@@ -41,12 +41,22 @@ export function MultiPlay({
     return () => window.clearInterval(id)
   }, [timerOn, revealing, room.questionIndex])
 
-  const leftMs = timerOn && !revealing ? Math.max(0, room.roundEndsAt - now) : 1
+  const graceLeftMs =
+    timerOn && !revealing ? Math.max(0, room.roundStartedAt - now) : 0
+  const inGrace = graceLeftMs > 0
+  const leftMs =
+    timerOn && !revealing
+      ? inGrace
+        ? room.roundDurationMs || 10000
+        : Math.max(0, room.roundEndsAt - now)
+      : 1
   const leftSec = Math.ceil(leftMs / 1000)
+  const graceSec = Math.ceil(graceLeftMs / 1000)
   const progress = useMemo(() => {
     const total = room.roundDurationMs || 10000
+    if (inGrace) return 1
     return Math.min(1, Math.max(0, leftMs / total))
-  }, [leftMs, room.roundDurationMs])
+  }, [leftMs, room.roundDurationMs, inGrace])
 
   if (!q) {
     return <p className="multi-play__empty">Chargement…</p>
@@ -79,21 +89,28 @@ export function MultiPlay({
         </p>
         {timerOn && !revealing && (
           <p
-            className={`multi-play__timer${leftSec <= 3 ? ' is-urgent' : ''}`}
+            className={`multi-play__timer${
+              !inGrace && leftSec <= 3 ? ' is-urgent' : ''
+            }`}
             aria-live="polite"
           >
-            {leftSec}s
+            {inGrace ? `Prêt ${graceSec}s` : `${leftSec}s`}
           </p>
         )}
       </div>
 
-      {timerOn && !revealing && (
+      {timerOn && !revealing && !inGrace && (
         <div className="multi-play__bar" aria-hidden>
           <div
             className="multi-play__bar-fill"
             style={{ transform: `scaleX(${progress})` }}
           />
         </div>
+      )}
+      {timerOn && !revealing && inGrace && (
+        <p className="multi-play__answered" aria-live="polite">
+          Synchronisation… le chrono démarre dans {graceSec}s
+        </p>
       )}
 
       {!revealing && (
