@@ -32,6 +32,12 @@ export function MultiLobby({
     room.difficulty === 'medium' || room.difficulty === 'hard'
       ? room.difficulty
       : 'easy'
+  const generating = room.status === 'generating' || busy
+  const roomError =
+    room.status === 'error'
+      ? room.errorMessage || 'La génération a échoué. Réessaie.'
+      : null
+  const displayError = roomError || error
 
   return (
     <section className="multi-lobby">
@@ -47,7 +53,7 @@ export function MultiLobby({
       <HostPlayersPanel
         room={room}
         playerId={playerId}
-        busy={busy}
+        busy={busy || room.status === 'generating'}
         onKick={onKick}
         alwaysOpen
       />
@@ -58,10 +64,18 @@ export function MultiLobby({
         </p>
       )}
 
-      {statusMsg && <p className="multi-lobby__hint">{statusMsg}</p>}
-      {error && (
+      {room.status === 'generating' && (
+        <p className="multi-lobby__hint" aria-live="polite">
+          Génération des questions en cours… Tout le monde reste synchronisé.
+        </p>
+      )}
+
+      {statusMsg && room.status !== 'generating' && (
+        <p className="multi-lobby__hint">{statusMsg}</p>
+      )}
+      {displayError && (
         <p className="multi-lobby__error" role="alert">
-          {error}
+          {displayError}
         </p>
       )}
 
@@ -69,18 +83,31 @@ export function MultiLobby({
         <button
           type="button"
           className="btn btn--primary"
-          disabled={busy || room.players.length < 1}
+          disabled={generating || room.players.length < 1}
           onClick={onStart}
         >
-          {busy
+          {generating
             ? 'Génération…'
-            : `Démarrer (10 Q · ${DIFFICULTY_LABELS[difficulty]}${timerOn ? ' · 10 s' : ''})`}
+            : room.status === 'error'
+              ? `Réessayer (10 Q · ${DIFFICULTY_LABELS[difficulty]}${timerOn ? ' · 10 s' : ''})`
+              : `Démarrer (10 Q · ${DIFFICULTY_LABELS[difficulty]}${timerOn ? ' · 10 s' : ''})`}
         </button>
       ) : (
-        <p className="multi-lobby__wait">En attente de l’hôte…</p>
+        <p className="multi-lobby__wait">
+          {room.status === 'generating'
+            ? 'L’hôte génère les questions…'
+            : room.status === 'error'
+              ? 'En attente que l’hôte relance…'
+              : 'En attente de l’hôte…'}
+        </p>
       )}
 
-      <button type="button" className="multi-lobby__leave" onClick={onLeave}>
+      <button
+        type="button"
+        className="multi-lobby__leave"
+        onClick={onLeave}
+        disabled={room.status === 'generating'}
+      >
         Quitter la salle
       </button>
     </section>
