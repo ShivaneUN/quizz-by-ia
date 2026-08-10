@@ -1,0 +1,86 @@
+.host-players {
+  width: 100%;
+  display: grid;
+  gap: 0.55rem;
+  justify-items: stretch;
+}
+
+.host-players__toggle {
+  width: 100%;
+  min-height: 2.6rem;
+}
+
+.host-players__title {
+  margin: 0.35rem 0 0;
+  font-size: 1rem;
+  text-align: center;
+}
+
+.host-players__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.host-players__list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.7rem 1rem;
+  border-radius: 12px;
+  background: var(--paper-elevated);
+  border: 1px solid color-mix(in srgb, var(--teal) 25%, transparent);
+  font-weight: 700;
+}
+
+.host-players__name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.host-players__badge {
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+  color: var(--accent);
+}
+
+.host-players__badge--you {
+  background: color-mix(in srgb, var(--teal) 25%, transparent);
+  color: var(--teal);
+}
+
+.host-players__kick {
+  flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, var(--danger, #c44) 45%, transparent);
+  background: color-mix(in srgb, var(--danger, #c44) 12%, transparent);
+  color: var(--danger, #c44);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 0.35rem 0.55rem;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.host-players__kick:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger, #c44) 22%, transparent);
+}
+
+.host-players__kick:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

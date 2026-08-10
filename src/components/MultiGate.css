@@ -1,0 +1,141 @@
+.multi-gate {
+  width: min(24rem, 100%);
+  margin: 1rem auto;
+  display: grid;
+  gap: 1rem;
+}
+
+.multi-gate__back {
+  justify-self: start;
+  border: none;
+  background: transparent;
+  color: var(--teal);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0.35rem 0;
+}
+
+.multi-gate__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.8rem;
+  color: var(--accent);
+  text-align: center;
+}
+
+.multi-gate__tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+  padding: 0.25rem;
+  border-radius: 999px;
+  background: #0a1835;
+  border: 2px solid color-mix(in srgb, #4db8ff 30%, transparent);
+}
+
+.multi-gate__tabs button {
+  border: none;
+  background: transparent;
+  color: color-mix(in srgb, #fff 70%, transparent);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 800;
+  padding: 0.55rem 0.5rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.multi-gate__tabs button.is-active {
+  background: linear-gradient(180deg, #ffe08a, #f0c14b);
+  color: #1a1200;
+}
+
+.multi-gate__form {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.multi-gate__name {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.multi-gate__name label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.multi-gate__random {
+  border: 1.5px solid color-mix(in srgb, var(--teal) 45%, transparent);
+  background: color-mix(in srgb, var(--teal) 12%, #0a1835);
+  color: #e8f0ff;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 700;
+  padding: 0.55rem 0.85rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+
+.multi-gate__random:hover:not(:disabled) {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.multi-gate__random:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.multi-gate__form label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.multi-gate__form input {
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 700;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  border: 2px solid color-mix(in srgb, #4db8ff 35%, transparent);
+  background: #122a52;
+  color: #fff;
+}
+
+.multi-gate__form input:invalid:not(:placeholder-shown) {
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+}
+
+.multi-gate__error {
+  margin: 0;
+  color: var(--danger);
+  font-weight: 700;
+  text-align: center;
+}
+
+.multi-gate__hint {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink-muted);
+  line-height: 1.35;
+  text-align: center;
+}
+
+.multi-gate__form .btn {
+  width: 100%;
+  min-height: 3rem;
+}

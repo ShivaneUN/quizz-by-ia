@@ -1,0 +1,67 @@
+.tier-result {
+  display: grid;
+  gap: 1rem;
+  max-width: 28rem;
+  justify-items: start;
+  animation: rise 0.35s ease both;
+}
+
+.tier-result__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.75rem;
+  color: var(--ink);
+}
+
+.tier-result__score {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--accent);
+}
+
+.tier-result__msg {
+  margin: 0;
+  line-height: 1.5;
+  color: var(--ink-muted);
+}
+
+.tier-result__diffs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.tier-result__diff {
+  border: 1.5px solid color-mix(in srgb, var(--teal) 40%, transparent);
+  background: var(--paper-elevated);
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 0.55rem 1rem;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tier-result__diff.is-current {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--paper-elevated));
+}
+
+.tier-result__diff:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.tier-result__actions {
+  display: grid;
+  gap: 0.65rem;
+  width: 100%;
+}
+
+.tier-result .btn--ghost {
+  background: transparent;
+  color: var(--ink-muted);
+  border: 1.5px solid color-mix(in srgb, var(--ink-muted) 35%, transparent);
+}

@@ -1,0 +1,203 @@
+.app {
+  position: relative;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  padding: 1rem clamp(0.75rem, 3vw, 2rem) 2rem;
+  padding-bottom: max(2rem, env(safe-area-inset-bottom));
+  padding-left: max(0.75rem, env(safe-area-inset-left));
+  padding-right: max(0.75rem, env(safe-area-inset-right));
+  overflow-x: hidden;
+}
+
+.app--home {
+  grid-template-rows: 1fr;
+  align-content: start;
+  padding-top: max(0.75rem, env(safe-area-inset-top));
+  padding-bottom: max(2.5rem, env(safe-area-inset-bottom));
+  overflow-y: auto;
+}
+
+.app__atmosphere {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(ellipse 80% 55% at 50% 32%, color-mix(in srgb, #1a3a6e 55%, transparent) 0%, transparent 70%),
+    radial-gradient(circle at 50% 22%, color-mix(in srgb, #3d8bfd 22%, transparent) 0%, transparent 38%),
+    radial-gradient(circle at 50% 18%, color-mix(in srgb, #f0c14b 10%, transparent) 0%, transparent 26%),
+    radial-gradient(circle at 12% 80%, color-mix(in srgb, #2ec4b6 10%, transparent) 0%, transparent 28%),
+    linear-gradient(165deg, #06101f 0%, #0b1c3d 48%, #0e2550 100%);
+}
+
+/* Étoiles discrètes — sans rayons coniques (causaient une couture verticale) */
+.app__atmosphere::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 18% 22%, color-mix(in srgb, #4db8ff 18%, transparent) 0 2px, transparent 3px),
+    radial-gradient(circle at 78% 18%, color-mix(in srgb, #4db8ff 14%, transparent) 0 2px, transparent 3px),
+    radial-gradient(circle at 88% 70%, color-mix(in srgb, #4db8ff 12%, transparent) 0 3px, transparent 4px),
+    radial-gradient(circle at 12% 68%, color-mix(in srgb, #4db8ff 10%, transparent) 0 2px, transparent 3px),
+    radial-gradient(circle at 50% 8%, color-mix(in srgb, #fff 8%, transparent) 0%, transparent 35%);
+  pointer-events: none;
+}
+
+.app__atmosphere::after {
+  content: none;
+}
+
+.app__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  animation: fade-in 0.5s ease both;
+}
+
+.app__header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.brand {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.8rem, 5vw, 2.4rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--ink);
+}
+
+.app__theme {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--accent);
+  text-align: right;
+}
+
+.app__scope {
+  font-weight: 600;
+  color: var(--teal);
+  font-size: 0.85em;
+}
+
+.btn-home {
+  border: 1.5px solid color-mix(in srgb, var(--teal) 45%, transparent);
+  background: color-mix(in srgb, var(--paper-elevated) 90%, transparent);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.12s ease;
+}
+
+.btn-home:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.app__main {
+  width: min(44rem, 100%);
+  margin-inline: auto;
+  display: grid;
+  gap: 1.25rem;
+  align-content: start;
+  justify-items: center;
+}
+
+.app--home .app__main {
+  width: 100%;
+}
+
+.app__hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ink-muted);
+}
+
+.loading {
+  display: grid;
+  gap: 1rem;
+  justify-items: center;
+  padding: 2.5rem 0;
+  text-align: center;
+  animation: fade-in 0.3s ease both;
+}
+
+.loading__pulse {
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 50%;
+  border: 3px solid color-mix(in srgb, var(--teal) 35%, transparent);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 520px) {
+  .app:not(.app--home) {
+    padding: 0.65rem 0.75rem 1.25rem;
+    padding-bottom: max(1.25rem, env(safe-area-inset-bottom));
+  }
+
+  .app:not(.app--home) .app__header {
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.65rem;
+  }
+
+  .app:not(.app--home) .app__theme {
+    text-align: right;
+    font-size: 0.8rem;
+    max-width: 11rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .brand {
+    font-size: 1.55rem;
+  }
+
+  .btn-home {
+    padding: 0.5rem 0.85rem;
+    min-height: 2.4rem;
+  }
+
+  .app__main {
+    gap: 0.85rem;
+    width: 100%;
+  }
+}
