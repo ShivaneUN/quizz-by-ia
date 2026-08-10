@@ -17,6 +17,13 @@ interface MultiPlayProps {
   disabled?: boolean
 }
 
+function hasActiveDeadline(room: MultiRoom): boolean {
+  if (typeof room.roundDeadlineAt === 'number' && room.roundDeadlineAt > 0) {
+    return true
+  }
+  return room.roundStartedAt > 0 && room.roundPhase === 'answering'
+}
+
 export function MultiPlay({
   room,
   playerId,
@@ -41,30 +48,53 @@ export function MultiPlay({
   const isHost = playerId === room.hostId
   const correctIndex = q?.correctIndex
   const isLast = room.questionIndex + 1 >= room.questions.length
+  const needsHostStart =
+    timerOn &&
+    !revealing &&
+    (waiting || (answering && !paused && !hasActiveDeadline(room)))
   const timerRunning =
-    timerOn && answering && !waiting && room.roundStartedAt > 0
+    timerOn && answering && !waiting && !needsHostStart && hasActiveDeadline(room)
+
+  /** Décalage horloge client ↔ serveur (ms). Positif si le client est en avance. */
+  const clockSkew = useMemo(() => {
+    if (typeof room.serverNow === 'number' && room.serverNow > 0) {
+      return Date.now() - room.serverNow
+    }
+    return 0
+  }, [room.serverNow, room.roundDeadlineAt, room.roundEndsAt, room.updatedAt])
 
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     setNow(Date.now())
-  }, [room.roundPhase, room.roundStartedAt, room.questionIndex, paused])
+  }, [
+    room.roundPhase,
+    room.roundStartedAt,
+    room.roundDeadlineAt,
+    room.roundEndsAt,
+    room.questionIndex,
+    paused,
+    room.serverNow,
+  ])
 
   useEffect(() => {
-    if (!timerRunning || paused || revealing || waiting) return
+    if (!timerRunning || paused || revealing) return
     const id = window.setInterval(() => setNow(Date.now()), 100)
     return () => window.clearInterval(id)
-  }, [timerRunning, paused, revealing, waiting, room.questionIndex])
+  }, [timerRunning, paused, revealing, room.questionIndex])
 
-  const leftMs = !timerRunning
-    ? 1
-    : paused
-      ? Math.max(0, room.timerPausedLeftMs ?? room.roundDurationMs)
-      : Math.max(0, room.roundEndsAt - now)
-  const leftSec = Math.ceil(leftMs / 1000)
+  const leftMs = needsHostStart
+    ? room.roundDurationMs || 10000
+    : !timerRunning
+      ? 1
+      : paused
+        ? Math.max(0, room.timerPausedLeftMs ?? room.roundDurationMs)
+        : Math.max(0, room.roundEndsAt - (now - clockSkew))
+  const leftSec = Math.max(0, Math.ceil(leftMs / 1000))
   const progress = useMemo(() => {
     const total = room.roundDurationMs || 10000
+    if (needsHostStart) return 1
     return Math.min(1, Math.max(0, leftMs / total))
-  }, [leftMs, room.roundDurationMs])
+  }, [leftMs, room.roundDurationMs, needsHostStart])
 
   if (!q) {
     return <p className="multi-play__empty">Chargement…</p>
@@ -78,7 +108,11 @@ export function MultiPlay({
 
   const timeExpired = timerRunning && !paused && leftMs <= 0
   const answersLocked =
-    disabled || revealing || waiting || hasAnswered || timeExpired
+    disabled ||
+    revealing ||
+    needsHostStart ||
+    hasAnswered ||
+    timeExpired
 
   return (
     <section className="multi-play">
@@ -109,6 +143,11 @@ export function MultiPlay({
             {paused ? `Pause ${leftSec}s` : `${leftSec}s`}
           </p>
         )}
+        {needsHostStart && (
+          <p className="multi-play__timer" aria-live="polite">
+            {Math.ceil((room.roundDurationMs || 10000) / 1000)}s
+          </p>
+        )}
       </div>
 
       {timerRunning && !paused && (
@@ -120,7 +159,7 @@ export function MultiPlay({
         </div>
       )}
 
-      {waiting && (
+      {needsHostStart && (
         <p className="multi-play__answered" aria-live="polite">
           {isHost
             ? 'Tout le monde est prêt ? Lance le chrono une fois — il enchaînera ensuite.'
@@ -135,7 +174,7 @@ export function MultiPlay({
         </p>
       )}
 
-      {!revealing && !waiting && (
+      {!revealing && !needsHostStart && (
         <p className="multi-play__answered">
           Réponses : {room.answeredCount}/{room.players.length}
         </p>
@@ -200,7 +239,7 @@ export function MultiPlay({
         })}
       </div>
 
-      {waiting && isHost && (
+      {needsHostStart && isHost && (
         <button
           type="button"
           className="btn btn--primary"
@@ -211,7 +250,7 @@ export function MultiPlay({
         </button>
       )}
 
-      {waiting && !isHost && (
+      {needsHostStart && !isHost && (
         <p className="multi-play__waiting" role="status">
           L’hôte lancera le chrono dès que tout le monde est prêt.
         </p>
@@ -282,7 +321,7 @@ export function MultiPlay({
         </ul>
       )}
 
-      {!revealing && !waiting && hasAnswered && (
+      {!revealing && !needsHostStart && hasAnswered && (
         <p className="multi-play__waiting" role="status">
           {timerOn
             ? 'Réponse enregistrée — en attente des autres ou de la fin du chrono…'

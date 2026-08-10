@@ -72,6 +72,11 @@ export interface RoomState {
   timerPaused?: boolean
   /** ms restantes au moment de la pause */
   timerPausedLeftMs?: number
+  /**
+   * Deadline absolue serveur (ms) du chrono — source de vérité.
+   * 0 si pas de chrono actif.
+   */
+  roundDeadlineAt?: number
   /** playerId → index réponse (absent = pas encore) */
   currentAnswers: Record<string, number>
   createdAt: number
@@ -178,10 +183,12 @@ export async function getRoom(code: string): Promise<RoomState | null> {
     room.timerEnabled !== false &&
     room.roundPhase === 'answering' &&
     !(room.roundStartedAt > 0) &&
+    !(typeof room.roundDeadlineAt === 'number' && room.roundDeadlineAt > 0) &&
     !room.timerPaused
   ) {
     room.roundPhase = 'waiting'
     room.roundStartedAt = 0
+    room.roundDeadlineAt = 0
   }
   if (!Number.isFinite(room.roundDurationMs) || room.roundDurationMs <= 0) {
     room.roundDurationMs = ROUND_MS
@@ -240,38 +247,69 @@ export function prepareRound(room: RoomState, now = Date.now()): void {
   room.currentAnswers = {}
   room.timerPaused = false
   room.timerPausedLeftMs = undefined
+  const duration =
+    Number.isFinite(room.roundDurationMs) && room.roundDurationMs > 0
+      ? room.roundDurationMs
+      : ROUND_MS
+  room.roundDurationMs = duration
+
   if (room.timerEnabled === false) {
     room.roundPhase = 'answering'
     room.roundStartedAt = now
+    room.roundDeadlineAt = 0
     return
   }
   if (!room.timerStarted) {
     room.roundPhase = 'waiting'
     room.roundStartedAt = 0
+    room.roundDeadlineAt = 0
     return
   }
   room.roundPhase = 'answering'
   room.roundStartedAt = now
+  room.roundDeadlineAt = now + duration
 }
 
-/** Hôte : premier lancement du chrono (active aussi les manches suivantes). */
+/**
+ * Hôte : lance (ou relance) le chrono.
+ * Idempotent / réparateur : marche depuis waiting ou depuis un état cassé.
+ */
 export function hostBeginRound(room: RoomState, now = Date.now()): RoomState {
   if (room.status !== 'playing') return room
-  if (room.roundPhase !== 'waiting') return room
+  if (room.roundPhase === 'reveal') return room
+
+  const duration =
+    Number.isFinite(room.roundDurationMs) && room.roundDurationMs > 0
+      ? room.roundDurationMs
+      : ROUND_MS
+  room.roundDurationMs = duration
+
   if (room.timerEnabled === false) {
     room.roundPhase = 'answering'
     room.roundStartedAt = now
+    room.roundDeadlineAt = 0
+    room.timerPaused = false
+    room.timerPausedLeftMs = undefined
     return room
   }
+
+  // Déjà en cours avec deadline valide → ne pas reset (évite double-clic)
+  if (
+    room.roundPhase === 'answering' &&
+    room.timerStarted &&
+    !room.timerPaused &&
+    typeof room.roundDeadlineAt === 'number' &&
+    room.roundDeadlineAt > now
+  ) {
+    return room
+  }
+
   room.timerStarted = true
   room.timerPaused = false
   room.timerPausedLeftMs = undefined
   room.roundPhase = 'answering'
   room.roundStartedAt = now
-  room.roundDurationMs =
-    Number.isFinite(room.roundDurationMs) && room.roundDurationMs > 0
-      ? room.roundDurationMs
-      : ROUND_MS
+  room.roundDeadlineAt = now + duration
   return room
 }
 
@@ -281,13 +319,17 @@ export function hostPauseTimer(room: RoomState, now = Date.now()): RoomState {
   if (room.roundPhase !== 'answering') return room
   if (room.timerEnabled === false) return room
   if (room.timerPaused) return room
-  if (!(room.roundStartedAt > 0)) return room
-  const left = Math.max(
-    0,
-    room.roundStartedAt + room.roundDurationMs - now,
-  )
+  const deadline =
+    typeof room.roundDeadlineAt === 'number' && room.roundDeadlineAt > 0
+      ? room.roundDeadlineAt
+      : room.roundStartedAt > 0
+        ? room.roundStartedAt + room.roundDurationMs
+        : 0
+  if (!(deadline > 0)) return room
+  const left = Math.max(0, deadline - now)
   room.timerPaused = true
   room.timerPausedLeftMs = left
+  room.roundDeadlineAt = 0
   return room
 }
 
@@ -302,7 +344,11 @@ export function hostResumeTimer(room: RoomState, now = Date.now()): RoomState {
       : room.roundDurationMs
   room.timerPaused = false
   room.timerPausedLeftMs = undefined
-  // endsAt = now + left  ⇒  startedAt = now - (duration - left)
+  room.roundDurationMs =
+    Number.isFinite(room.roundDurationMs) && room.roundDurationMs > 0
+      ? room.roundDurationMs
+      : ROUND_MS
+  room.roundDeadlineAt = now + left
   room.roundStartedAt = now - (room.roundDurationMs - left)
   return room
 }
@@ -322,10 +368,13 @@ export function publicRoomView(
     imageUrl?: string
   }>
   roundEndsAt: number
+  /** Horloge serveur au moment de la réponse — pour corriger le skew client */
+  serverNow: number
   answeredCount: number
   allAnswered: boolean
   storage: 'redis' | 'memory'
 } {
+  const now = Date.now()
   const revealAll = Boolean(opts?.revealAnswers) || room.status === 'finished'
   const revealingCurrent =
     room.status === 'playing' && room.roundPhase === 'reveal'
@@ -333,30 +382,37 @@ export function publicRoomView(
   const allAnswered =
     room.players.length > 0 && answeredCount >= room.players.length
 
-  const timerArmed =
-    room.roundPhase === 'answering' &&
-    room.timerEnabled !== false &&
-    room.roundStartedAt > 0
+  const duration =
+    Number.isFinite(room.roundDurationMs) && room.roundDurationMs > 0
+      ? room.roundDurationMs
+      : ROUND_MS
+
+  let deadline =
+    typeof room.roundDeadlineAt === 'number' && room.roundDeadlineAt > 0
+      ? room.roundDeadlineAt
+      : room.roundPhase === 'answering' &&
+          room.timerEnabled !== false &&
+          room.roundStartedAt > 0 &&
+          !room.timerPaused
+        ? room.roundStartedAt + duration
+        : 0
+
   const timerOff =
     room.timerEnabled === false ||
     room.roundPhase === 'reveal' ||
     room.roundPhase === 'waiting' ||
-    !timerArmed
-  let roundEndsAt: number
-  if (timerOff) {
-    roundEndsAt = Number.MAX_SAFE_INTEGER
-  } else if (room.timerPaused) {
-    // Le client affiche timerPausedLeftMs (figé) ; roundEndsAt ne compte pas
-    roundEndsAt = Number.MAX_SAFE_INTEGER
-  } else {
-    roundEndsAt = room.roundStartedAt + room.roundDurationMs
-  }
+    room.timerPaused ||
+    !(deadline > 0)
+
+  const roundEndsAt = timerOff ? now + 365 * 24 * 60 * 60 * 1000 : deadline
 
   return {
     ...room,
     quizMode: 'standard',
     timerStarted: Boolean(room.timerStarted),
     timerPaused: Boolean(room.timerPaused),
+    roundDurationMs: duration,
+    roundDeadlineAt: deadline,
     questions: room.questions.map((q, i) => {
       const show =
         revealAll ||
@@ -377,6 +433,7 @@ export function publicRoomView(
       }
     }),
     roundEndsAt,
+    serverNow: now,
     answeredCount,
     allAnswered,
     storage: redisConfigured() ? 'redis' : 'memory',
@@ -402,11 +459,18 @@ export function maybeCloseRound(
   }
 
   const timerOn = room.timerEnabled !== false
+  const duration =
+    Number.isFinite(room.roundDurationMs) && room.roundDurationMs > 0
+      ? room.roundDurationMs
+      : ROUND_MS
+  const deadline =
+    typeof room.roundDeadlineAt === 'number' && room.roundDeadlineAt > 0
+      ? room.roundDeadlineAt
+      : room.roundStartedAt > 0
+        ? room.roundStartedAt + duration
+        : 0
   const timeUp =
-    timerOn &&
-    !room.timerPaused &&
-    room.roundStartedAt > 0 &&
-    now >= room.roundStartedAt + room.roundDurationMs
+    timerOn && !room.timerPaused && deadline > 0 && now >= deadline
   const allAnswered =
     room.players.length > 0 &&
     room.players.every((p) => p.id in room.currentAnswers)
@@ -423,6 +487,7 @@ export function maybeCloseRound(
 
   room.timerPaused = false
   room.timerPausedLeftMs = undefined
+  room.roundDeadlineAt = 0
   room.roundPhase = 'reveal'
   return { room, changed: true }
 }

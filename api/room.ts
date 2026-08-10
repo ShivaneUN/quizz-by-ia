@@ -357,6 +357,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const wasHost = room.hostId === playerId
+      // L’hôte quitte → la salle est fermée pour tout le monde
+      if (wasHost) {
+        await deleteRoom(code)
+        return json(res, 200, { left: true, closed: true, code })
+      }
+
       room.players.splice(idx, 1)
       if (playerId in room.currentAnswers) {
         delete room.currentAnswers[playerId]
@@ -365,13 +371,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (room.players.length === 0) {
         await deleteRoom(code)
         return json(res, 200, { left: true, closed: true, code })
-      }
-
-      if (wasHost) {
-        const nextHost = [...room.players].sort(
-          (a, b) => a.joinedAt - b.joinedAt,
-        )[0]
-        room.hostId = nextHost.id
       }
 
       // Les autres continuent : si tout le monde restant a répondu → reveal
@@ -451,12 +450,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const now = Date.now()
       const timerOn = room.timerEnabled !== false
-      if (
-        timerOn &&
-        !room.timerPaused &&
-        room.roundStartedAt > 0 &&
-        now > room.roundStartedAt + room.roundDurationMs
-      ) {
+      const deadline =
+        typeof room.roundDeadlineAt === 'number' && room.roundDeadlineAt > 0
+          ? room.roundDeadlineAt
+          : room.roundStartedAt > 0
+            ? room.roundStartedAt + room.roundDurationMs
+            : 0
+      if (timerOn && !room.timerPaused && deadline > 0 && now > deadline) {
         room = (await syncRoomRound(code)) ?? room
         return json(res, 200, { room: publicRoomView(room) })
       }
@@ -529,9 +529,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (room.status !== 'playing') {
         return json(res, 200, { room: publicRoomView(room) })
       }
-      if (room.roundPhase !== 'waiting') {
-        return json(res, 200, { room: publicRoomView(room) })
-      }
+      // Force le démarrage même si l’état local était incohérent
       room = hostBeginRound(room)
       await saveRoom(room)
       return json(res, 200, { room: publicRoomView(room) })

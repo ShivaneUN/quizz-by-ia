@@ -39,8 +39,11 @@ export interface MultiRoom {
   timerStarted?: boolean
   timerPaused?: boolean
   timerPausedLeftMs?: number
+  roundDeadlineAt?: number
   currentAnswers: Record<string, number>
   roundEndsAt: number
+  /** Horloge serveur (corrige le décalage d’horloge client) */
+  serverNow?: number
   answeredCount: number
   allAnswered: boolean
   updatedAt?: number
@@ -77,7 +80,9 @@ export function preferNewerRoom(
     next.questionIndex === prev.questionIndex &&
     prev.roundPhase === 'answering' &&
     next.roundPhase === 'waiting' &&
-    (prev.timerStarted || prev.roundStartedAt > 0)
+    (prev.timerStarted ||
+      prev.roundStartedAt > 0 ||
+      (typeof prev.roundDeadlineAt === 'number' && prev.roundDeadlineAt > 0))
   ) {
     return prev
   }

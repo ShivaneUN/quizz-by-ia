@@ -713,7 +713,7 @@ export default function App() {
     setScreen('mode')
   }
 
-  /** Quitte la salle côté serveur (les autres continuent) puis retour accueil */
+  /** Quitte la salle — si hôte, la salle est fermée pour tout le monde */
   async function handleMultiLeave() {
     const code = multiRoom?.code
     const pid = multiPlayerId
@@ -1030,7 +1030,8 @@ export default function App() {
         code: multiRoom.code,
         playerId: multiPlayerId,
       })
-      setMultiRoom((prev) => preferNewerRoom(prev, res.room))
+      // Forcer l’état renvoyé (évite qu’un poll stale annule le begin)
+      setMultiRoom(res.room)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur')
     } finally {
@@ -1047,7 +1048,7 @@ export default function App() {
         code: multiRoom.code,
         playerId: multiPlayerId,
       })
-      setMultiRoom((prev) => preferNewerRoom(prev, res.room))
+      setMultiRoom(res.room)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur')
     } finally {
@@ -1064,7 +1065,7 @@ export default function App() {
         code: multiRoom.code,
         playerId: multiPlayerId,
       })
-      setMultiRoom((prev) => preferNewerRoom(prev, res.room))
+      setMultiRoom(res.room)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur')
     } finally {
