@@ -20,7 +20,7 @@ export interface MultiQuestion {
 export interface MultiRoom {
   code: string
   hostId: string
-  status: 'lobby' | 'playing' | 'finished'
+  status: 'lobby' | 'generating' | 'playing' | 'finished' | 'error'
   theme: string
   scope: QuizScope
   timerEnabled?: boolean
@@ -28,6 +28,8 @@ export interface MultiRoom {
   difficulty?: Difficulty
   aiProvider?: AiProvider
   quizMode?: QuizContentMode
+  /** Présent si status === 'error' */
+  errorMessage?: string
   players: MultiPlayer[]
   questions: MultiQuestion[]
   questionIndex: number
@@ -78,9 +80,11 @@ async function postRoom(body: Record<string, unknown>) {
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
-    throw new Error(
+    const err = new Error(
       typeof data.error === 'string' ? data.error : `Erreur (${res.status})`,
-    )
+    ) as Error & { room?: MultiRoom }
+    if (data.room) err.room = data.room as MultiRoom
+    throw err
   }
   return data as {
     room?: MultiRoom
