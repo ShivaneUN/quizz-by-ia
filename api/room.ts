@@ -1,6 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { generateQuestions, normalizeThemeSlug, parseAiProvider, parseQuizContentMode } from '../server/generate.js'
-import { fetchCommonsImageUrl } from '../server/wikimedia.js'
+import { generateQuestions, normalizeThemeSlug, parseAiProvider } from '../server/generate.js'
 import {
   ROUND_MS,
   MULTI_QUESTION_COUNT,
@@ -13,6 +12,7 @@ import {
   maybeCloseRound,
   hostNextQuestion,
   syncRoomRound,
+  armRoundTimer,
   type RoomState,
 } from '../server/rooms.js'
 
@@ -81,7 +81,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const difficulty =
         playMode === 'progression' ? 'easy' : parseDifficulty(body.difficulty)
       const aiProvider = parseAiProvider(body.aiProvider)
-      const quizMode = parseQuizContentMode(body.quizMode)
       const hostId = newPlayerId()
       let code = makeRoomCode()
       for (let i = 0; i < 5; i++) {
@@ -100,7 +99,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         playMode,
         difficulty,
         aiProvider,
-        quizMode,
+        quizMode: 'standard',
         players: [{ id: hostId, name: hostName.slice(0, 24), score: 0, joinedAt: now }],
         questions: [],
         questionIndex: 0,
@@ -128,7 +127,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       let room = await getRoom(code)
       if (!room) return json(res, 404, { error: 'Salle introuvable' })
-      // Lobby, partie en cours ou finished — le code suffit
+      // Lobby, génération, partie en cours ou finished — le code suffit
       if (room.players.length >= 8) {
         return json(res, 400, { error: 'Salle pleine (max 8)' })
       }
@@ -167,79 +166,105 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (playerId !== room.hostId) {
         return json(res, 403, { error: 'Seul l’hôte peut démarrer' })
       }
-      // Rejouer le même thème : autorisé depuis lobby ou finished
       if (room.status === 'playing') {
         return json(res, 400, { error: 'Partie déjà en cours' })
+      }
+      if (room.status === 'generating') {
+        return json(res, 200, { room: publicRoomView(room) })
       }
       if (room.players.length < 1) {
         return json(res, 400, { error: 'Pas assez de joueurs' })
       }
 
-      const quizMode = room.quizMode === 'image' ? 'image' : 'standard'
-      const themeSlug =
-        quizMode === 'image'
-          ? `${normalizeThemeSlug(room.theme)}--${room.scope}--image`
-          : `${normalizeThemeSlug(room.theme)}--${room.scope}`
+      // Feedback partagé : tous les clients voient « génération » via le poll
+      room.status = 'generating'
+      room.quizMode = 'standard'
+      delete room.errorMessage
+      room.questions = []
+      room.questionIndex = 0
+      room.roundPhase = 'answering'
+      room.currentAnswers = {}
+      room.roundStartedAt = 0
+      await saveRoom(room)
+
+      const themeSlug = `${normalizeThemeSlug(room.theme)}--${room.scope}`
       const difficulty = parseDifficulty(room.difficulty)
       const provider = parseAiProvider(room.aiProvider ?? 'auto')
-      const gen = await generateQuestions(
-        room.theme,
-        themeSlug,
-        'complementary',
-        difficulty,
-        room.scope,
-        provider,
-        quizMode,
-      )
-      if (gen.error) {
-        return json(res, 422, { error: gen.error })
+
+      let gen: Awaited<ReturnType<typeof generateQuestions>>
+      try {
+        gen = await generateQuestions(
+          room.theme,
+          themeSlug,
+          'complementary',
+          difficulty,
+          room.scope,
+          provider,
+          'standard',
+        )
+      } catch (e) {
+        const message =
+          e instanceof Error ? e.message : 'Erreur de génération'
+        const latest = (await getRoom(code)) ?? room
+        latest.status = 'error'
+        latest.errorMessage = message
+        latest.quizMode = 'standard'
+        await saveRoom(latest)
+        return json(res, 422, {
+          error: message,
+          room: publicRoomView(latest),
+        })
       }
-      // Résoudre les images manquantes (Wikipedia) puis ne garder que celles avec URL
-      const withImages = await Promise.all(
-        gen.questions
-          .filter((q) => q.difficulty === difficulty)
-          .map(async (q) => {
-            let imageUrl = q.imageUrl
-            if (!imageUrl) {
-              const sujet = q.imageSubject || q.answers[q.correctIndex]
-              if (sujet) {
-                imageUrl = await fetchCommonsImageUrl(
-                  sujet,
-                  q.imageKind ?? 'sujet_entier',
-                  q.answers[q.correctIndex],
-                )
-              }
-            }
-            if (!imageUrl && quizMode === 'image') return null
-            return {
-              id: q.id,
-              question: q.question,
-              answers: q.answers,
-              correctIndex: q.correctIndex,
-              explanation: q.explanation,
-              sourceType: q.sourceType,
-              imageUrl,
-            }
-          }),
-      )
-      const questions = withImages
-        .filter((q): q is NonNullable<typeof q> => q !== null)
+
+      // Recharge : un leave/kick a pu modifier la salle pendant la génération
+      room = (await getRoom(code)) ?? room
+      if (room.status !== 'generating') {
+        return json(res, 200, { room: publicRoomView(room) })
+      }
+
+      if (gen.error) {
+        room.status = 'error'
+        room.errorMessage = gen.error
+        room.quizMode = 'standard'
+        await saveRoom(room)
+        return json(res, 422, {
+          error: gen.error,
+          room: publicRoomView(room),
+        })
+      }
+
+      const questions = gen.questions
+        .filter((q) => q.difficulty === difficulty)
         .slice(0, MULTI_QUESTION_COUNT)
+        .map((q) => ({
+          id: q.id,
+          question: q.question,
+          answers: q.answers,
+          correctIndex: q.correctIndex,
+          explanation: q.explanation,
+          sourceType: q.sourceType,
+        }))
 
       if (questions.length < MULTI_QUESTION_COUNT) {
+        const err = `Pas assez de questions (${questions.length}/${MULTI_QUESTION_COUNT}). Réessaie.`
+        room.status = 'error'
+        room.errorMessage = err
+        room.quizMode = 'standard'
+        await saveRoom(room)
         return json(res, 422, {
-          error: `Pas assez de questions illustrées (${questions.length}/${MULTI_QUESTION_COUNT}). Réessaie.`,
+          error: err,
+          room: publicRoomView(room),
         })
       }
 
       const now = Date.now()
       room.status = 'playing'
+      delete room.errorMessage
+      room.quizMode = 'standard'
       room.questions = questions
       room.questionIndex = 0
-      room.roundPhase = 'answering'
-      room.currentAnswers = {}
-      room.roundStartedAt = now
       room.players = room.players.map((p) => ({ ...p, score: 0 }))
+      armRoundTimer(room, now)
       await saveRoom(room)
       return json(res, 200, {
         room: publicRoomView(room),
@@ -257,7 +282,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (playerId !== room.hostId) {
         return json(res, 403, { error: 'Seul l’hôte peut changer le thème' })
       }
-      if (room.status === 'playing') {
+      if (room.status === 'playing' || room.status === 'generating') {
         return json(res, 400, { error: 'Impossible pendant une partie' })
       }
       if (!theme) return json(res, 400, { error: 'thème requis' })
@@ -267,9 +292,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (body.aiProvider !== undefined) {
         room.aiProvider = parseAiProvider(body.aiProvider)
       }
-      if (body.quizMode !== undefined) {
-        room.quizMode = parseQuizContentMode(body.quizMode)
-      }
+      room.quizMode = 'standard'
+      delete room.errorMessage
       room.status = 'lobby'
       room.questions = []
       room.questionIndex = 0
@@ -407,6 +431,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const timerOn = room.timerEnabled !== false
       if (
         timerOn &&
+        now >= room.roundStartedAt &&
         now > room.roundStartedAt + room.roundDurationMs
       ) {
         room = (await syncRoomRound(code)) ?? room
@@ -479,7 +504,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (playerId !== room.hostId) {
         return json(res, 403, { error: 'Seul l’hôte peut régler le chrono' })
       }
-      if (room.status === 'playing') {
+      if (room.status === 'playing' || room.status === 'generating') {
         return json(res, 400, { error: 'Impossible pendant une partie' })
       }
       room.timerEnabled = timerEnabled
@@ -497,7 +522,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (playerId !== room.hostId) {
         return json(res, 403, { error: 'Seul l’hôte peut régler la difficulté' })
       }
-      if (room.status === 'playing') {
+      if (room.status === 'playing' || room.status === 'generating') {
         return json(res, 400, { error: 'Impossible pendant une partie' })
       }
       // En mode paliers, la difficulté suit la progression (sauf avance explicite hôte)
@@ -515,7 +540,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (playerId !== room.hostId) {
         return json(res, 403, { error: 'Seul l’hôte peut changer le mode' })
       }
-      if (room.status === 'playing') {
+      if (room.status === 'playing' || room.status === 'generating') {
         return json(res, 400, { error: 'Impossible pendant une partie' })
       }
       room.playMode = playMode
