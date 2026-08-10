@@ -30,6 +30,11 @@ import {
   startRoom,
   type MultiRoom,
 } from './lib/multiApi'
+import {
+  clearMultiSession,
+  loadMultiSession,
+  saveMultiSession,
+} from './lib/multiSession'
 import { AnswerAudit } from './components/AnswerAudit'
 import { ModeSelect } from './components/ModeSelect'
 import { MultiGate } from './components/MultiGate'
@@ -64,6 +69,21 @@ type Screen =
   | 'multi-lobby'
   | 'multi-play'
   | 'multi-score'
+
+/** Navigation multi pilotée par le status serveur (tous les clients). */
+function multiScreenForStatus(status: MultiRoom['status']): Screen {
+  if (status === 'playing') return 'multi-play'
+  if (status === 'finished') return 'multi-score'
+  return 'multi-lobby'
+}
+
+function roomFromError(e: unknown): MultiRoom | null {
+  if (e && typeof e === 'object' && 'room' in e) {
+    const room = (e as { room?: MultiRoom }).room
+    return room ?? null
+  }
+  return null
+}
 
 interface TierSnapshot {
   difficulty: Difficulty
@@ -106,6 +126,37 @@ export default function App() {
   const [multiPlayerId, setMultiPlayerId] = useState<string | null>(null)
   const [multiRoom, setMultiRoom] = useState<MultiRoom | null>(null)
   const [multiBusy, setMultiBusy] = useState(false)
+
+  // Reconnexion multi après refresh
+  useEffect(() => {
+    const saved = loadMultiSession()
+    if (!saved) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { room } = await pollRoom(saved.code)
+        if (cancelled) return
+        if (!room.players.some((p) => p.id === saved.playerId)) {
+          clearMultiSession()
+          return
+        }
+        setMultiName(saved.playerName)
+        setMultiPlayerId(saved.playerId)
+        setMultiRoom(room)
+        setScreen(multiScreenForStatus(room.status))
+        saveMultiSession({
+          code: saved.code,
+          playerId: saved.playerId,
+          playerName: saved.playerName,
+        })
+      } catch {
+        if (!cancelled) clearMultiSession()
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const ensureHand = useCallback(
     async (
@@ -290,6 +341,7 @@ export default function App() {
         if (cancelled) return
         // Éjecté / plus dans la salle → retour (les autres continuent)
         if (!room.players.some((p) => p.id === multiPlayerId)) {
+          clearMultiSession()
           setMultiName('')
           setMultiPlayerId(null)
           setMultiRoom(null)
@@ -299,25 +351,15 @@ export default function App() {
           return
         }
         setMultiRoom((prev) => preferNewerRoom(prev, room))
-        // Hôte change de thème / reset → lobby pour tout le monde
-        if (
-          room.status === 'lobby' &&
-          (screen === 'multi-score' || screen === 'multi-play')
-        ) {
-          setScreen('multi-lobby')
-        } else if (room.status === 'playing' && screen !== 'multi-play') {
-          setScreen('multi-play')
-        } else if (
-          room.status === 'finished' &&
-          screen !== 'multi-score' &&
-          screen !== 'multi-theme'
-        ) {
-          setScreen('multi-score')
-        }
+        // Pendant le choix de thème, ne pas forcer le lobby
+        if (screen === 'multi-theme') return
+        const next = multiScreenForStatus(room.status)
+        if (next !== screen) setScreen(next)
       } catch (e) {
         if (cancelled) return
         const msg = e instanceof Error ? e.message : ''
         if (msg.toLowerCase().includes('introuvable')) {
+          clearMultiSession()
           setMultiName('')
           setMultiPlayerId(null)
           setMultiRoom(null)
@@ -663,6 +705,7 @@ export default function App() {
     setMultiPlayerId(null)
     setMultiRoom(null)
     setMultiBusy(false)
+    clearMultiSession()
     setScreen('mode')
   }
 
@@ -713,9 +756,12 @@ export default function App() {
       setMultiName(playerName)
       setMultiPlayerId(res.playerId!)
       setMultiRoom(res.room)
-      if (res.room.status === 'finished') setScreen('multi-score')
-      else if (res.room.status === 'playing') setScreen('multi-play')
-      else setScreen('multi-lobby')
+      saveMultiSession({
+        code: res.room.code,
+        playerId: res.playerId!,
+        playerName,
+      })
+      setScreen(multiScreenForStatus(res.room.status))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur')
     } finally {
@@ -795,6 +841,11 @@ export default function App() {
       })
       setMultiPlayerId(res.playerId!)
       setMultiRoom(res.room)
+      saveMultiSession({
+        code: res.room.code,
+        playerId: res.playerId!,
+        playerName: multiName.trim(),
+      })
       setStatusMsg(null)
       setScreen('multi-lobby')
     } catch (e) {
@@ -835,9 +886,12 @@ export default function App() {
       })
       setMultiRoom(res.room)
       setStatusMsg(res.message ?? null)
-      setScreen('multi-play')
+      setScreen(multiScreenForStatus(res.room.status))
     } catch (e) {
+      const room = roomFromError(e)
+      if (room) setMultiRoom(room)
       setError(e instanceof Error ? e.message : 'Erreur')
+      setScreen('multi-lobby')
     } finally {
       setMultiBusy(false)
     }
@@ -875,9 +929,12 @@ export default function App() {
       })
       setMultiRoom(res.room)
       setStatusMsg(res.message ?? null)
-      setScreen('multi-play')
+      setScreen(multiScreenForStatus(res.room.status))
     } catch (e) {
+      const room = roomFromError(e)
+      if (room) setMultiRoom(room)
       setError(e instanceof Error ? e.message : 'Erreur')
+      setScreen('multi-lobby')
     } finally {
       setMultiBusy(false)
     }
@@ -899,9 +956,12 @@ export default function App() {
       })
       setMultiRoom(res.room)
       setStatusMsg(res.message ?? null)
-      setScreen('multi-play')
+      setScreen(multiScreenForStatus(res.room.status))
     } catch (e) {
+      const room = roomFromError(e)
+      if (room) setMultiRoom(room)
       setError(e instanceof Error ? e.message : 'Erreur')
+      setScreen('multi-lobby')
     } finally {
       setMultiBusy(false)
     }
