@@ -8,6 +8,8 @@ interface MultiPlayProps {
   playerId: string
   onAnswer: (answerIndex: number) => void
   onBegin: () => void
+  onPause: () => void
+  onResume: () => void
   onNext: () => void
   onLeave: () => void
   onKick: (targetPlayerId: string) => void
@@ -20,6 +22,8 @@ export function MultiPlay({
   playerId,
   onAnswer,
   onBegin,
+  onPause,
+  onResume,
   onNext,
   onLeave,
   onKick,
@@ -32,22 +36,30 @@ export function MultiPlay({
   const timerOn = room.timerEnabled !== false
   const waiting = room.roundPhase === 'waiting'
   const revealing = room.roundPhase === 'reveal'
-  const answering = room.roundPhase === 'answering' || (!waiting && !revealing)
+  const answering = room.roundPhase === 'answering'
+  const paused = Boolean(room.timerPaused)
   const isHost = playerId === room.hostId
   const correctIndex = q?.correctIndex
   const isLast = room.questionIndex + 1 >= room.questions.length
+  const timerRunning =
+    timerOn && answering && !waiting && room.roundStartedAt > 0
 
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
-    if (!timerOn || revealing || waiting) return
+    setNow(Date.now())
+  }, [room.roundPhase, room.roundStartedAt, room.questionIndex, paused])
+
+  useEffect(() => {
+    if (!timerRunning || paused || revealing || waiting) return
     const id = window.setInterval(() => setNow(Date.now()), 100)
     return () => window.clearInterval(id)
-  }, [timerOn, revealing, waiting, room.questionIndex])
+  }, [timerRunning, paused, revealing, waiting, room.questionIndex])
 
-  const leftMs =
-    timerOn && answering && !waiting
-      ? Math.max(0, room.roundEndsAt - now)
-      : 1
+  const leftMs = !timerRunning
+    ? 1
+    : paused
+      ? Math.max(0, room.timerPausedLeftMs ?? room.roundDurationMs)
+      : Math.max(0, room.roundEndsAt - now)
   const leftSec = Math.ceil(leftMs / 1000)
   const progress = useMemo(() => {
     const total = room.roundDurationMs || 10000
@@ -64,8 +76,9 @@ export function MultiPlay({
     hasAnswered &&
     myAnswer === correctIndex
 
+  const timeExpired = timerRunning && !paused && leftMs <= 0
   const answersLocked =
-    disabled || revealing || waiting || hasAnswered || (timerOn && leftMs <= 0)
+    disabled || revealing || waiting || hasAnswered || timeExpired
 
   return (
     <section className="multi-play">
@@ -86,17 +99,19 @@ export function MultiPlay({
             </>
           )}
         </p>
-        {timerOn && answering && !waiting && (
+        {timerRunning && (
           <p
-            className={`multi-play__timer${leftSec <= 3 ? ' is-urgent' : ''}`}
+            className={`multi-play__timer${
+              !paused && leftSec <= 3 ? ' is-urgent' : ''
+            }`}
             aria-live="polite"
           >
-            {leftSec}s
+            {paused ? `Pause ${leftSec}s` : `${leftSec}s`}
           </p>
         )}
       </div>
 
-      {timerOn && answering && !waiting && (
+      {timerRunning && !paused && (
         <div className="multi-play__bar" aria-hidden>
           <div
             className="multi-play__bar-fill"
@@ -108,8 +123,15 @@ export function MultiPlay({
       {waiting && (
         <p className="multi-play__answered" aria-live="polite">
           {isHost
-            ? 'Tout le monde est prêt ? Lance le chrono quand tu veux.'
+            ? 'Tout le monde est prêt ? Lance le chrono une fois — il enchaînera ensuite.'
             : 'En attente que l’hôte lance le chrono…'}
+        </p>
+      )}
+
+      {paused && (
+        <p className="multi-play__answered" aria-live="polite">
+          Chrono en pause
+          {isHost ? ' — tu peux le relancer quand tu veux.' : '.'}
         </p>
       )}
 
@@ -193,6 +215,17 @@ export function MultiPlay({
         <p className="multi-play__waiting" role="status">
           L’hôte lancera le chrono dès que tout le monde est prêt.
         </p>
+      )}
+
+      {timerRunning && isHost && (
+        <button
+          type="button"
+          className="btn btn--primary"
+          disabled={busy}
+          onClick={paused ? onResume : onPause}
+        >
+          {busy ? '…' : paused ? 'Relancer le chrono' : 'Pause chrono'}
+        </button>
       )}
 
       {revealing && (

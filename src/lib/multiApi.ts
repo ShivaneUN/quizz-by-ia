@@ -36,6 +36,9 @@ export interface MultiRoom {
   roundPhase?: 'waiting' | 'answering' | 'reveal'
   roundStartedAt: number
   roundDurationMs: number
+  timerStarted?: boolean
+  timerPaused?: boolean
+  timerPausedLeftMs?: number
   currentAnswers: Record<string, number>
   roundEndsAt: number
   answeredCount: number
@@ -65,6 +68,16 @@ export function preferNewerRoom(
     prev.roundPhase === 'answering' &&
     next.roundPhase === 'reveal' &&
     prevT >= nextT
+  ) {
+    return prev
+  }
+
+  // Ne pas écraser un begin frais par un poll encore en waiting
+  if (
+    next.questionIndex === prev.questionIndex &&
+    prev.roundPhase === 'answering' &&
+    next.roundPhase === 'waiting' &&
+    (prev.timerStarted || prev.roundStartedAt > 0)
   ) {
     return prev
   }
@@ -123,6 +136,22 @@ export async function beginRoomRound(input: {
   playerId: string
 }) {
   const data = await postRoom({ action: 'begin', ...input })
+  return { room: data.room! }
+}
+
+export async function pauseRoomTimer(input: {
+  code: string
+  playerId: string
+}) {
+  const data = await postRoom({ action: 'pause', ...input })
+  return { room: data.room! }
+}
+
+export async function resumeRoomTimer(input: {
+  code: string
+  playerId: string
+}) {
+  const data = await postRoom({ action: 'resume', ...input })
   return { room: data.room! }
 }
 

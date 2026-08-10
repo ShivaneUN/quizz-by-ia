@@ -14,6 +14,8 @@ import {
   syncRoomRound,
   prepareRound,
   hostBeginRound,
+  hostPauseTimer,
+  hostResumeTimer,
   type RoomState,
 } from '../server/rooms.js'
 import {
@@ -48,7 +50,7 @@ function json(res: VercelResponse, status: number, body: unknown) {
 
 /**
  * POST /api/room
- * actions: create | join | start | begin | answer | next | leave | kick | state | setTheme | setTimer | setDifficulty | setPlayMode | close
+ * actions: create | join | start | begin | pause | resume | answer | next | leave | kick | state | setTheme | setTimer | setDifficulty | setPlayMode | close
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') {
@@ -113,6 +115,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         roundPhase: 'answering',
         roundStartedAt: 0,
         roundDurationMs: ROUND_MS,
+        timerStarted: false,
+        timerPaused: false,
         currentAnswers: {},
         createdAt: now,
         updatedAt: now,
@@ -186,6 +190,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Feedback partagé : tous les clients voient « génération » via le poll
       room.status = 'generating'
       room.quizMode = 'standard'
+      room.timerStarted = false
+      room.timerPaused = false
+      room.timerPausedLeftMs = undefined
       delete room.errorMessage
       room.questions = []
       room.questionIndex = 0
@@ -307,6 +314,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       room.quizMode = 'standard'
       delete room.errorMessage
       room.status = 'lobby'
+      room.timerStarted = false
+      room.timerPaused = false
+      room.timerPausedLeftMs = undefined
       room.questions = []
       room.questionIndex = 0
       room.roundPhase = 'answering'
@@ -443,7 +453,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const timerOn = room.timerEnabled !== false
       if (
         timerOn &&
-        now >= room.roundStartedAt &&
+        !room.timerPaused &&
+        room.roundStartedAt > 0 &&
         now > room.roundStartedAt + room.roundDurationMs
       ) {
         room = (await syncRoomRound(code)) ?? room
@@ -522,6 +533,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return json(res, 200, { room: publicRoomView(room) })
       }
       room = hostBeginRound(room)
+      await saveRoom(room)
+      return json(res, 200, { room: publicRoomView(room) })
+    }
+
+    if (action === 'pause') {
+      const code = String(body.code ?? '').trim().toUpperCase()
+      const playerId = String(body.playerId ?? '')
+      let room = await getRoom(code)
+      if (!room) return json(res, 404, { error: 'Salle introuvable' })
+      if (playerId !== room.hostId) {
+        return json(res, 403, { error: 'Seul l’hôte peut mettre en pause' })
+      }
+      room = hostPauseTimer(room)
+      await saveRoom(room)
+      return json(res, 200, { room: publicRoomView(room) })
+    }
+
+    if (action === 'resume') {
+      const code = String(body.code ?? '').trim().toUpperCase()
+      const playerId = String(body.playerId ?? '')
+      let room = await getRoom(code)
+      if (!room) return json(res, 404, { error: 'Salle introuvable' })
+      if (playerId !== room.hostId) {
+        return json(res, 403, { error: 'Seul l’hôte peut relancer le chrono' })
+      }
+      room = hostResumeTimer(room)
       await saveRoom(room)
       return json(res, 200, { room: publicRoomView(room) })
     }

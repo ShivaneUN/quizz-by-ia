@@ -22,8 +22,10 @@ import {
   kickRoomPlayer,
   leaveRoom,
   nextRoomQuestion,
+  pauseRoomTimer,
   pollRoom,
   preferNewerRoom,
+  resumeRoomTimer,
   setRoomDifficulty,
   setRoomPlayMode,
   setRoomTheme,
@@ -1036,6 +1038,40 @@ export default function App() {
     }
   }
 
+  async function handleMultiPause() {
+    if (!multiRoom || !multiPlayerId) return
+    setMultiBusy(true)
+    setError(null)
+    try {
+      const res = await pauseRoomTimer({
+        code: multiRoom.code,
+        playerId: multiPlayerId,
+      })
+      setMultiRoom((prev) => preferNewerRoom(prev, res.room))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erreur')
+    } finally {
+      setMultiBusy(false)
+    }
+  }
+
+  async function handleMultiResume() {
+    if (!multiRoom || !multiPlayerId) return
+    setMultiBusy(true)
+    setError(null)
+    try {
+      const res = await resumeRoomTimer({
+        code: multiRoom.code,
+        playerId: multiPlayerId,
+      })
+      setMultiRoom((prev) => preferNewerRoom(prev, res.room))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erreur')
+    } finally {
+      setMultiBusy(false)
+    }
+  }
+
   async function handleMultiNext() {
     if (!multiRoom || !multiPlayerId || multiBusy) return
     setMultiBusy(true)
@@ -1249,6 +1285,8 @@ export default function App() {
               playerId={multiPlayerId}
               onAnswer={handleMultiAnswer}
               onBegin={() => void handleMultiBegin()}
+              onPause={() => void handleMultiPause()}
+              onResume={() => void handleMultiResume()}
               onNext={() => void handleMultiNext()}
               onLeave={() => void handleMultiLeave()}
               onKick={(id) => void handleMultiKick(id)}
