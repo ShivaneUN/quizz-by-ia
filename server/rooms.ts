@@ -85,8 +85,8 @@ export interface RoomState {
 
 export const ROUND_MS = 10_000
 export const MULTI_QUESTION_COUNT = 10
-/** TTL Redis salle (inactivité) — rafraîchi à chaque save */
-export const ROOM_TTL_SEC = 60 * 90
+/** TTL Redis salle (inactivité) — rafraîchi à chaque save / poll */
+export const ROOM_TTL_SEC = 60 * 5
 
 const memory = new Map<string, RoomState>()
 
@@ -220,6 +220,13 @@ export async function deleteRoom(code: string): Promise<void> {
     return
   }
   memory.delete(c)
+}
+
+/** Prolonge le TTL tant que quelqu’un poll la salle. */
+export async function touchRoom(code: string): Promise<void> {
+  const c = code.trim().toUpperCase()
+  if (!redisConfigured()) return
+  await redisCommand('EXPIRE', roomKey(c), ROOM_TTL_SEC)
 }
 
 export function newPlayerId(): string {
@@ -522,7 +529,10 @@ export async function syncRoomRound(code: string): Promise<RoomState | null> {
   const phase = room.roundPhase
   const { room: closed, changed } = maybeCloseRound(room)
 
-  if (!changed) return closed
+  if (!changed) {
+    await touchRoom(code)
+    return closed
+  }
 
   const latest = await getRoom(code)
   if (
@@ -531,6 +541,7 @@ export async function syncRoomRound(code: string): Promise<RoomState | null> {
     latest.roundPhase !== phase ||
     latest.status !== 'playing'
   ) {
+    if (latest) await touchRoom(code)
     return latest ?? closed
   }
 
