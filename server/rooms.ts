@@ -2,7 +2,13 @@
  * Stockage des salles multi — mémoire (dev local) + Upstash Redis (prod Vercel).
  */
 
-export type RoomStatus = 'lobby' | 'playing' | 'finished'
+/** lobby | generating (IA) | playing | finished | error (génération échouée) */
+export type RoomStatus =
+  | 'lobby'
+  | 'generating'
+  | 'playing'
+  | 'finished'
+  | 'error'
 
 /** answering = les joueurs répondent ; reveal = feedback, l’hôte passe à la suivante */
 export type RoundPhase = 'answering' | 'reveal'
@@ -41,14 +47,19 @@ export interface RoomState {
   difficulty: 'easy' | 'medium' | 'hard'
   /** IA : auto (Groq→Gemini), groq ou gemini */
   aiProvider: 'auto' | 'groq' | 'gemini'
-  /** standard = texte ; image = QCM illustré */
+  /** Toujours standard en multi (images désactivées) */
   quizMode?: 'standard' | 'image'
+  /** Message si status === 'error' */
+  errorMessage?: string
   players: RoomPlayer[]
   questions: RoomQuestion[]
   questionIndex: number
   /** answering | reveal (feedback entre questions) */
   roundPhase: RoundPhase
-  /** Timestamp ms du début de la question en cours */
+  /**
+   * Timestamp ms du début effectif du chrono.
+   * Peut être dans le futur (= grâce avant démarrage du compte à rebours).
+   */
   roundStartedAt: number
   roundDurationMs: number
   /** playerId → index réponse (absent = pas encore) */
@@ -58,7 +69,11 @@ export interface RoomState {
 }
 
 export const ROUND_MS = 10_000
+/** Délai avant que le chrono ne compte (chargement question / équité) */
+export const ROUND_GRACE_MS = 4_000
 export const MULTI_QUESTION_COUNT = 10
+/** TTL Redis salle (inactivité) — rafraîchi à chaque save */
+export const ROOM_TTL_SEC = 60 * 90
 
 const memory = new Map<string, RoomState>()
 
@@ -91,8 +106,23 @@ async function redisCommand<T>(...args: (string | number)[]): Promise<T | null> 
   return data.result ?? null
 }
 
+export { redisCommand, redisConfigured }
+
 function roomKey(code: string): string {
   return `quizz:room:${code.toUpperCase()}`
+}
+
+function normalizeRoomStatus(raw: string | undefined): RoomStatus {
+  if (
+    raw === 'lobby' ||
+    raw === 'generating' ||
+    raw === 'playing' ||
+    raw === 'finished' ||
+    raw === 'error'
+  ) {
+    return raw
+  }
+  return 'lobby'
 }
 
 export async function getRoom(code: string): Promise<RoomState | null> {
@@ -106,7 +136,8 @@ export async function getRoom(code: string): Promise<RoomState | null> {
     room = memory.get(c) ?? null
   }
   if (!room) return null
-  // Compat salles créées avant l’option chrono / difficulté
+  // Compat salles anciennes
+  room.status = normalizeRoomStatus(room.status)
   if (typeof room.timerEnabled !== 'boolean') {
     room.timerEnabled = true
   }
@@ -123,13 +154,21 @@ export async function getRoom(code: string): Promise<RoomState | null> {
   if (room.roundPhase !== 'answering' && room.roundPhase !== 'reveal') {
     room.roundPhase = 'answering'
   }
+  room.quizMode = 'standard'
   return room
 }
 
 export async function saveRoom(room: RoomState): Promise<void> {
   room.updatedAt = Date.now()
+  room.quizMode = 'standard'
   if (redisConfigured()) {
-    await redisCommand('SET', roomKey(room.code), JSON.stringify(room), 'EX', 60 * 60 * 6)
+    await redisCommand(
+      'SET',
+      roomKey(room.code),
+      JSON.stringify(room),
+      'EX',
+      ROOM_TTL_SEC,
+    )
     return
   }
   memory.set(room.code, room)
@@ -159,6 +198,17 @@ export function makeRoomCode(): string {
   return code
 }
 
+/** Arme le chrono avec une grâce (équité chargement). */
+export function armRoundTimer(room: RoomState, now = Date.now()): void {
+  room.roundPhase = 'answering'
+  room.currentAnswers = {}
+  if (room.timerEnabled === false) {
+    room.roundStartedAt = now
+    return
+  }
+  room.roundStartedAt = now + ROUND_GRACE_MS
+}
+
 /** Vue client : masque les bonnes réponses tant que la manche n’est pas close */
 export function publicRoomView(
   room: RoomState,
@@ -185,8 +235,15 @@ export function publicRoomView(
   const allAnswered =
     room.players.length > 0 && answeredCount >= room.players.length
 
+  const timerOff =
+    room.timerEnabled === false || room.roundPhase === 'reveal'
+  const roundEndsAt = timerOff
+    ? Number.MAX_SAFE_INTEGER
+    : room.roundStartedAt + room.roundDurationMs
+
   return {
     ...room,
+    quizMode: 'standard',
     questions: room.questions.map((q, i) => {
       const show =
         revealAll ||
@@ -196,7 +253,7 @@ export function publicRoomView(
         id: q.id,
         question: q.question,
         answers: q.answers,
-        imageUrl: q.imageUrl,
+        imageUrl: undefined,
         ...(show
           ? {
               correctIndex: q.correctIndex,
@@ -206,10 +263,7 @@ export function publicRoomView(
           : {}),
       }
     }),
-    roundEndsAt:
-      room.timerEnabled === false || room.roundPhase === 'reveal'
-        ? Number.MAX_SAFE_INTEGER
-        : room.roundStartedAt + room.roundDurationMs,
+    roundEndsAt,
     answeredCount,
     allAnswered,
     storage: redisConfigured() ? 'redis' : 'memory',
@@ -217,10 +271,8 @@ export function publicRoomView(
 }
 
 /**
- * Si chrono écoulé ou tout le monde a répondu → score + phase reveal (feedback).
- * L’hôte doit ensuite appeler next pour la question suivante.
- * Les absents = réponse fausse.
- * @returns whether the room was mutated (answering → reveal / finished)
+ * Si chrono écoulé ou tout le monde a répondu → score + phase reveal.
+ * Le chrono ne compte qu’après roundStartedAt (grâce possible).
  */
 export function maybeCloseRound(
   room: RoomState,
@@ -237,8 +289,9 @@ export function maybeCloseRound(
   }
 
   const timerOn = room.timerEnabled !== false
+  const timerArmed = now >= room.roundStartedAt
   const timeUp =
-    timerOn && now >= room.roundStartedAt + room.roundDurationMs
+    timerOn && timerArmed && now >= room.roundStartedAt + room.roundDurationMs
   const allAnswered =
     room.players.length > 0 &&
     room.players.every((p) => p.id in room.currentAnswers)
@@ -272,15 +325,12 @@ export function hostNextQuestion(room: RoomState, now = Date.now()): RoomState {
   }
 
   room.questionIndex = next
-  room.currentAnswers = {}
-  room.roundPhase = 'answering'
-  room.roundStartedAt = now
+  armRoundTimer(room, now)
   return room
 }
 
 /**
  * Ferme la manche si besoin, sans écraser un `next` concurrent.
- * Ne sauvegarde que si on passe réellement en reveal.
  */
 export async function syncRoomRound(code: string): Promise<RoomState | null> {
   const room = await getRoom(code)
@@ -292,7 +342,6 @@ export async function syncRoomRound(code: string): Promise<RoomState | null> {
 
   if (!changed) return closed
 
-  // CAS : n’écrase pas si l’hôte a déjà avancé entre-temps
   const latest = await getRoom(code)
   if (
     !latest ||
