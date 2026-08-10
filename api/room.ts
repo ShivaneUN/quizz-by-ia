@@ -15,6 +15,12 @@ import {
   armRoundTimer,
   type RoomState,
 } from '../server/rooms.js'
+import {
+  getSeenQuestionKeys,
+  pickUnseenPreferring,
+  questionFingerprint,
+  rememberQuestionKeys,
+} from '../server/questionHistory.js'
 
 export const config = {
   maxDuration: 60,
@@ -233,17 +239,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         })
       }
 
-      const questions = gen.questions
-        .filter((q) => q.difficulty === difficulty)
-        .slice(0, MULTI_QUESTION_COUNT)
-        .map((q) => ({
-          id: q.id,
-          question: q.question,
-          answers: q.answers,
-          correctIndex: q.correctIndex,
-          explanation: q.explanation,
-          sourceType: q.sourceType,
-        }))
+      const pool = gen.questions.filter((q) => q.difficulty === difficulty)
+      const seen = await getSeenQuestionKeys(themeSlug)
+      const selected = pickUnseenPreferring(pool, seen, MULTI_QUESTION_COUNT)
+      const questions = selected.map((q) => ({
+        id: q.id,
+        question: q.question,
+        answers: q.answers,
+        correctIndex: q.correctIndex,
+        explanation: q.explanation,
+        sourceType: q.sourceType,
+      }))
 
       if (questions.length < MULTI_QUESTION_COUNT) {
         const err = `Pas assez de questions (${questions.length}/${MULTI_QUESTION_COUNT}). Réessaie.`
@@ -256,6 +262,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           room: publicRoomView(room),
         })
       }
+
+      await rememberQuestionKeys(
+        themeSlug,
+        questions.map((q) => questionFingerprint(q.question)),
+      )
 
       const now = Date.now()
       room.status = 'playing'
