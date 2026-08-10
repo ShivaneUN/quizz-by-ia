@@ -10,8 +10,12 @@ export type RoomStatus =
   | 'finished'
   | 'error'
 
-/** answering = les joueurs répondent ; reveal = feedback, l’hôte passe à la suivante */
-export type RoundPhase = 'answering' | 'reveal'
+/**
+ * waiting = chrono pas encore lancé (hôte doit démarrer) ;
+ * answering = les joueurs répondent ;
+ * reveal = feedback, l’hôte passe à la suivante
+ */
+export type RoundPhase = 'waiting' | 'answering' | 'reveal'
 
 export interface RoomPlayer {
   id: string
@@ -54,12 +58,9 @@ export interface RoomState {
   players: RoomPlayer[]
   questions: RoomQuestion[]
   questionIndex: number
-  /** answering | reveal (feedback entre questions) */
+  /** waiting | answering | reveal */
   roundPhase: RoundPhase
-  /**
-   * Timestamp ms du début effectif du chrono.
-   * Peut être dans le futur (= grâce avant démarrage du compte à rebours).
-   */
+  /** Timestamp ms du début effectif du chrono (0 si waiting). */
   roundStartedAt: number
   roundDurationMs: number
   /** playerId → index réponse (absent = pas encore) */
@@ -69,8 +70,6 @@ export interface RoomState {
 }
 
 export const ROUND_MS = 10_000
-/** Délai avant que le chrono ne compte (chargement question / équité) */
-export const ROUND_GRACE_MS = 4_000
 export const MULTI_QUESTION_COUNT = 10
 /** TTL Redis salle (inactivité) — rafraîchi à chaque save */
 export const ROOM_TTL_SEC = 60 * 90
@@ -151,7 +150,11 @@ export async function getRoom(code: string): Promise<RoomState | null> {
   if (room.playMode !== 'progression' && room.playMode !== 'free') {
     room.playMode = 'free'
   }
-  if (room.roundPhase !== 'answering' && room.roundPhase !== 'reveal') {
+  if (
+    room.roundPhase !== 'waiting' &&
+    room.roundPhase !== 'answering' &&
+    room.roundPhase !== 'reveal'
+  ) {
     room.roundPhase = 'answering'
   }
   room.quizMode = 'standard'
@@ -198,15 +201,28 @@ export function makeRoomCode(): string {
   return code
 }
 
-/** Arme le chrono avec une grâce (équité chargement). */
-export function armRoundTimer(room: RoomState, now = Date.now()): void {
-  room.roundPhase = 'answering'
+/**
+ * Prépare une manche : sans chrono → answering immédiat ;
+ * avec chrono → waiting (l’hôte lance avec hostBeginRound).
+ */
+export function prepareRound(room: RoomState, now = Date.now()): void {
   room.currentAnswers = {}
   if (room.timerEnabled === false) {
+    room.roundPhase = 'answering'
     room.roundStartedAt = now
     return
   }
-  room.roundStartedAt = now + ROUND_GRACE_MS
+  room.roundPhase = 'waiting'
+  room.roundStartedAt = 0
+}
+
+/** Hôte : démarre le chrono de la manche en cours. */
+export function hostBeginRound(room: RoomState, now = Date.now()): RoomState {
+  if (room.status !== 'playing') return room
+  if (room.roundPhase !== 'waiting') return room
+  room.roundPhase = 'answering'
+  room.roundStartedAt = now
+  return room
 }
 
 /** Vue client : masque les bonnes réponses tant que la manche n’est pas close */
@@ -236,7 +252,9 @@ export function publicRoomView(
     room.players.length > 0 && answeredCount >= room.players.length
 
   const timerOff =
-    room.timerEnabled === false || room.roundPhase === 'reveal'
+    room.timerEnabled === false ||
+    room.roundPhase === 'reveal' ||
+    room.roundPhase === 'waiting'
   const roundEndsAt = timerOff
     ? Number.MAX_SAFE_INTEGER
     : room.roundStartedAt + room.roundDurationMs
@@ -272,14 +290,14 @@ export function publicRoomView(
 
 /**
  * Si chrono écoulé ou tout le monde a répondu → score + phase reveal.
- * Le chrono ne compte qu’après roundStartedAt (grâce possible).
+ * Ne s’applique qu’en phase answering (pas pendant waiting).
  */
 export function maybeCloseRound(
   room: RoomState,
   now = Date.now(),
 ): { room: RoomState; changed: boolean } {
   if (room.status !== 'playing') return { room, changed: false }
-  if (room.roundPhase === 'reveal') return { room, changed: false }
+  if (room.roundPhase !== 'answering') return { room, changed: false }
   if (room.questions.length === 0) return { room, changed: false }
 
   const q = room.questions[room.questionIndex]
@@ -289,9 +307,10 @@ export function maybeCloseRound(
   }
 
   const timerOn = room.timerEnabled !== false
-  const timerArmed = now >= room.roundStartedAt
   const timeUp =
-    timerOn && timerArmed && now >= room.roundStartedAt + room.roundDurationMs
+    timerOn &&
+    room.roundStartedAt > 0 &&
+    now >= room.roundStartedAt + room.roundDurationMs
   const allAnswered =
     room.players.length > 0 &&
     room.players.every((p) => p.id in room.currentAnswers)
@@ -325,7 +344,7 @@ export function hostNextQuestion(room: RoomState, now = Date.now()): RoomState {
   }
 
   room.questionIndex = next
-  armRoundTimer(room, now)
+  prepareRound(room, now)
   return room
 }
 

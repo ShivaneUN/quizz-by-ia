@@ -7,6 +7,7 @@ interface MultiPlayProps {
   room: MultiRoom
   playerId: string
   onAnswer: (answerIndex: number) => void
+  onBegin: () => void
   onNext: () => void
   onLeave: () => void
   onKick: (targetPlayerId: string) => void
@@ -18,6 +19,7 @@ export function MultiPlay({
   room,
   playerId,
   onAnswer,
+  onBegin,
   onNext,
   onLeave,
   onKick,
@@ -28,35 +30,29 @@ export function MultiPlay({
   const myAnswer = room.currentAnswers[playerId]
   const hasAnswered = myAnswer !== undefined
   const timerOn = room.timerEnabled !== false
+  const waiting = room.roundPhase === 'waiting'
   const revealing = room.roundPhase === 'reveal'
+  const answering = room.roundPhase === 'answering' || (!waiting && !revealing)
   const isHost = playerId === room.hostId
   const correctIndex = q?.correctIndex
-  const isLast =
-    room.questionIndex + 1 >= room.questions.length
+  const isLast = room.questionIndex + 1 >= room.questions.length
 
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
-    if (!timerOn || revealing) return
+    if (!timerOn || revealing || waiting) return
     const id = window.setInterval(() => setNow(Date.now()), 100)
     return () => window.clearInterval(id)
-  }, [timerOn, revealing, room.questionIndex])
+  }, [timerOn, revealing, waiting, room.questionIndex])
 
-  const graceLeftMs =
-    timerOn && !revealing ? Math.max(0, room.roundStartedAt - now) : 0
-  const inGrace = graceLeftMs > 0
   const leftMs =
-    timerOn && !revealing
-      ? inGrace
-        ? room.roundDurationMs || 10000
-        : Math.max(0, room.roundEndsAt - now)
+    timerOn && answering && !waiting
+      ? Math.max(0, room.roundEndsAt - now)
       : 1
   const leftSec = Math.ceil(leftMs / 1000)
-  const graceSec = Math.ceil(graceLeftMs / 1000)
   const progress = useMemo(() => {
     const total = room.roundDurationMs || 10000
-    if (inGrace) return 1
     return Math.min(1, Math.max(0, leftMs / total))
-  }, [leftMs, room.roundDurationMs, inGrace])
+  }, [leftMs, room.roundDurationMs])
 
   if (!q) {
     return <p className="multi-play__empty">Chargement…</p>
@@ -67,6 +63,9 @@ export function MultiPlay({
     typeof correctIndex === 'number' &&
     hasAnswered &&
     myAnswer === correctIndex
+
+  const answersLocked =
+    disabled || revealing || waiting || hasAnswered || (timerOn && leftMs <= 0)
 
   return (
     <section className="multi-play">
@@ -87,19 +86,17 @@ export function MultiPlay({
             </>
           )}
         </p>
-        {timerOn && !revealing && (
+        {timerOn && answering && !waiting && (
           <p
-            className={`multi-play__timer${
-              !inGrace && leftSec <= 3 ? ' is-urgent' : ''
-            }`}
+            className={`multi-play__timer${leftSec <= 3 ? ' is-urgent' : ''}`}
             aria-live="polite"
           >
-            {inGrace ? `Prêt ${graceSec}s` : `${leftSec}s`}
+            {leftSec}s
           </p>
         )}
       </div>
 
-      {timerOn && !revealing && !inGrace && (
+      {timerOn && answering && !waiting && (
         <div className="multi-play__bar" aria-hidden>
           <div
             className="multi-play__bar-fill"
@@ -107,13 +104,16 @@ export function MultiPlay({
           />
         </div>
       )}
-      {timerOn && !revealing && inGrace && (
+
+      {waiting && (
         <p className="multi-play__answered" aria-live="polite">
-          Synchronisation… le chrono démarre dans {graceSec}s
+          {isHost
+            ? 'Tout le monde est prêt ? Lance le chrono quand tu veux.'
+            : 'En attente que l’hôte lance le chrono…'}
         </p>
       )}
 
-      {!revealing && (
+      {!revealing && !waiting && (
         <p className="multi-play__answered">
           Réponses : {room.answeredCount}/{room.players.length}
         </p>
@@ -151,23 +151,20 @@ export function MultiPlay({
               key={`${q.id}-${i}`}
               type="button"
               className={`multi-play__answer${state}`}
-              disabled={
-                disabled ||
-                revealing ||
-                hasAnswered ||
-                (timerOn && leftMs <= 0)
-              }
+              disabled={answersLocked}
               onClick={() => onAnswer(i)}
             >
               <span className="multi-play__letter" aria-hidden>
                 {String.fromCharCode(65 + i)}
               </span>
               <span>{answer}</span>
-              {revealing && typeof correctIndex === 'number' && i === correctIndex && (
-                <span className="multi-play__badge multi-play__badge--ok">
-                  Correct
-                </span>
-              )}
+              {revealing &&
+                typeof correctIndex === 'number' &&
+                i === correctIndex && (
+                  <span className="multi-play__badge multi-play__badge--ok">
+                    Correct
+                  </span>
+                )}
               {revealing &&
                 selected &&
                 typeof correctIndex === 'number' &&
@@ -180,6 +177,23 @@ export function MultiPlay({
           )
         })}
       </div>
+
+      {waiting && isHost && (
+        <button
+          type="button"
+          className="btn btn--primary"
+          disabled={busy}
+          onClick={onBegin}
+        >
+          {busy ? '…' : 'Lancer le chrono'}
+        </button>
+      )}
+
+      {waiting && !isHost && (
+        <p className="multi-play__waiting" role="status">
+          L’hôte lancera le chrono dès que tout le monde est prêt.
+        </p>
+      )}
 
       {revealing && (
         <div
@@ -235,7 +249,7 @@ export function MultiPlay({
         </ul>
       )}
 
-      {!revealing && hasAnswered && (
+      {!revealing && !waiting && hasAnswered && (
         <p className="multi-play__waiting" role="status">
           {timerOn
             ? 'Réponse enregistrée — en attente des autres ou de la fin du chrono…'
@@ -271,13 +285,8 @@ export function MultiPlay({
         onKick={onKick}
       />
 
-      <button
-        type="button"
-        className="multi-play__leave"
-        onClick={onLeave}
-        disabled={busy}
-      >
-        Quitter la salle
+      <button type="button" className="multi-play__leave" onClick={onLeave}>
+        Quitter
       </button>
     </section>
   )

@@ -33,7 +33,7 @@ export interface MultiRoom {
   players: MultiPlayer[]
   questions: MultiQuestion[]
   questionIndex: number
-  roundPhase?: 'answering' | 'reveal'
+  roundPhase?: 'waiting' | 'answering' | 'reveal'
   roundStartedAt: number
   roundDurationMs: number
   currentAnswers: Record<string, number>
@@ -116,6 +116,14 @@ export async function joinRoom(input: { code: string; playerName: string }) {
 export async function startRoom(input: { code: string; playerId: string }) {
   const data = await postRoom({ action: 'start', ...input })
   return { room: data.room!, playerId: data.playerId, message: data.message }
+}
+
+export async function beginRoomRound(input: {
+  code: string
+  playerId: string
+}) {
+  const data = await postRoom({ action: 'begin', ...input })
+  return { room: data.room! }
 }
 
 export async function nextRoomQuestion(input: {

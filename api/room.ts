@@ -12,7 +12,8 @@ import {
   maybeCloseRound,
   hostNextQuestion,
   syncRoomRound,
-  armRoundTimer,
+  prepareRound,
+  hostBeginRound,
   type RoomState,
 } from '../server/rooms.js'
 import {
@@ -47,7 +48,7 @@ function json(res: VercelResponse, status: number, body: unknown) {
 
 /**
  * POST /api/room
- * actions: create | join | start | answer | next | leave | kick | state | setTheme | setTimer | setDifficulty | setPlayMode | close
+ * actions: create | join | start | begin | answer | next | leave | kick | state | setTheme | setTimer | setDifficulty | setPlayMode | close
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') {
@@ -275,7 +276,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       room.questions = questions
       room.questionIndex = 0
       room.players = room.players.map((p) => ({ ...p, score: 0 }))
-      armRoundTimer(room, now)
+      prepareRound(room, now)
       await saveRoom(room)
       return json(res, 200, {
         room: publicRoomView(room),
@@ -421,7 +422,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (room.status !== 'playing') {
         return json(res, 200, { room: publicRoomView(room) })
       }
-      if (room.roundPhase === 'reveal') {
+      if (room.roundPhase === 'reveal' || room.roundPhase === 'waiting') {
         return json(res, 200, { room: publicRoomView(room) })
       }
 
@@ -502,6 +503,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return json(res, 400, { error: 'Attends la fin des réponses' })
       }
       room = hostNextQuestion(room)
+      await saveRoom(room)
+      return json(res, 200, { room: publicRoomView(room) })
+    }
+
+    if (action === 'begin') {
+      const code = String(body.code ?? '').trim().toUpperCase()
+      const playerId = String(body.playerId ?? '')
+      let room = await getRoom(code)
+      if (!room) return json(res, 404, { error: 'Salle introuvable' })
+      if (playerId !== room.hostId) {
+        return json(res, 403, { error: 'Seul l’hôte peut lancer le chrono' })
+      }
+      if (room.status !== 'playing') {
+        return json(res, 200, { room: publicRoomView(room) })
+      }
+      if (room.roundPhase !== 'waiting') {
+        return json(res, 200, { room: publicRoomView(room) })
+      }
+      room = hostBeginRound(room)
       await saveRoom(room)
       return json(res, 200, { room: publicRoomView(room) })
     }

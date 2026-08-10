@@ -1,4 +1,10 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
+import { pollRoom } from '../lib/multiApi'
+import {
+  clearLastMultiRoom,
+  loadLastMultiRoom,
+  type LastMultiRoom,
+} from '../lib/multiSession'
 import './MultiGate.css'
 
 const RANDOM_ADJECTIVES = [
@@ -64,6 +70,8 @@ interface MultiGateProps {
   error?: string | null
 }
 
+type LastStatus = 'idle' | 'checking' | 'active' | 'gone'
+
 export function MultiGate({
   onCreate,
   onJoin,
@@ -75,6 +83,28 @@ export function MultiGate({
   const [name, setName] = useState('')
   const [code, setCode] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
+  const [lastRoom, setLastRoom] = useState<LastMultiRoom | null>(null)
+  const [lastStatus, setLastStatus] = useState<LastStatus>('idle')
+
+  useEffect(() => {
+    const saved = loadLastMultiRoom()
+    if (!saved) return
+    setLastRoom(saved)
+    setName((prev) => (prev.trim() ? prev : saved.playerName))
+    setLastStatus('checking')
+    let cancelled = false
+    ;(async () => {
+      try {
+        await pollRoom(saved.code)
+        if (!cancelled) setLastStatus('active')
+      } catch {
+        if (!cancelled) setLastStatus('gone')
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const trimmedName = name.trim()
   const canSubmit =
@@ -94,12 +124,68 @@ export function MultiGate({
     else onJoin(code.trim().toUpperCase(), trimmedName)
   }
 
+  function rejoinLast() {
+    if (!lastRoom || busy || lastStatus !== 'active') return
+    const pseudo = trimmedName.length >= 2 ? trimmedName : lastRoom.playerName
+    setLocalError(null)
+    onJoin(lastRoom.code, pseudo)
+  }
+
+  function dismissLast() {
+    clearLastMultiRoom()
+    setLastRoom(null)
+    setLastStatus('idle')
+  }
+
   return (
     <section className="multi-gate">
       <button type="button" className="multi-gate__back" onClick={onBack}>
         ← Retour
       </button>
       <h2 className="multi-gate__title">Multijoueur</h2>
+
+      {lastRoom && (
+        <div className="multi-gate__last" aria-live="polite">
+          <p className="multi-gate__last-label">Dernière salle</p>
+          <p className="multi-gate__last-code">{lastRoom.code}</p>
+          {lastRoom.theme && (
+            <p className="multi-gate__last-theme">{lastRoom.theme}</p>
+          )}
+          {lastStatus === 'checking' && (
+            <p className="multi-gate__hint">Vérification…</p>
+          )}
+          {lastStatus === 'active' && (
+            <>
+              <p className="multi-gate__hint">
+                La salle est encore active — tu peux y retourner.
+              </p>
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={busy}
+                onClick={rejoinLast}
+              >
+                {busy ? '…' : `Rejoindre ${lastRoom.code}`}
+              </button>
+            </>
+          )}
+          {lastStatus === 'gone' && (
+            <>
+              <p className="multi-gate__error" role="alert">
+                Cette salle n’existe plus ou n’est plus active.
+              </p>
+              <button
+                type="button"
+                className="multi-gate__last-dismiss"
+                disabled={busy}
+                onClick={dismissLast}
+              >
+                Effacer
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       <div className="multi-gate__tabs" role="tablist">
         <button

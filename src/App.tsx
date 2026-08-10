@@ -15,6 +15,7 @@ import { createEmptyTierAttempts, resolveTierOutcome } from './lib/progression'
 import { bankSlug, isEphemeralTheme } from './lib/themeSlug'
 import {
   answerRoom,
+  beginRoomRound,
   closeRoom,
   createRoom,
   joinRoom,
@@ -33,6 +34,7 @@ import {
 import {
   clearMultiSession,
   loadMultiSession,
+  saveLastMultiRoom,
   saveMultiSession,
 } from './lib/multiSession'
 import { AnswerAudit } from './components/AnswerAudit'
@@ -713,6 +715,11 @@ export default function App() {
   async function handleMultiLeave() {
     const code = multiRoom?.code
     const pid = multiPlayerId
+    const name = multiName.trim()
+    const theme = multiRoom?.theme
+    if (code && name) {
+      saveLastMultiRoom({ code, playerName: name, theme })
+    }
     if (code && pid) {
       try {
         await leaveRoom({ code, playerId: pid })
@@ -760,6 +767,11 @@ export default function App() {
         code: res.room.code,
         playerId: res.playerId!,
         playerName,
+      })
+      saveLastMultiRoom({
+        code: res.room.code,
+        playerName,
+        theme: res.room.theme,
       })
       setScreen(multiScreenForStatus(res.room.status))
     } catch (e) {
@@ -845,6 +857,11 @@ export default function App() {
         code: res.room.code,
         playerId: res.playerId!,
         playerName: multiName.trim(),
+      })
+      saveLastMultiRoom({
+        code: res.room.code,
+        playerName: multiName.trim(),
+        theme: res.room.theme,
       })
       setStatusMsg(null)
       setScreen('multi-lobby')
@@ -972,6 +989,13 @@ export default function App() {
     setMultiBusy(true)
     setError(null)
     try {
+      if (multiName.trim()) {
+        saveLastMultiRoom({
+          code: multiRoom.code,
+          playerName: multiName.trim(),
+          theme: multiRoom.theme,
+        })
+      }
       await closeRoom({ code: multiRoom.code, playerId: multiPlayerId })
       resetAll()
     } catch (e) {
@@ -992,6 +1016,23 @@ export default function App() {
       if (res.room.status === 'finished') setScreen('multi-score')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur')
+    }
+  }
+
+  async function handleMultiBegin() {
+    if (!multiRoom || !multiPlayerId) return
+    setMultiBusy(true)
+    setError(null)
+    try {
+      const res = await beginRoomRound({
+        code: multiRoom.code,
+        playerId: multiPlayerId,
+      })
+      setMultiRoom((prev) => preferNewerRoom(prev, res.room))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erreur')
+    } finally {
+      setMultiBusy(false)
     }
   }
 
@@ -1207,6 +1248,7 @@ export default function App() {
               room={multiRoom}
               playerId={multiPlayerId}
               onAnswer={handleMultiAnswer}
+              onBegin={() => void handleMultiBegin()}
               onNext={() => void handleMultiNext()}
               onLeave={() => void handleMultiLeave()}
               onKick={(id) => void handleMultiKick(id)}
