@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { MultiRoom } from '../lib/multiApi'
+import { StreakFlame } from './StreakFlame'
 import './HostPlayersPanel.css'
 
 interface HostPlayersPanelProps {
@@ -52,6 +53,7 @@ export function HostPlayersPanel({
               <li key={p.id}>
                 <span className="host-players__name">
                   {p.name}
+                  <StreakFlame streak={p.streakActuelle ?? 0} />
                   {p.id === room.hostId && (
                     <span className="host-players__badge">Hôte</span>
                   )}

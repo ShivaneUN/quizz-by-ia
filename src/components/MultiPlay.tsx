@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { MultiRoom } from '../lib/multiApi'
 import { HostPlayersPanel } from './HostPlayersPanel'
+import { PlayersStreakBar } from './PlayersStreakBar'
+import { StreakFlame } from './StreakFlame'
 import './MultiPlay.css'
 
 interface MultiPlayProps {
@@ -182,6 +184,8 @@ export function MultiPlay({
 
       <h2 className="multi-play__question">{q.question}</h2>
 
+      <PlayersStreakBar room={room} playerId={playerId} />
+
       {q.imageUrl && (
         <figure className="multi-play__media">
           <img
@@ -311,6 +315,7 @@ export function MultiPlay({
                 <span>
                   {p.name}
                   {p.id === playerId ? ' (toi)' : ''}
+                  <StreakFlame streak={p.streakActuelle ?? 0} />
                 </span>
                 <span>
                   {noAnswer ? '⏱' : ok ? '✓' : '✗'} {p.score} pts

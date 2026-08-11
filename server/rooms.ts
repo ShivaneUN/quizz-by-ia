@@ -22,6 +22,12 @@ export interface RoomPlayer {
   name: string
   score: number
   joinedAt: number
+  /** Bonnes réponses consécutives en cours */
+  streakActuelle?: number
+  /** Meilleure série de la partie */
+  meilleurStreak?: number
+  /** Bonus streak appliqué à la fin (0 si pas encore) */
+  bonusApplique?: number
 }
 
 export interface RoomQuestion {
@@ -79,6 +85,8 @@ export interface RoomState {
   roundDeadlineAt?: number
   /** playerId → index réponse (absent = pas encore) */
   currentAnswers: Record<string, number>
+  /** Bonus streak déjà comptés dans score (évite double application) */
+  scoresFinalized?: boolean
   createdAt: number
   updatedAt: number
 }
@@ -193,6 +201,21 @@ export async function getRoom(code: string): Promise<RoomState | null> {
   if (!Number.isFinite(room.roundDurationMs) || room.roundDurationMs <= 0) {
     room.roundDurationMs = ROUND_MS
   }
+  room.players = room.players.map((p) => ({
+    ...p,
+    streakActuelle:
+      typeof p.streakActuelle === 'number' && p.streakActuelle >= 0
+        ? p.streakActuelle
+        : 0,
+    meilleurStreak:
+      typeof p.meilleurStreak === 'number' && p.meilleurStreak >= 0
+        ? p.meilleurStreak
+        : 0,
+    bonusApplique:
+      typeof p.bonusApplique === 'number' && p.bonusApplique >= 0
+        ? p.bonusApplique
+        : 0,
+  }))
   room.quizMode = 'standard'
   return room
 }
@@ -242,6 +265,44 @@ export function makeRoomCode(): string {
     code += alphabet[Math.floor(Math.random() * alphabet.length)]
   }
   return code
+}
+
+/** Reset scores + streaks pour une nouvelle manche (relance / start). */
+export function resetPlayersForNewGame(room: RoomState): void {
+  room.scoresFinalized = false
+  room.players = room.players.map((p) => ({
+    ...p,
+    score: 0,
+    streakActuelle: 0,
+    meilleurStreak: 0,
+    bonusApplique: 0,
+  }))
+}
+
+export function calculerBonusStreak(
+  meilleurStreak: number,
+  totalQuestions: number,
+  streakParfaite: boolean,
+): number {
+  if (totalQuestions === 10 && streakParfaite) return 5
+  if (meilleurStreak >= 8) return 3
+  if (meilleurStreak >= 5) return 2
+  if (meilleurStreak >= 3) return 1
+  return 0
+}
+
+/** Applique le bonus de série une seule fois à la fin de partie. */
+export function finalizeScores(room: RoomState): void {
+  if (room.scoresFinalized) return
+  const total = room.questions.length
+  for (const p of room.players) {
+    const best = p.meilleurStreak ?? 0
+    const streakParfaite = total > 0 && best === total
+    const bonus = calculerBonusStreak(best, total, streakParfaite)
+    p.score += bonus
+    p.bonusApplique = bonus
+  }
+  room.scoresFinalized = true
 }
 
 /**
@@ -461,6 +522,7 @@ export function maybeCloseRound(
 
   const q = room.questions[room.questionIndex]
   if (!q) {
+    finalizeScores(room)
     room.status = 'finished'
     return { room, changed: true }
   }
@@ -489,6 +551,10 @@ export function maybeCloseRound(
     const correct = typeof ans === 'number' && ans === q.correctIndex
     if (correct) {
       p.score += 1
+      p.streakActuelle = (p.streakActuelle ?? 0) + 1
+      p.meilleurStreak = Math.max(p.meilleurStreak ?? 0, p.streakActuelle)
+    } else {
+      p.streakActuelle = 0
     }
   }
 
@@ -506,10 +572,12 @@ export function hostNextQuestion(room: RoomState, now = Date.now()): RoomState {
 
   const next = room.questionIndex + 1
   if (next >= room.questions.length) {
+    finalizeScores(room)
     room.status = 'finished'
     room.questionIndex = next
     room.currentAnswers = {}
     room.roundPhase = 'answering'
+    room.roundDeadlineAt = 0
     return room
   }
 

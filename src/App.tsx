@@ -357,6 +357,7 @@ export default function App() {
         setMultiRoom((prev) => preferNewerRoom(prev, room))
         // Pendant le choix de thème, ne pas forcer le lobby
         if (screen === 'multi-theme') return
+        // Navigation pilotée par le status serveur (relance = generating → playing)
         const next = multiScreenForStatus(room.status)
         if (next !== screen) setScreen(next)
       } catch (e) {
@@ -893,11 +894,34 @@ export default function App() {
     }
   }
 
-  async function handleMultiStart() {
+  async function runSharedMultiStart() {
     if (!multiRoom || !multiPlayerId) return
     setMultiBusy(true)
     setError(null)
     setStatusMsg('Génération des questions…')
+    // Même flux que le lancement initial : tout le monde voit « generating » via le poll
+    setMultiRoom((prev) =>
+      prev
+        ? {
+            ...prev,
+            status: 'generating',
+            questions: [],
+            questionIndex: 0,
+            currentAnswers: {},
+            timerStarted: false,
+            timerPaused: false,
+            roundDeadlineAt: 0,
+            players: prev.players.map((p) => ({
+              ...p,
+              score: 0,
+              streakActuelle: 0,
+              meilleurStreak: 0,
+              bonusApplique: 0,
+            })),
+          }
+        : prev,
+    )
+    setScreen('multi-lobby')
     try {
       const res = await startRoom({
         code: multiRoom.code,
@@ -916,12 +940,19 @@ export default function App() {
     }
   }
 
+  async function handleMultiStart() {
+    await runSharedMultiStart()
+  }
+
   async function handleMultiContinueTier() {
     if (!multiRoom || !multiPlayerId) return
-    // Paliers : on ne génère le suivant que si TOUT LE MONDE a validé 10/10
+    const baseOf = (score: number, bonus?: number) =>
+      Math.max(0, score - (bonus ?? 0))
     const allPassed =
       multiRoom.players.length > 0 &&
-      multiRoom.players.every((p) => p.score >= PASS_THRESHOLD)
+      multiRoom.players.every(
+        (p) => baseOf(p.score, p.bonusApplique) >= PASS_THRESHOLD,
+      )
     if (!allPassed) {
       setError(`Il faut ${PASS_THRESHOLD}/10 pour chaque joueur pour avancer`)
       return
@@ -942,21 +973,13 @@ export default function App() {
         playerId: multiPlayerId,
         difficulty: next,
       })
-      const res = await startRoom({
-        code: multiRoom.code,
-        playerId: multiPlayerId,
-      })
-      setMultiRoom(res.room)
-      setStatusMsg(res.message ?? null)
-      setScreen(multiScreenForStatus(res.room.status))
     } catch (e) {
-      const room = roomFromError(e)
-      if (room) setMultiRoom(room)
       setError(e instanceof Error ? e.message : 'Erreur')
-      setScreen('multi-lobby')
-    } finally {
       setMultiBusy(false)
+      return
     }
+    setMultiBusy(false)
+    await runSharedMultiStart()
   }
 
   async function handleMultiRestartTiers() {
@@ -969,21 +992,13 @@ export default function App() {
         playerId: multiPlayerId,
         difficulty: 'easy',
       })
-      const res = await startRoom({
-        code: multiRoom.code,
-        playerId: multiPlayerId,
-      })
-      setMultiRoom(res.room)
-      setStatusMsg(res.message ?? null)
-      setScreen(multiScreenForStatus(res.room.status))
     } catch (e) {
-      const room = roomFromError(e)
-      if (room) setMultiRoom(room)
       setError(e instanceof Error ? e.message : 'Erreur')
-      setScreen('multi-lobby')
-    } finally {
       setMultiBusy(false)
+      return
     }
+    setMultiBusy(false)
+    await runSharedMultiStart()
   }
 
   async function handleMultiClose() {

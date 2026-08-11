@@ -16,6 +16,7 @@ import {
   hostBeginRound,
   hostPauseTimer,
   hostResumeTimer,
+  resetPlayersForNewGame,
   type RoomState,
 } from '../server/rooms.js'
 import {
@@ -109,7 +110,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         difficulty,
         aiProvider,
         quizMode: 'standard',
-        players: [{ id: hostId, name: hostName.slice(0, 24), score: 0, joinedAt: now }],
+        players: [
+          {
+            id: hostId,
+            name: hostName.slice(0, 24),
+            score: 0,
+            streakActuelle: 0,
+            meilleurStreak: 0,
+            bonusApplique: 0,
+            joinedAt: now,
+          },
+        ],
         questions: [],
         questionIndex: 0,
         roundPhase: 'answering',
@@ -160,6 +171,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         name: playerName.slice(0, 24),
         // Rejoint en cours : score à 0 (questions déjà passées non comptées)
         score: 0,
+        streakActuelle: 0,
+        meilleurStreak: 0,
+        bonusApplique: 0,
         joinedAt: Date.now(),
       })
       await saveRoom(room)
@@ -193,12 +207,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       room.timerStarted = false
       room.timerPaused = false
       room.timerPausedLeftMs = undefined
+      room.roundDeadlineAt = 0
       delete room.errorMessage
       room.questions = []
       room.questionIndex = 0
       room.roundPhase = 'answering'
       room.currentAnswers = {}
       room.roundStartedAt = 0
+      resetPlayersForNewGame(room)
       await saveRoom(room)
 
       const themeSlug = `${normalizeThemeSlug(room.theme)}--${room.scope}`
@@ -282,7 +298,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       room.quizMode = 'standard'
       room.questions = questions
       room.questionIndex = 0
-      room.players = room.players.map((p) => ({ ...p, score: 0 }))
       prepareRound(room, now)
       await saveRoom(room)
       return json(res, 200, {
@@ -322,7 +337,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       room.roundPhase = 'answering'
       room.currentAnswers = {}
       room.roundStartedAt = 0
-      room.players = room.players.map((p) => ({ ...p, score: 0 }))
+      room.players = room.players.map((p) => ({
+        ...p,
+        score: 0,
+        streakActuelle: 0,
+        meilleurStreak: 0,
+        bonusApplique: 0,
+      }))
+      room.scoresFinalized = false
       await saveRoom(room)
       return json(res, 200, { room: publicRoomView(room) })
     }

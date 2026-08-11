@@ -38,8 +38,10 @@ export function MultiScoreboard({
   onLeave,
   onKick,
 }: MultiScoreboardProps) {
-  const ranked = [...room.players].sort((a, b) => b.score - a.score)
   const total = room.questions.length || 10
+  const baseOf = (score: number, bonus?: number) =>
+    Math.max(0, score - (bonus ?? 0))
+  const ranked = [...room.players].sort((a, b) => b.score - a.score)
   const isHost = playerId === room.hostId
   const difficulty: Difficulty =
     room.difficulty === 'medium' || room.difficulty === 'hard'
@@ -48,7 +50,9 @@ export function MultiScoreboard({
   const playMode = room.playMode === 'progression' ? 'progression' : 'free'
   const allPassed =
     room.players.length > 0 &&
-    room.players.every((p) => p.score >= PASS_THRESHOLD)
+    room.players.every(
+      (p) => baseOf(p.score, p.bonusApplique) >= PASS_THRESHOLD,
+    )
   const curIdx = DIFFICULTIES.indexOf(difficulty)
   const nextDifficulty =
     allPassed && curIdx >= 0 && curIdx < DIFFICULTIES.length - 1
@@ -63,7 +67,9 @@ export function MultiScoreboard({
     ranked.length > 0
       ? ranked.reduce((s, p) => s + p.score, 0) / ranked.length
       : 0
-  const perfectCount = ranked.filter((p) => p.score >= total).length
+  const perfectCount = ranked.filter(
+    (p) => baseOf(p.score, p.bonusApplique) >= total,
+  ).length
   const timerOn = room.timerEnabled !== false
 
   return (
@@ -87,7 +93,13 @@ export function MultiScoreboard({
             {winner.id === playerId ? ' (toi)' : ''}
           </p>
           <p className="multi-dash__winner-score">
-            {winner.score}/{total}
+            {(() => {
+              const bonus = winner.bonusApplique ?? 0
+              const base = Math.max(0, winner.score - bonus)
+              return bonus > 0
+                ? `${winner.score} pts (${base}/${total} +${bonus} 🔥)`
+                : `${base}/${total}`
+            })()}
           </p>
         </div>
       )}
@@ -113,8 +125,14 @@ export function MultiScoreboard({
 
       {you && (
         <p className="multi-dash__you">
-          Toi : <strong>#{yourRank}</strong> — {you.score}/{total} (
-          {Math.round((you.score / total) * 100)}%)
+          Toi : <strong>#{yourRank}</strong> —{' '}
+          {(() => {
+            const bonus = you.bonusApplique ?? 0
+            const base = baseOf(you.score, bonus)
+            return bonus > 0
+              ? `${you.score} pts (${base}/${total} +${bonus} 🔥)`
+              : `${base}/${total} (${Math.round((base / total) * 100)}%)`
+          })()}
         </p>
       )}
 
@@ -136,8 +154,10 @@ export function MultiScoreboard({
         <ol className="multi-dash__list">
           {ranked.map((p, i) => {
             const isYou = p.id === playerId
-            const passed = p.score >= PASS_THRESHOLD
-            const pct = Math.round((p.score / total) * 100)
+            const bonus = p.bonusApplique ?? 0
+            const base = baseOf(p.score, bonus)
+            const passed = base >= PASS_THRESHOLD
+            const pct = Math.round((base / total) * 100)
             return (
               <li
                 key={p.id}
@@ -157,18 +177,27 @@ export function MultiScoreboard({
                       </span>
                     )}
                   </span>
-                  <span
-                    className="multi-dash__bar"
-                    aria-hidden
-                  >
-                    <span
+                  <div className="multi-dash__bar" aria-hidden>
+                    <div
                       className="multi-dash__bar-fill"
-                      style={{ width: `${pct}%` }}
+                      style={{ width: `${Math.min(100, pct)}%` }}
                     />
-                  </span>
+                  </div>
                 </div>
                 <span className="multi-dash__pts">
-                  {p.score}/{total}
+                  {bonus > 0 ? (
+                    <>
+                      {p.score} pts
+                      <small className="multi-dash__bonus">
+                        {' '}
+                        ({base}/{total}+{bonus}🔥)
+                      </small>
+                    </>
+                  ) : (
+                    <>
+                      {base}/{total}
+                    </>
+                  )}
                 </span>
               </li>
             )

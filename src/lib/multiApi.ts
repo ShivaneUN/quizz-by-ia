@@ -5,6 +5,9 @@ export interface MultiPlayer {
   name: string
   score: number
   joinedAt: number
+  streakActuelle?: number
+  meilleurStreak?: number
+  bonusApplique?: number
 }
 
 export interface MultiQuestion {
@@ -48,9 +51,14 @@ export interface MultiRoom {
   allAnswered: boolean
   updatedAt?: number
   storage?: 'redis' | 'memory'
+  scoresFinalized?: boolean
 }
 
-/** Garde l’état le plus récent (évite qu’un poll stale annule un « question suivante ») */
+/**
+ * Fusionne l’état salle en préférant la version la plus récente.
+ * Important : une relance remet questionIndex à 0 — ne jamais bloquer
+ * un updatedAt plus récent à cause d’un index plus bas.
+ */
 export function preferNewerRoom(
   prev: MultiRoom | null,
   next: MultiRoom,
@@ -60,12 +68,26 @@ export function preferNewerRoom(
 
   const prevT = prev.updatedAt ?? 0
   const nextT = next.updatedAt ?? 0
-  if (nextT > 0 && prevT > 0 && nextT < prevT) return prev
+
+  // updatedAt fiable : le plus récent gagne toujours (relance, génération, etc.)
+  if (nextT > 0 && prevT > 0) {
+    if (nextT > prevT) return next
+    if (nextT < prevT) return prev
+  }
+
+  // Timestamps égaux / absents — heuristiques anti-poll stale
+  if (
+    next.status !== prev.status &&
+    (next.status === 'generating' ||
+      next.status === 'playing' ||
+      next.status === 'error' ||
+      next.status === 'lobby')
+  ) {
+    return next
+  }
 
   if (next.questionIndex < prev.questionIndex) return prev
 
-  // Même question : ne pas revenir en reveal si on est déjà repassé en answering
-  // (cas rare sans updatedAt fiable)
   if (
     next.questionIndex === prev.questionIndex &&
     prev.roundPhase === 'answering' &&
@@ -75,7 +97,6 @@ export function preferNewerRoom(
     return prev
   }
 
-  // Ne pas écraser un begin frais par un poll encore en waiting
   if (
     next.questionIndex === prev.questionIndex &&
     prev.roundPhase === 'answering' &&

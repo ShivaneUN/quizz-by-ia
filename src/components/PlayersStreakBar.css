@@ -1,0 +1,44 @@
+.players-streak {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.players-streak__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.45rem 0.75rem;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--paper-elevated) 90%, transparent);
+  border: 1px solid color-mix(in srgb, var(--teal) 20%, transparent);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.players-streak__item.is-you {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.players-streak__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.players-streak__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-shrink: 0;
+}
+
+.players-streak__score {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted);
+  font-size: 0.8rem;
+}

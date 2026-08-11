@@ -1,0 +1,43 @@
+.streak-flame {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+  line-height: 1;
+  animation: streak-pulse 0.9s ease-in-out infinite alternate;
+  user-select: none;
+}
+
+.streak-flame__n {
+  font-family: var(--font-display, inherit);
+  font-weight: 800;
+  font-size: 0.7em;
+}
+
+.streak-flame--sm {
+  font-size: 1.15rem;
+  color: #fb923c;
+  filter: drop-shadow(0 0 4px color-mix(in srgb, #fb923c 55%, transparent));
+}
+
+.streak-flame--md {
+  font-size: 1.45rem;
+  color: #f97316;
+  filter: drop-shadow(0 0 6px color-mix(in srgb, #f97316 60%, transparent));
+}
+
+.streak-flame--lg {
+  font-size: 1.85rem;
+  color: #ef4444;
+  filter: drop-shadow(0 0 8px color-mix(in srgb, #ef4444 65%, transparent));
+}
+
+@keyframes streak-pulse {
+  from {
+    transform: scale(1);
+    opacity: 0.88;
+  }
+  to {
+    transform: scale(1.12);
+    opacity: 1;
+  }
+}
