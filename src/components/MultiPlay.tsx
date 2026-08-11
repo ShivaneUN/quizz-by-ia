@@ -118,48 +118,54 @@ export function MultiPlay({
 
   return (
     <section className="multi-play">
-      <div className="multi-play__top">
-        <p className="multi-play__meta">
-          Question {room.questionIndex + 1} / {room.questions.length}
-          {(room.difficulty === 'easy' ||
-            room.difficulty === 'medium' ||
-            room.difficulty === 'hard') && (
-            <>
-              {' '}
-              ·{' '}
-              {room.difficulty === 'easy'
-                ? 'Facile'
-                : room.difficulty === 'medium'
-                  ? 'Moyen'
-                  : 'Difficile'}
-            </>
-          )}
-        </p>
-        {timerRunning && (
-          <p
-            className={`multi-play__timer${
-              !paused && leftSec <= 3 ? ' is-urgent' : ''
-            }`}
-            aria-live="polite"
-          >
-            {paused ? `Pause ${leftSec}s` : `${leftSec}s`}
-          </p>
-        )}
-        {needsHostStart && (
-          <p className="multi-play__timer" aria-live="polite">
-            {Math.ceil((room.roundDurationMs || 10000) / 1000)}s
-          </p>
-        )}
-      </div>
+      <div className="multi-play__header">
+        <div className="multi-play__header-main">
+          <div className="multi-play__top">
+            <p className="multi-play__meta">
+              Question {room.questionIndex + 1} / {room.questions.length}
+              {(room.difficulty === 'easy' ||
+                room.difficulty === 'medium' ||
+                room.difficulty === 'hard') && (
+                <>
+                  {' '}
+                  ·{' '}
+                  {room.difficulty === 'easy'
+                    ? 'Facile'
+                    : room.difficulty === 'medium'
+                      ? 'Moyen'
+                      : 'Difficile'}
+                </>
+              )}
+            </p>
+            {timerRunning && (
+              <p
+                className={`multi-play__timer${
+                  !paused && leftSec <= 3 ? ' is-urgent' : ''
+                }`}
+                aria-live="polite"
+              >
+                {paused ? `Pause ${leftSec}s` : `${leftSec}s`}
+              </p>
+            )}
+            {needsHostStart && (
+              <p className="multi-play__timer" aria-live="polite">
+                {Math.ceil((room.roundDurationMs || 10000) / 1000)}s
+              </p>
+            )}
+          </div>
 
-      {timerRunning && !paused && (
-        <div className="multi-play__bar" aria-hidden>
-          <div
-            className="multi-play__bar-fill"
-            style={{ transform: `scaleX(${progress})` }}
-          />
+          {timerRunning && !paused && (
+            <div className="multi-play__bar" aria-hidden>
+              <div
+                className="multi-play__bar-fill"
+                style={{ transform: `scaleX(${progress})` }}
+              />
+            </div>
+          )}
         </div>
-      )}
+
+        <PlayersStreakBar room={room} playerId={playerId} />
+      </div>
 
       {needsHostStart && (
         <p className="multi-play__answered" aria-live="polite">
@@ -183,8 +189,6 @@ export function MultiPlay({
       )}
 
       <h2 className="multi-play__question">{q.question}</h2>
-
-      <PlayersStreakBar room={room} playerId={playerId} />
 
       {q.imageUrl && (
         <figure className="multi-play__media">

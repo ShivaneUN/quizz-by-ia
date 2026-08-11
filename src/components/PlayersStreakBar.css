@@ -1,44 +1,102 @@
-.players-streak {
+.live-rank {
+  width: min(11.5rem, 42vw);
+  justify-self: end;
+  align-self: start;
+  padding: 0.45rem 0.5rem 0.55rem;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--paper-elevated) 92%, #0a1835);
+  border: 1px solid color-mix(in srgb, var(--teal) 28%, transparent);
+  box-shadow: 0 8px 20px color-mix(in srgb, #000 22%, transparent);
+}
+
+.live-rank__title {
+  margin: 0 0 0.35rem;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  text-align: right;
+}
+
+.live-rank__list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 0.35rem;
+  gap: 0.25rem;
 }
 
-.players-streak__item {
-  display: flex;
+.live-rank__item {
+  display: grid;
+  grid-template-columns: 1.4rem minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.45rem 0.75rem;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--paper-elevated) 90%, transparent);
-  border: 1px solid color-mix(in srgb, var(--teal) 20%, transparent);
-  font-size: 0.9rem;
+  gap: 0.3rem;
+  padding: 0.28rem 0.35rem;
+  border-radius: 8px;
+  font-size: 0.78rem;
   font-weight: 700;
 }
 
-.players-streak__item.is-you {
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+.live-rank__item.is-you {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
-.players-streak__name {
+.live-rank__item.is-first .live-rank__pos {
+  color: var(--accent);
+}
+
+.live-rank__pos {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted);
+  font-size: 0.7rem;
+}
+
+.live-rank__name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.players-streak__meta {
+.live-rank__meta {
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.25rem;
   flex-shrink: 0;
 }
 
-.players-streak__score {
+.live-rank__score {
   font-variant-numeric: tabular-nums;
-  color: var(--ink-muted);
-  font-size: 0.8rem;
+  min-width: 1rem;
+  text-align: right;
+  color: var(--teal);
+}
+
+.live-rank .streak-flame {
+  transform-origin: center;
+}
+
+.live-rank .streak-flame--sm {
+  font-size: 0.9rem;
+}
+
+.live-rank .streak-flame--md {
+  font-size: 1.05rem;
+}
+
+.live-rank .streak-flame--lg {
+  font-size: 1.2rem;
+}
+
+@media (max-width: 520px) {
+  .live-rank {
+    width: min(9.8rem, 46vw);
+    padding: 0.35rem 0.4rem 0.4rem;
+  }
+
+  .live-rank__item {
+    font-size: 0.72rem;
+    padding: 0.22rem 0.28rem;
+  }
 }
