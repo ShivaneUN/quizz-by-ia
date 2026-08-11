@@ -42,6 +42,8 @@ interface ThemeSelectProps {
   ) => void
   /** Accueil solo ou création / changement de thème multi */
   variant?: 'solo' | 'multi'
+  /** Retour vers le choix Solo / Multi */
+  onBack?: () => void
   busy?: boolean
   error?: string | null
 }
@@ -49,6 +51,7 @@ interface ThemeSelectProps {
 export function ThemeSelect({
   onStart,
   variant = 'solo',
+  onBack,
   busy,
   error,
 }: ThemeSelectProps) {
@@ -246,6 +249,16 @@ export function ThemeSelect({
 
   return (
     <section className={`game-home${isMulti ? ' game-home--multi' : ''}`}>
+      {onBack && (
+        <button
+          type="button"
+          className="game-home__back"
+          onClick={onBack}
+          disabled={busy}
+        >
+          ← Retour
+        </button>
+      )}
       <form className="game-home__form" onSubmit={handleSubmit}>
         {nameField}
 

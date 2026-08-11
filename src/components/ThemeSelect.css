@@ -7,6 +7,28 @@
   position: relative;
 }
 
+.game-home__back {
+  justify-self: start;
+  display: inline-flex;
+  border: none;
+  background: transparent;
+  color: var(--teal);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0.35rem 0;
+  margin-bottom: 0.35rem;
+}
+
+.game-home__back:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.game-home__back:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .game-home__form {
   display: grid;
   gap: 0.85rem;

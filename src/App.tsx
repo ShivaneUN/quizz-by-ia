@@ -1189,6 +1189,10 @@ export default function App() {
           <ThemeSelect
             onStart={handleStart}
             variant="solo"
+            onBack={() => {
+              setError(null)
+              setScreen('mode')
+            }}
             busy={false}
             error={error}
           />
