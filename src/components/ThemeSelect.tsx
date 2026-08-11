@@ -136,7 +136,7 @@ export function ThemeSelect({
             <circle cx="60" cy="12" r="3" fill="#ffe08a" />
           </svg>
         </span>
-        <h1 className="brand-hero__title">Quizz</h1>
+        <h1 className="brand-hero__title">Quizz By Ai</h1>
       </div>
 
       <p className="brand-hero__tagline">

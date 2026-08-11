@@ -8,7 +8,7 @@ interface ModeSelectProps {
 export function ModeSelect({ onSolo, onMulti }: ModeSelectProps) {
   return (
     <section className="mode-select">
-      <h1 className="mode-select__title">Quizz</h1>
+      <h1 className="mode-select__title">Quizz By Ai</h1>
       <p className="mode-select__lead">Choisis ton mode de jeu</p>
       <div className="mode-select__grid">
         <button type="button" className="mode-card" onClick={onSolo}>

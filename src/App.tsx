@@ -1123,7 +1123,7 @@ export default function App() {
       <div className="app__atmosphere" aria-hidden />
       {showHeader && (
         <header className="app__header">
-          <p className="brand">Quizz</p>
+          <p className="brand">Quizz By Ai</p>
           <div className="app__header-right">
             {(session.theme || multiRoom?.theme) && (
               <p className="app__theme">
