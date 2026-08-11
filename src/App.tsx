@@ -45,6 +45,7 @@ import { MultiGate } from './components/MultiGate'
 import { MultiLobby } from './components/MultiLobby'
 import { MultiPlay } from './components/MultiPlay'
 import { MultiScoreboard } from './components/MultiScoreboard'
+import { PlayersStreakBar } from './components/PlayersStreakBar'
 import { ProgressBar } from './components/ProgressBar'
 import { QuizPlay } from './components/QuizPlay'
 import { Results } from './components/Results'
@@ -1125,6 +1126,9 @@ export default function App() {
         <header className="app__header">
           <p className="brand">Quizz</p>
           <div className="app__header-right">
+            {screen === 'multi-play' && multiRoom && multiPlayerId && (
+              <PlayersStreakBar room={multiRoom} playerId={multiPlayerId} />
+            )}
             {(session.theme || multiRoom?.theme) && (
               <p className="app__theme">
                 {multiRoom?.theme ?? session.theme}
@@ -1286,7 +1290,7 @@ export default function App() {
 
         {screen === 'multi-play' && multiRoom && multiPlayerId && (
           <>
-            {multiRoom.playMode === 'progression' && (
+            {multiRoom.playMode === 'progression' ? (
               <ProgressBar
                 current={
                   multiRoom.difficulty === 'medium' ||
@@ -1295,7 +1299,7 @@ export default function App() {
                     : 'easy'
                 }
               />
-            )}
+            ) : null}
             <MultiPlay
               room={multiRoom}
               playerId={multiPlayerId}

@@ -51,7 +51,7 @@
 
 .app__header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
   margin-bottom: 1rem;
@@ -60,10 +60,18 @@
 
 .app__header-right {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.75rem;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.app__header-right .brand {
+  align-self: center;
+}
+
+.app__header .brand {
+  align-self: center;
 }
 
 .brand {

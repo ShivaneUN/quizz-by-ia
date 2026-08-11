@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { MultiRoom } from '../lib/multiApi'
 import { HostPlayersPanel } from './HostPlayersPanel'
-import { PlayersStreakBar } from './PlayersStreakBar'
 import { StreakFlame } from './StreakFlame'
 import './MultiPlay.css'
 
@@ -118,54 +117,48 @@ export function MultiPlay({
 
   return (
     <section className="multi-play">
-      <div className="multi-play__header">
-        <div className="multi-play__header-main">
-          <div className="multi-play__top">
-            <p className="multi-play__meta">
-              Question {room.questionIndex + 1} / {room.questions.length}
-              {(room.difficulty === 'easy' ||
-                room.difficulty === 'medium' ||
-                room.difficulty === 'hard') && (
-                <>
-                  {' '}
-                  ·{' '}
-                  {room.difficulty === 'easy'
-                    ? 'Facile'
-                    : room.difficulty === 'medium'
-                      ? 'Moyen'
-                      : 'Difficile'}
-                </>
-              )}
-            </p>
-            {timerRunning && (
-              <p
-                className={`multi-play__timer${
-                  !paused && leftSec <= 3 ? ' is-urgent' : ''
-                }`}
-                aria-live="polite"
-              >
-                {paused ? `Pause ${leftSec}s` : `${leftSec}s`}
-              </p>
-            )}
-            {needsHostStart && (
-              <p className="multi-play__timer" aria-live="polite">
-                {Math.ceil((room.roundDurationMs || 10000) / 1000)}s
-              </p>
-            )}
-          </div>
-
-          {timerRunning && !paused && (
-            <div className="multi-play__bar" aria-hidden>
-              <div
-                className="multi-play__bar-fill"
-                style={{ transform: `scaleX(${progress})` }}
-              />
-            </div>
+      <div className="multi-play__top">
+        <p className="multi-play__meta">
+          Question {room.questionIndex + 1} / {room.questions.length}
+          {(room.difficulty === 'easy' ||
+            room.difficulty === 'medium' ||
+            room.difficulty === 'hard') && (
+            <>
+              {' '}
+              ·{' '}
+              {room.difficulty === 'easy'
+                ? 'Facile'
+                : room.difficulty === 'medium'
+                  ? 'Moyen'
+                  : 'Difficile'}
+            </>
           )}
-        </div>
-
-        <PlayersStreakBar room={room} playerId={playerId} />
+        </p>
+        {timerRunning && (
+          <p
+            className={`multi-play__timer${
+              !paused && leftSec <= 3 ? ' is-urgent' : ''
+            }`}
+            aria-live="polite"
+          >
+            {paused ? `Pause ${leftSec}s` : `${leftSec}s`}
+          </p>
+        )}
+        {needsHostStart && (
+          <p className="multi-play__timer" aria-live="polite">
+            {Math.ceil((room.roundDurationMs || 10000) / 1000)}s
+          </p>
+        )}
       </div>
+
+      {timerRunning && !paused && (
+        <div className="multi-play__bar" aria-hidden>
+          <div
+            className="multi-play__bar-fill"
+            style={{ transform: `scaleX(${progress})` }}
+          />
+        </div>
+      )}
 
       {needsHostStart && (
         <p className="multi-play__answered" aria-live="polite">

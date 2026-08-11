@@ -2,19 +2,7 @@
   display: grid;
   gap: 0.9rem;
   animation: multi-rise 0.3s ease both;
-}
-
-.multi-play__header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 0.65rem 0.85rem;
-}
-
-.multi-play__header-main {
-  display: grid;
-  gap: 0.45rem;
-  min-width: 0;
+  width: 100%;
 }
 
 .multi-play__top {
