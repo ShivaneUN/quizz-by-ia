@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { MultiRoom } from '../lib/multiApi'
 import { HostPlayersPanel } from './HostPlayersPanel'
+import { PlayersStreakBar } from './PlayersStreakBar'
 import { StreakFlame } from './StreakFlame'
 import './MultiPlay.css'
 
@@ -351,6 +352,8 @@ export function MultiPlay({
           En attente de l’hôte pour continuer…
         </p>
       )}
+
+      <PlayersStreakBar room={room} playerId={playerId} />
 
       <HostPlayersPanel
         room={room}

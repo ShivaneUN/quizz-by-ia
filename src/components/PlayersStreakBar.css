@@ -1,23 +1,20 @@
 .live-rank {
-  width: min(12rem, 46vw);
-  max-height: min(40vh, 14rem);
-  overflow: auto;
-  padding: 0.4rem 0.45rem 0.5rem;
+  width: 100%;
+  margin-top: 0.35rem;
+  padding: 0.55rem 0.65rem 0.65rem;
   border-radius: 12px;
-  background: color-mix(in srgb, #0f2244 92%, #000);
-  border: 1px solid color-mix(in srgb, var(--teal) 35%, transparent);
-  box-shadow: 0 10px 24px color-mix(in srgb, #000 35%, transparent);
-  flex-shrink: 0;
+  background: color-mix(in srgb, var(--paper-elevated) 92%, #0a1835);
+  border: 1px solid color-mix(in srgb, var(--teal) 28%, transparent);
 }
 
 .live-rank__title {
-  margin: 0 0 0.3rem;
-  font-size: 0.62rem;
+  margin: 0 0 0.4rem;
+  font-size: 0.68rem;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-muted);
-  text-align: right;
+  text-align: left;
 }
 
 .live-rank__list {
@@ -25,22 +22,24 @@
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 0.2rem;
+  gap: 0.3rem;
 }
 
 .live-rank__item {
   display: grid;
-  grid-template-columns: 1.35rem minmax(0, 1fr) auto;
+  grid-template-columns: 1.5rem minmax(0, 1fr) auto;
   align-items: center;
-  gap: 0.25rem;
-  padding: 0.25rem 0.3rem;
+  gap: 0.4rem;
+  padding: 0.4rem 0.5rem;
   border-radius: 8px;
-  font-size: 0.75rem;
+  font-size: 0.88rem;
   font-weight: 700;
+  background: color-mix(in srgb, #0a1835 40%, transparent);
 }
 
 .live-rank__item.is-you {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
 .live-rank__item.is-first .live-rank__pos {
@@ -50,7 +49,7 @@
 .live-rank__pos {
   font-variant-numeric: tabular-nums;
   color: var(--ink-muted);
-  font-size: 0.68rem;
+  font-size: 0.75rem;
 }
 
 .live-rank__name {
@@ -63,35 +62,25 @@
 .live-rank__meta {
   display: inline-flex;
   align-items: center;
-  gap: 0.2rem;
+  gap: 0.35rem;
   flex-shrink: 0;
 }
 
 .live-rank__score {
   font-variant-numeric: tabular-nums;
-  min-width: 0.85rem;
+  min-width: 1rem;
   text-align: right;
   color: var(--teal);
 }
 
 .live-rank .streak-flame--sm {
-  font-size: 0.85rem;
-}
-
-.live-rank .streak-flame--md {
   font-size: 1rem;
 }
 
-.live-rank .streak-flame--lg {
-  font-size: 1.15rem;
+.live-rank .streak-flame--md {
+  font-size: 1.2rem;
 }
 
-@media (max-width: 640px) {
-  .live-rank {
-    width: min(9.5rem, 42vw);
-  }
-
-  .live-rank__item {
-    font-size: 0.68rem;
-  }
+.live-rank .streak-flame--lg {
+  font-size: 1.4rem;
 }

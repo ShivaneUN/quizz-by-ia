@@ -59,7 +59,7 @@ export function ThemeSelect({
   const [scope, setScope] = useState<QuizScope>('fr')
   const [difficulty, setDifficulty] = useState<Difficulty>('easy')
   const [timerEnabled, setTimerEnabled] = useState(true)
-  const [gameMode, setGameMode] = useState<GameModeOption>('progression')
+  const [gameMode, setGameMode] = useState<GameModeOption>('free')
   const [aiProvider, setAiProvider] = useState<AiProvider>('auto')
 
   const isMulti = variant === 'multi'
