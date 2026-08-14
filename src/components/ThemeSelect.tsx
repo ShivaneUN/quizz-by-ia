@@ -57,11 +57,10 @@ export function ThemeSelect({
 }: ThemeSelectProps) {
   const [themeId, setThemeId] = useState<string | null>(null)
   const [subtheme, setSubtheme] = useState('Général')
-  const [playerName, setPlayerName] = useState('')
   const [customTheme, setCustomTheme] = useState('')
   const [scope, setScope] = useState<QuizScope>('fr')
   const [difficulty, setDifficulty] = useState<Difficulty>('easy')
-  const [timerEnabled, setTimerEnabled] = useState(true)
+  const [timerEnabled, setTimerEnabled] = useState(false)
   const [gameMode, setGameMode] = useState<GameModeOption>('free')
   const [aiProvider, setAiProvider] = useState<AiProvider>('auto')
 
@@ -86,7 +85,7 @@ export function ThemeSelect({
         ? formatThemeQuery(parent.label, subtheme)
         : ''
     if (!t || busy) return
-    onStart(t, playerName.trim() || 'Joueur', scope, {
+    onStart(t, '', scope, {
       timerEnabled,
       difficulty: gameMode === 'free' ? difficulty : 'easy',
       gameMode,
@@ -101,25 +100,6 @@ export function ThemeSelect({
       ? formatThemeQuery(parent.label, subtheme)
       : ''
   const canPlay = Boolean(activeLabel) && !busy
-
-  const nameField = !isMulti ? (
-    <label className="game-home__pseudo">
-      <span className="game-home__pseudo-label">Pseudo</span>
-      <span className="game-home__pseudo-box">
-        <span className="game-home__pseudo-icon" aria-hidden>
-          👤
-        </span>
-        <input
-          value={playerName}
-          onChange={(e) => setPlayerName(e.target.value)}
-          placeholder="Ton prénom…"
-          maxLength={32}
-          autoComplete="nickname"
-          enterKeyHint="done"
-        />
-      </span>
-    </label>
-  ) : null
 
   const centerBlock = (
     <div className="game-home__center">
@@ -136,7 +116,7 @@ export function ThemeSelect({
             <circle cx="60" cy="12" r="3" fill="#ffe08a" />
           </svg>
         </span>
-        <h1 className="brand-hero__title">Quizz By Ai</h1>
+        <h1 className="brand-hero__title">Quizz By IA</h1>
       </div>
 
       <p className="brand-hero__tagline">
@@ -260,8 +240,6 @@ export function ThemeSelect({
         </button>
       )}
       <form className="game-home__form" onSubmit={handleSubmit}>
-        {nameField}
-
         <div className="game-home__mobile-top">{centerBlock}</div>
 
         <div className="game-home__stage">

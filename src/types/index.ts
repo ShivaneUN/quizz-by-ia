@@ -49,6 +49,8 @@ export interface QuestionBank {
 /** Historique des questions déjà vues par le joueur pour un thème */
 export interface PlayerThemeHistory {
   seenByDifficulty: Record<Difficulty, string[]>
+  /** Énoncés déjà posés (tous niveaux) — anti-doublon génération */
+  seenTexts?: string[]
   updatedAt: string
 }
 

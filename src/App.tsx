@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { generateQuestions } from './lib/api'
 import { attachImagesToQuestions } from './lib/resolveImage'
 import {
+  collectExcludeQuestionTexts,
   drawUnseen,
   getOrCreatePlayerId,
   loadBank,
@@ -31,6 +32,7 @@ import {
   setRoomTheme,
   setRoomTimer,
   startRoom,
+  reportTypingScore,
   type MultiRoom,
 } from './lib/multiApi'
 import {
@@ -40,6 +42,11 @@ import {
   saveMultiSession,
 } from './lib/multiSession'
 import { AnswerAudit } from './components/AnswerAudit'
+import { WaitMiniGames } from './components/WaitMiniGames'
+import {
+  TypingScorePopup,
+  type TypingScoreEntry,
+} from './components/TypingScorePopup'
 import { ModeSelect } from './components/ModeSelect'
 import { MultiGate } from './components/MultiGate'
 import { MultiLobby } from './components/MultiLobby'
@@ -68,6 +75,7 @@ type Screen =
   | 'play'
   | 'tier-result'
   | 'finished'
+  | 'minigames'
   | 'multi-gate'
   | 'multi-theme'
   | 'multi-lobby'
@@ -102,7 +110,7 @@ const initialSession = (): GameSession => ({
   themeSlug: '',
   scope: 'fr',
   playerName: '',
-  playMode: 'progression',
+  playMode: 'manual',
   timerEnabled: false,
   aiProvider: 'auto',
   quizMode: 'standard',
@@ -124,12 +132,61 @@ export default function App() {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
   const [audit, setAudit] = useState<AuditEntry[]>([])
   const [pendingScored, setPendingScored] = useState(false)
+  /** Évite de doubler l’audit multi à chaque poll en phase reveal */
+  const multiAuditKeysRef = useRef<Set<string>>(new Set())
 
   // —— Multijoueur ——
   const [multiName, setMultiName] = useState('')
   const [multiPlayerId, setMultiPlayerId] = useState<string | null>(null)
   const [multiRoom, setMultiRoom] = useState<MultiRoom | null>(null)
   const [multiBusy, setMultiBusy] = useState(false)
+  /** Popup scores duel de frappe (fin de génération) */
+  const [typingBoard, setTypingBoard] = useState<{
+    kind: 'solo' | 'multi'
+    entries: TypingScoreEntry[]
+  } | null>(null)
+  const soloTypingScoreRef = useRef(0)
+  const multiTypingFlushRef = useRef(0)
+  const multiPrevStatusRef = useRef<MultiRoom['status'] | null>(null)
+  const typingReportTimer = useRef<number | null>(null)
+
+  // Audit multi : enregistre à chaque révélation de question
+  useEffect(() => {
+    if (!multiRoom || !multiPlayerId) return
+    if (multiRoom.status !== 'playing' && multiRoom.status !== 'finished') return
+    if (multiRoom.roundPhase !== 'reveal') return
+    const q = multiRoom.questions[multiRoom.questionIndex]
+    if (!q) return
+    const key = `${multiRoom.code}:${multiRoom.questionIndex}:${q.id}`
+    if (multiAuditKeysRef.current.has(key)) return
+    multiAuditKeysRef.current.add(key)
+    const raw = multiRoom.currentAnswers[multiPlayerId]
+    const selectedIndex = typeof raw === 'number' ? raw : -1
+    const correctIndex =
+      typeof q.correctIndex === 'number' ? q.correctIndex : 0
+    const correct = selectedIndex >= 0 && selectedIndex === correctIndex
+    setAudit((prev) => [
+      ...prev,
+      {
+        questionId: q.id,
+        question: q.question,
+        answers: q.answers,
+        selectedIndex,
+        correctIndex,
+        correct,
+        explanation: q.explanation,
+        sourceType: q.sourceType,
+      },
+    ])
+  }, [
+    multiRoom,
+    multiPlayerId,
+    multiRoom?.code,
+    multiRoom?.status,
+    multiRoom?.roundPhase,
+    multiRoom?.questionIndex,
+    multiRoom?.updatedAt,
+  ])
 
   // Reconnexion multi après refresh
   useEffect(() => {
@@ -190,6 +247,7 @@ export default function App() {
             scope,
             provider,
             quizMode,
+            excludeQuestions: collectExcludeQuestionTexts(themeSlug, playerId),
           })
           let hand = await finalizeImageQs(
             gen.questions.filter((q) => q.difficulty === difficulty),
@@ -204,6 +262,7 @@ export default function App() {
             history,
             difficulty,
             hand.map((q) => q.id),
+            hand.map((q) => q.question),
           )
           saveHistory(playerId, themeSlug, history)
           return { hand, msg: gen.message }
@@ -228,6 +287,7 @@ export default function App() {
             scope,
             provider,
             quizMode,
+            excludeQuestions: collectExcludeQuestionTexts(themeSlug, playerId),
           })
           const tierQs = await finalizeImageQs(
             gen.questions.filter((q) => q.difficulty === difficulty),
@@ -274,6 +334,7 @@ export default function App() {
             scope,
             provider,
             quizMode,
+            excludeQuestions: collectExcludeQuestionTexts(themeSlug, playerId),
           })
           const tierQs = await finalizeImageQs(
             gen.questions.filter((q) => q.difficulty === difficulty),
@@ -317,6 +378,7 @@ export default function App() {
         history,
         difficulty,
         hand.map((q) => q.id),
+        hand.map((q) => q.question),
       )
       saveHistory(playerId, themeSlug, history)
 
@@ -382,6 +444,162 @@ export default function App() {
     }
   }, [multiRoom?.code, multiPlayerId, screen])
 
+  // Ouvre le dashboard frappe quand la génération multi se termine
+  useEffect(() => {
+    const status = multiRoom?.status ?? null
+    const prev = multiPrevStatusRef.current
+    multiPrevStatusRef.current = status
+    if (!multiRoom || !multiPlayerId) return
+    if (prev === 'generating' && status === 'playing') {
+      // Flush le dernier score local avant d’afficher le classement
+      if (typingReportTimer.current) {
+        window.clearTimeout(typingReportTimer.current)
+        typingReportTimer.current = null
+      }
+      const localScore = multiTypingFlushRef.current
+      void reportTypingScore({
+        code: multiRoom.code,
+        playerId: multiPlayerId,
+        typingScore: localScore,
+      })
+        .then((res) => {
+          setMultiRoom((prevRoom) => preferNewerRoom(prevRoom, res.room))
+          setTypingBoard({
+            kind: 'multi',
+            entries: res.room.players.map((p) => ({
+              id: p.id,
+              name: p.name,
+              score:
+                p.id === multiPlayerId
+                  ? Math.max(p.typingScore ?? 0, localScore)
+                  : (p.typingScore ?? 0),
+            })),
+          })
+        })
+        .catch(() => {
+          setTypingBoard({
+            kind: 'multi',
+            entries: multiRoom.players.map((p) => ({
+              id: p.id,
+              name: p.name,
+              score:
+                p.id === multiPlayerId
+                  ? Math.max(p.typingScore ?? 0, localScore)
+                  : (p.typingScore ?? 0),
+            })),
+          })
+        })
+    }
+  }, [multiRoom, multiPlayerId, multiRoom?.status, multiRoom?.updatedAt])
+
+  // Ferme auto : hôte a lancé le chrono / la manche
+  const typingBoardKind = typingBoard?.kind ?? null
+  useEffect(() => {
+    if (typingBoardKind !== 'multi' || !multiRoom) return
+    if (multiRoom.timerStarted) {
+      setTypingBoard(null)
+      return
+    }
+    // Sans chrono : la manche démarre toute seule → laisse lire puis ferme
+    if (
+      multiRoom.timerEnabled === false &&
+      multiRoom.roundPhase === 'answering'
+    ) {
+      const id = window.setTimeout(() => setTypingBoard(null), 5000)
+      return () => window.clearTimeout(id)
+    }
+  }, [
+    typingBoardKind,
+    multiRoom,
+    multiRoom?.timerStarted,
+    multiRoom?.timerEnabled,
+    multiRoom?.roundPhase,
+  ])
+
+  // Rafraîchit le classement multi pendant que le popup est ouvert
+  useEffect(() => {
+    if (typingBoardKind !== 'multi' || !multiRoom) return
+    const next = multiRoom.players.map((p) => ({
+      id: p.id,
+      name: p.name,
+      score:
+        p.id === multiPlayerId
+          ? Math.max(p.typingScore ?? 0, multiTypingFlushRef.current)
+          : (p.typingScore ?? 0),
+    }))
+    setTypingBoard((prev) => {
+      if (!prev || prev.kind !== 'multi') return prev
+      const same =
+        prev.entries.length === next.length &&
+        prev.entries.every(
+          (e, i) =>
+            e.id === next[i]?.id &&
+            e.name === next[i]?.name &&
+            e.score === next[i]?.score,
+        )
+      return same ? prev : { kind: 'multi', entries: next }
+    })
+  }, [typingBoardKind, multiRoom, multiRoom?.players, multiPlayerId])
+
+  // Solo : ferme auto après quelques secondes (le quiz est déjà prêt)
+  useEffect(() => {
+    if (typingBoardKind !== 'solo') return
+    const id = window.setTimeout(() => setTypingBoard(null), 5000)
+    return () => window.clearTimeout(id)
+  }, [typingBoardKind])
+
+  // Solo : ferme aussi dès la 1ʳᵉ réponse
+  useEffect(() => {
+    if (typingBoardKind === 'solo' && selectedIndex !== null) {
+      setTypingBoard(null)
+    }
+  }, [selectedIndex, typingBoardKind])
+
+  function pushSoloTypingBoard(score: number) {
+    setTypingBoard({
+      kind: 'solo',
+      entries: [
+        {
+          id: 'solo',
+          name: 'Toi',
+          score,
+        },
+      ],
+    })
+  }
+
+  function handleSoloTypingScore(score: number) {
+    soloTypingScoreRef.current = score
+  }
+
+  function handleMultiTypingScore(score: number) {
+    if (!multiRoom || !multiPlayerId) return
+    multiTypingFlushRef.current = score
+    if (typingReportTimer.current) window.clearTimeout(typingReportTimer.current)
+    typingReportTimer.current = window.setTimeout(() => {
+      void reportTypingScore({
+        code: multiRoom.code,
+        playerId: multiPlayerId,
+        typingScore: multiTypingFlushRef.current,
+      })
+        .then((res) => {
+          setMultiRoom((prev) => preferNewerRoom(prev, res.room))
+        })
+        .catch(() => {
+          /* poll rattrapera */
+        })
+    }, 400)
+  }
+
+  // Flush immédiat du score frappe à la fin (démontage TypingDuel)
+  useEffect(() => {
+    return () => {
+      if (typingReportTimer.current) {
+        window.clearTimeout(typingReportTimer.current)
+      }
+    }
+  }, [])
+
   async function handleStart(
     theme: string,
     playerName: string,
@@ -391,6 +609,7 @@ export default function App() {
     setError(null)
     setStatusMsg(null)
     setScreen('loading')
+    soloTypingScoreRef.current = 0
 
     const themeSlug = bankSlug(theme, scope, options.quizMode)
     const playMode = options.gameMode === 'free' ? 'manual' : 'progression'
@@ -459,6 +678,7 @@ export default function App() {
       setSelectedIndex(null)
       setPendingScored(false)
       if (result.msg) setStatusMsg(result.msg)
+      pushSoloTypingBoard(soloTypingScoreRef.current)
       setScreen('play')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur au démarrage')
@@ -574,6 +794,7 @@ export default function App() {
   async function startSoloHand(nextDiff: Difficulty) {
     setError(null)
     setScreen('loading')
+    soloTypingScoreRef.current = 0
     setStatusMsg('Préparation de la manche…')
 
     try {
@@ -617,6 +838,7 @@ export default function App() {
       setPendingScored(false)
       if (result.msg) setStatusMsg(result.msg)
       setTierSnapshot(null)
+      pushSoloTypingBoard(soloTypingScoreRef.current)
       setScreen('play')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur')
@@ -645,6 +867,7 @@ export default function App() {
       : tierSnapshot.difficulty
 
     setScreen('loading')
+    soloTypingScoreRef.current = 0
     setStatusMsg(
       outcome.passed && outcome.nextDifficulty
         ? `Génération du palier ${DIFFICULTY_LABELS[outcome.nextDifficulty]}…`
@@ -691,6 +914,7 @@ export default function App() {
       setPendingScored(false)
       if (result.msg) setStatusMsg(result.msg)
       setTierSnapshot(null)
+      pushSoloTypingBoard(soloTypingScoreRef.current)
       setScreen('play')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur')
@@ -711,6 +935,7 @@ export default function App() {
     setMultiRoom(null)
     setMultiBusy(false)
     clearMultiSession()
+    setTypingBoard(null)
     setScreen('mode')
   }
 
@@ -899,6 +1124,8 @@ export default function App() {
     setMultiBusy(true)
     setError(null)
     setStatusMsg('Génération des questions…')
+    setAudit([])
+    multiAuditKeysRef.current = new Set()
     // Même flux que le lancement initial : tout le monde voit « generating » via le poll
     setMultiRoom((prev) =>
       prev
@@ -1047,6 +1274,7 @@ export default function App() {
       })
       // Forcer l’état renvoyé (évite qu’un poll stale annule le begin)
       setMultiRoom(res.room)
+      setTypingBoard(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur')
     } finally {
@@ -1119,11 +1347,20 @@ export default function App() {
     (screen === 'multi-theme' && !multiRoom)
 
   return (
-    <div className={`app${isHomeLike ? ' app--home' : ''}`}>
+    <div
+      className={`app${isHomeLike ? ' app--home' : ''}${screen === 'minigames' ? ' app--center' : ''}`}
+    >
       <div className="app__atmosphere" aria-hidden />
+      {typingBoard && (
+        <TypingScorePopup
+          entries={typingBoard.entries}
+          playerId={typingBoard.kind === 'multi' ? multiPlayerId : 'solo'}
+          onClose={() => setTypingBoard(null)}
+        />
+      )}
       {showHeader && (
         <header className="app__header">
-          <p className="brand">Quizz By Ai</p>
+          <p className="brand">Quizz By IA</p>
           <div className="app__header-right">
             {(session.theme || multiRoom?.theme) && (
               <p className="app__theme">
@@ -1182,7 +1419,17 @@ export default function App() {
               setError(null)
               setScreen('multi-gate')
             }}
+            onMinigames={() => {
+              setError(null)
+              setScreen('minigames')
+            }}
           />
+        )}
+
+        {screen === 'minigames' && (
+          <div className="minigames-hub">
+            <WaitMiniGames freePlay mode="solo" />
+          </div>
         )}
 
         {screen === 'home' && (
@@ -1218,9 +1465,12 @@ export default function App() {
         )}
 
         {screen === 'loading' && (
-          <div className="loading" role="status">
-            <div className="loading__pulse" />
-            <p>{statusMsg ?? 'Chargement…'}</p>
+          <div className="loading loading--duel" role="status">
+            <WaitMiniGames
+              mode="solo"
+              statusLabel={statusMsg ?? 'Génération du quiz…'}
+              onScoreChange={handleSoloTypingScore}
+            />
           </div>
         )}
 
@@ -1265,7 +1515,6 @@ export default function App() {
 
         {screen === 'finished' && (
           <Results
-            playerName={session.playerName}
             theme={session.theme}
             totalScore={session.totalScore}
             tierAttempts={session.tierAttempts}
@@ -1287,6 +1536,7 @@ export default function App() {
             onStart={handleMultiStart}
             onLeave={() => void handleMultiLeave()}
             onKick={(id) => void handleMultiKick(id)}
+            onTypingScore={handleMultiTypingScore}
           />
         )}
 
@@ -1314,27 +1564,31 @@ export default function App() {
               onKick={(id) => void handleMultiKick(id)}
               busy={multiBusy}
             />
+            <AnswerAudit entries={audit} compact />
           </>
         )}
 
         {screen === 'multi-score' && multiRoom && multiPlayerId && (
-          <MultiScoreboard
-            room={multiRoom}
-            playerId={multiPlayerId}
-            busy={multiBusy}
-            error={error}
-            onReplay={handleMultiStart}
-            onContinueTier={() => void handleMultiContinueTier()}
-            onRestartTiers={() => void handleMultiRestartTiers()}
-            onChangeTheme={() => {
-              setError(null)
-              setScreen('multi-theme')
-            }}
-            onSetDifficulty={handleMultiSetDifficulty}
-            onCloseRoom={handleMultiClose}
-            onLeave={() => void handleMultiLeave()}
-            onKick={(id) => void handleMultiKick(id)}
-          />
+          <>
+            <MultiScoreboard
+              room={multiRoom}
+              playerId={multiPlayerId}
+              busy={multiBusy}
+              error={error}
+              onReplay={handleMultiStart}
+              onContinueTier={() => void handleMultiContinueTier()}
+              onRestartTiers={() => void handleMultiRestartTiers()}
+              onChangeTheme={() => {
+                setError(null)
+                setScreen('multi-theme')
+              }}
+              onSetDifficulty={handleMultiSetDifficulty}
+              onCloseRoom={handleMultiClose}
+              onLeave={() => void handleMultiLeave()}
+              onKick={(id) => void handleMultiKick(id)}
+            />
+            <AnswerAudit entries={audit} compact={false} />
+          </>
         )}
 
         {statusMsg && screen === 'play' && (

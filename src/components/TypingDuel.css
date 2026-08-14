@@ -1,0 +1,157 @@
+.typing-duel {
+  width: min(22rem, 100%);
+  margin: 0 auto;
+  display: grid;
+  gap: 0.75rem;
+  justify-items: center;
+  text-align: center;
+  padding: 1rem 0.75rem 1.25rem;
+  animation: typing-duel-in 0.25s ease both;
+}
+
+.typing-duel--embedded {
+  width: 100%;
+  padding: 0;
+  animation: none;
+}
+
+.typing-duel--embedded .typing-duel__hint {
+  margin-top: 0;
+}
+
+.typing-duel__eyebrow {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--teal);
+}
+
+.typing-duel__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.6rem, 6vw, 2rem);
+  color: #fff;
+  -webkit-text-stroke: 3px #f0c14b;
+  paint-order: stroke fill;
+  line-height: 1.05;
+}
+
+.typing-duel__hint {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink-muted);
+  line-height: 1.35;
+  max-width: 18rem;
+}
+
+.typing-duel__scores {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem;
+  width: 100%;
+}
+
+.typing-duel__score {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 12px;
+  background: color-mix(in srgb, #0a1835 88%, transparent);
+  border: 1.5px solid color-mix(in srgb, #f0c14b 35%, transparent);
+}
+
+.typing-duel__score-label {
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.typing-duel__score-value {
+  font-family: var(--font-display);
+  font-size: 1.45rem;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1;
+}
+
+.typing-duel__word {
+  margin: 0.35rem 0 0;
+  font-family: var(--font-display);
+  font-size: clamp(2.2rem, 10vw, 3rem);
+  letter-spacing: 0.12em;
+  color: #fff;
+  text-shadow: 0 0 18px color-mix(in srgb, #f0c14b 40%, transparent);
+  min-height: 1.15em;
+  transition: transform 0.08s ease, color 0.08s ease;
+}
+
+.typing-duel.is-ok .typing-duel__word {
+  color: var(--success);
+  transform: scale(1.04);
+}
+
+.typing-duel.is-ko .typing-duel__word {
+  color: var(--danger);
+  transform: translateX(-2px);
+}
+
+.typing-duel__field {
+  width: 100%;
+}
+
+.typing-duel__field input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 2px solid color-mix(in srgb, #4db8ff 45%, transparent);
+  border-radius: 14px;
+  background: #0a1835;
+  color: #fff;
+  font: inherit;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-align: center;
+  text-transform: uppercase;
+  padding: 0.85rem 1rem;
+  outline: none;
+}
+
+.typing-duel__field input:focus {
+  border-color: #f0c14b;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #f0c14b 25%, transparent);
+}
+
+.typing-duel__field input::placeholder {
+  color: color-mix(in srgb, #9aadc4 70%, transparent);
+  letter-spacing: 0.02em;
+  text-transform: none;
+  font-weight: 600;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@keyframes typing-duel-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

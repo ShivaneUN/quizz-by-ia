@@ -6,6 +6,10 @@ import {
   parseQuizContentMode,
   type Difficulty,
 } from '../server/generate.js'
+import {
+  getGenerationEstimateSec,
+  recordGenerationMs,
+} from '../server/genStats.js'
 
 export const config = {
   maxDuration: 60,
@@ -15,9 +19,15 @@ function parseScope(raw: unknown): 'fr' | 'international' {
   return raw === 'international' ? 'international' : 'fr'
 }
 
+function isGatewayTimeoutMessage(msg: string): boolean {
+  return /504|503|524|502|délai dépassé|timeout|timed out|gateway|trop de temps/i.test(
+    msg,
+  )
+}
+
 /**
  * POST /api/generate-questions
- * Body: { theme, mode, difficulty?, scope?, provider?, quizMode?: 'standard'|'image' }
+ * Body: { theme, mode, difficulty?, scope?, provider?, quizMode?, excludeQuestions? }
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -33,10 +43,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       scope: rawScope,
       provider: rawProvider,
       quizMode: rawQuizMode,
+      excludeQuestions: rawExclude,
     } = req.body ?? {}
     const scope = parseScope(rawScope)
     const provider = parseAiProvider(rawProvider)
     const quizMode = parseQuizContentMode(rawQuizMode)
+    const excludeQuestions = Array.isArray(rawExclude)
+      ? rawExclude.filter((x: unknown): x is string => typeof x === 'string')
+      : []
 
     if (!theme || typeof theme !== 'string' || !theme.trim()) {
       return res.status(400).json({ error: 'theme requis' })
@@ -67,6 +81,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? `${baseSlug}--${scope}--image`
         : `${baseSlug}--${scope}`
 
+    const started = Date.now()
     const result = await generateQuestions(
       theme.trim(),
       themeSlug,
@@ -75,11 +90,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       scope,
       provider,
       quizMode,
+      excludeQuestions,
     )
+    const generationMs = Date.now() - started
 
     if (result.error) {
+      if (isGatewayTimeoutMessage(result.error)) {
+        return res.status(504).json({
+          error:
+            'Le serveur a mis trop de temps à répondre, réessaie dans quelques secondes',
+        })
+      }
+      // Thème invalide / lot invalide → 422
       return res.status(422).json({ error: result.error })
     }
+
+    if (!Array.isArray(result.questions) || result.questions.length !== 10) {
+      return res.status(422).json({
+        error:
+          'JSON invalide : le lot ne contient pas exactement 10 questions. Réessaie.',
+      })
+    }
+
+    await recordGenerationMs(generationMs)
+    const { estimateSec } = await getGenerationEstimateSec('solo')
 
     return res.status(200).json({
       theme: theme.trim(),
@@ -87,10 +121,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       questions: result.questions,
       source: result.source,
       message: result.message,
+      generationMs,
+      estimateSec,
     })
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Erreur serveur'
     console.error('[generate-questions]', message)
+    if (isGatewayTimeoutMessage(message)) {
+      return res.status(504).json({
+        error:
+          'Le serveur a mis trop de temps à répondre, réessaie dans quelques secondes',
+      })
+    }
     return res.status(500).json({ error: message })
   }
 }

@@ -21,10 +21,14 @@ import {
 } from '../server/rooms.js'
 import {
   getSeenQuestionKeys,
+  getSeenQuestionTexts,
   pickUnseenPreferring,
-  questionFingerprint,
   rememberQuestionKeys,
 } from '../server/questionHistory.js'
+import {
+  getGenerationEstimateSec,
+  recordGenerationMs,
+} from '../server/genStats.js'
 
 export const config = {
   maxDuration: 60,
@@ -51,7 +55,7 @@ function json(res: VercelResponse, status: number, body: unknown) {
 
 /**
  * POST /api/room
- * actions: create | join | start | begin | pause | resume | answer | next | leave | kick | state | setTheme | setTimer | setDifficulty | setPlayMode | close
+ * actions: create | join | start | begin | pause | resume | answer | next | leave | kick | state | setTheme | setTimer | setDifficulty | setPlayMode | close | typingScore
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') {
@@ -86,7 +90,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const scope = parseScope(body.scope)
       if (!theme) return json(res, 400, { error: 'thème requis' })
 
-      const timerEnabled = body.timerEnabled !== false
+      const timerEnabled = Boolean(body.timerEnabled)
       const playMode = parsePlayMode(body.playMode)
       const difficulty =
         playMode === 'progression' ? 'easy' : parseDifficulty(body.difficulty)
@@ -118,6 +122,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             streakActuelle: 0,
             meilleurStreak: 0,
             bonusApplique: 0,
+            typingScore: 0,
             joinedAt: now,
           },
         ],
@@ -174,6 +179,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         streakActuelle: 0,
         meilleurStreak: 0,
         bonusApplique: 0,
+        typingScore: 0,
         joinedAt: Date.now(),
       })
       await saveRoom(room)
@@ -215,13 +221,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       room.currentAnswers = {}
       room.roundStartedAt = 0
       resetPlayersForNewGame(room)
+      const eta = await getGenerationEstimateSec('multi')
+      room.genEstimateSec = eta.estimateSec
       await saveRoom(room)
 
       const themeSlug = `${normalizeThemeSlug(room.theme)}--${room.scope}`
       const difficulty = parseDifficulty(room.difficulty)
       const provider = parseAiProvider(room.aiProvider ?? 'auto')
+      const excludeQuestions = await getSeenQuestionTexts(themeSlug)
 
       let gen: Awaited<ReturnType<typeof generateQuestions>>
+      const genStarted = Date.now()
       try {
         gen = await generateQuestions(
           room.theme,
@@ -231,6 +241,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           room.scope,
           provider,
           'standard',
+          excludeQuestions,
         )
       } catch (e) {
         const message =
@@ -239,11 +250,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         latest.status = 'error'
         latest.errorMessage = message
         latest.quizMode = 'standard'
+        delete latest.genEstimateSec
         await saveRoom(latest)
         return json(res, 422, {
           error: message,
           room: publicRoomView(latest),
         })
+      }
+      const generationMs = Date.now() - genStarted
+      if (!gen.error) {
+        await recordGenerationMs(generationMs)
       }
 
       // Recharge : un leave/kick a pu modifier la salle pendant la génération
@@ -256,6 +272,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         room.status = 'error'
         room.errorMessage = gen.error
         room.quizMode = 'standard'
+        delete room.genEstimateSec
         await saveRoom(room)
         return json(res, 422, {
           error: gen.error,
@@ -280,6 +297,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         room.status = 'error'
         room.errorMessage = err
         room.quizMode = 'standard'
+        delete room.genEstimateSec
         await saveRoom(room)
         return json(res, 422, {
           error: err,
@@ -289,12 +307,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       await rememberQuestionKeys(
         themeSlug,
-        questions.map((q) => questionFingerprint(q.question)),
+        questions.map((q) => q.question),
       )
 
       const now = Date.now()
       room.status = 'playing'
       delete room.errorMessage
+      delete room.genEstimateSec
       room.quizMode = 'standard'
       room.questions = questions
       room.questionIndex = 0
@@ -343,6 +362,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         streakActuelle: 0,
         meilleurStreak: 0,
         bonusApplique: 0,
+        typingScore: 0,
       }))
       room.scoresFinalized = false
       await saveRoom(room)
@@ -636,6 +656,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         room.difficulty = 'easy'
       }
       await saveRoom(room)
+      return json(res, 200, { room: publicRoomView(room) })
+    }
+
+    if (action === 'typingScore') {
+      const code = String(body.code ?? '').trim().toUpperCase()
+      const playerId = String(body.playerId ?? '')
+      const raw = Number(body.typingScore)
+      const typingScore = Number.isFinite(raw)
+        ? Math.max(0, Math.min(9999, Math.floor(raw)))
+        : 0
+      if (!code || !playerId) {
+        return json(res, 400, { error: 'code et playerId requis' })
+      }
+      const room = await getRoom(code)
+      if (!room) return json(res, 404, { error: 'Salle introuvable' })
+      if (room.status !== 'generating' && room.status !== 'playing') {
+        return json(res, 200, { room: publicRoomView(room) })
+      }
+      const player = room.players.find((p) => p.id === playerId)
+      if (!player) return json(res, 403, { error: 'Joueur absent de la salle' })
+      // Monotone : évite qu’un poll stale écrase un score plus haut
+      if ((player.typingScore ?? 0) < typingScore) {
+        player.typingScore = typingScore
+        room.updatedAt = Date.now()
+        await saveRoom(room)
+      }
       return json(res, 200, { room: publicRoomView(room) })
     }
 

@@ -34,25 +34,26 @@ export function AnswerAudit({ entries, compact = true }: AnswerAuditProps) {
               <p className="answer-audit__q">
                 <span className="answer-audit__n">Q{i + 1}.</span> {e.question}
               </p>
+
               {!compact && (
-                <>
-                  <p className="answer-audit__a">
-                    Ta réponse :{' '}
-                    {e.selectedIndex < 0
-                      ? 'Temps écoulé'
-                      : e.answers[e.selectedIndex]}
-                  </p>
-                  {!e.correct && (
-                    <p className="answer-audit__good">
-                      Bonne réponse : {e.answers[e.correctIndex]}
-                    </p>
-                  )}
-                </>
+                <p className="answer-audit__a">
+                  Ta réponse :{' '}
+                  {e.selectedIndex < 0
+                    ? 'Temps écoulé / pas de réponse'
+                    : e.answers[e.selectedIndex]}
+                </p>
               )}
-              {e.correct && e.explanation && (
+
+              {!e.correct && (
+                <p className="answer-audit__good">
+                  Bonne réponse : {e.answers[e.correctIndex]}
+                </p>
+              )}
+
+              {e.explanation && (
                 <p className="answer-audit__explain">{e.explanation}</p>
               )}
-              {e.correct && e.sourceType && (
+              {e.sourceType && (
                 <p className="answer-audit__source">Source : {e.sourceType}</p>
               )}
             </div>

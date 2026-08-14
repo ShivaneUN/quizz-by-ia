@@ -123,6 +123,20 @@
   width: 100%;
 }
 
+.app--center .app__main {
+  align-content: center;
+  justify-items: center;
+  align-self: stretch;
+  min-height: 100%;
+}
+
+.minigames-hub {
+  width: min(22rem, 100%);
+  display: grid;
+  justify-items: center;
+  animation: fade-in 0.3s ease both;
+}
+
 .app__hint {
   margin: 0;
   font-size: 0.85rem;
@@ -136,6 +150,11 @@
   padding: 2.5rem 0;
   text-align: center;
   animation: fade-in 0.3s ease both;
+}
+
+.loading--duel {
+  padding: 1rem 0 2rem;
+  width: 100%;
 }
 
 .loading__pulse {

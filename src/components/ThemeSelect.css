@@ -38,56 +38,6 @@
 }
 
 /* Pseudo — haut gauche (solo) */
-.game-home__pseudo {
-  justify-self: start;
-  align-self: start;
-  display: grid;
-  gap: 0.3rem;
-  width: min(12.5rem, 42vw);
-  z-index: 8;
-  text-align: left;
-}
-
-.game-home__pseudo-label {
-  font-size: 0.65rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ink-muted);
-}
-
-.game-home__pseudo-box {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.45rem 0.75rem;
-  border-radius: 999px;
-  background: #0a1835;
-  border: 2px solid color-mix(in srgb, #4db8ff 40%, transparent);
-  box-shadow: inset 0 2px 8px color-mix(in srgb, #000 40%, transparent);
-}
-
-.game-home__pseudo-icon {
-  font-size: 0.85rem;
-  opacity: 0.75;
-  flex-shrink: 0;
-}
-
-.game-home__pseudo-box input {
-  flex: 1;
-  border: none;
-  background: transparent;
-  color: #fff;
-  font: inherit;
-  font-size: 0.9rem;
-  font-weight: 600;
-  outline: none;
-  min-width: 0;
-}
-
-.game-home__pseudo-box input::placeholder {
-  color: color-mix(in srgb, #9aadc4 80%, transparent);
-}
 
 .game-home__mobile-top {
   display: none;
@@ -164,7 +114,7 @@
 .brand-hero__title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: clamp(2.4rem, 7vw, 3.2rem);
+  font-size: clamp(1.85rem, 6.2vw, 2.75rem);
   font-weight: 700;
   line-height: 0.95;
   color: #ffffff;
@@ -598,16 +548,6 @@
     width: 100%;
   }
 
-  .game-home__pseudo {
-    width: 100%;
-    max-width: 22rem;
-    justify-self: start;
-  }
-
-  .game-home__pseudo-box input {
-    font-size: 1rem;
-  }
-
   .game-home__mobile-top {
     display: block;
     width: min(22rem, 100%);
@@ -678,7 +618,7 @@
   }
 
   .brand-hero__title {
-    font-size: clamp(2.4rem, 12vw, 3rem);
+    font-size: clamp(1.7rem, 9vw, 2.4rem);
     -webkit-text-stroke-width: 3.5px;
   }
 

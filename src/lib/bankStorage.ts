@@ -5,7 +5,7 @@ const BANK_PREFIX = 'quizz:bank:'
 const HISTORY_PREFIX = 'quizz:history:'
 const PLAYER_KEY = 'quizz:playerId'
 /** Purge les banques pour forcer le nouveau prompt / mode image */
-const BANK_IMAGE_VERSION = 16
+const BANK_IMAGE_VERSION = 19
 const BANK_VERSION_KEY = 'quizz:bankImageVersion'
 
 function ensureBankImageVersion(): void {
@@ -60,6 +60,29 @@ export function clearBank(themeSlug: string): void {
   localStorage.removeItem(BANK_PREFIX + themeSlug)
 }
 
+/**
+ * Vide banques de questions + historiques solo (localStorage).
+ * Conserve l’id joueur, les sessions multi, et le classement mini-jeux.
+ */
+export function clearLocalQuizCache(): { banks: number; histories: number } {
+  const toRemove: string[] = []
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i)
+    if (!k) continue
+    if (k.startsWith(BANK_PREFIX) || k.startsWith(HISTORY_PREFIX)) {
+      toRemove.push(k)
+    }
+  }
+  let banks = 0
+  let histories = 0
+  for (const k of toRemove) {
+    if (k.startsWith(BANK_PREFIX)) banks++
+    else histories++
+    localStorage.removeItem(k)
+  }
+  return { banks, histories }
+}
+
 export function saveBank(bank: QuestionBank): void {
   localStorage.setItem(BANK_PREFIX + bank.meta.themeSlug, JSON.stringify(bank))
 }
@@ -97,6 +120,7 @@ export function loadHistory(playerId: string, themeSlug: string): PlayerThemeHis
   }
   return {
     seenByDifficulty: { easy: [], medium: [], hard: [] },
+    seenTexts: [],
     updatedAt: new Date().toISOString(),
   }
 }
@@ -117,17 +141,47 @@ export function markSeen(
   history: PlayerThemeHistory,
   difficulty: Difficulty,
   questionIds: string[],
+  questionTexts: string[] = [],
 ): PlayerThemeHistory {
   const seen = new Set(history.seenByDifficulty[difficulty])
   for (const id of questionIds) seen.add(id)
+  const texts = new Set(history.seenTexts ?? [])
+  for (const t of questionTexts) {
+    const n = t.trim()
+    if (n) texts.add(n)
+  }
+  let seenTexts = [...texts]
+  if (seenTexts.length > 200) {
+    seenTexts = seenTexts.slice(seenTexts.length - 200)
+  }
   return {
     ...history,
     seenByDifficulty: {
       ...history.seenByDifficulty,
       [difficulty]: [...seen],
     },
+    seenTexts,
     updatedAt: new Date().toISOString(),
   }
+}
+
+/**
+ * Textes à exclure à la génération : banque locale + historique vu.
+ */
+export function collectExcludeQuestionTexts(
+  themeSlug: string,
+  playerId: string,
+): string[] {
+  const bank = loadBank(themeSlug)
+  const history = loadHistory(playerId, themeSlug)
+  const out = new Set<string>()
+  for (const q of bank?.questions ?? []) {
+    if (q.question.trim()) out.add(q.question.trim())
+  }
+  for (const t of history.seenTexts ?? []) {
+    if (t.trim()) out.add(t.trim())
+  }
+  return [...out]
 }
 
 /**
@@ -141,9 +195,16 @@ export function drawUnseen(
   limit: number,
 ): Question[] {
   const seen = new Set(history.seenByDifficulty[difficulty])
-  const pool = bank.questions.filter(
-    (q) => q.difficulty === difficulty && !seen.has(q.id),
+  const seenTexts = new Set(
+    (history.seenTexts ?? []).map((t) =>
+      t.trim().toLowerCase().replace(/\s+/g, ' '),
+    ),
   )
+  const pool = bank.questions.filter((q) => {
+    if (q.difficulty !== difficulty || seen.has(q.id)) return false
+    const fp = q.question.trim().toLowerCase().replace(/\s+/g, ' ')
+    return !seenTexts.has(fp)
+  })
   // Mélange Fisher-Yates
   for (let i = pool.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1))

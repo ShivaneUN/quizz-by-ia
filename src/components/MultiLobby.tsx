@@ -2,6 +2,7 @@ import type { MultiRoom } from '../lib/multiApi'
 import type { Difficulty } from '../types'
 import { DIFFICULTY_LABELS } from '../types'
 import { HostPlayersPanel } from './HostPlayersPanel'
+import { WaitMiniGames } from './WaitMiniGames'
 import './MultiLobby.css'
 
 interface MultiLobbyProps {
@@ -13,6 +14,7 @@ interface MultiLobbyProps {
   onStart: () => void
   onLeave: () => void
   onKick: (targetPlayerId: string) => void
+  onTypingScore?: (score: number) => void
 }
 
 export function MultiLobby({
@@ -24,6 +26,7 @@ export function MultiLobby({
   onStart,
   onLeave,
   onKick,
+  onTypingScore,
 }: MultiLobbyProps) {
   const isHost = playerId === room.hostId
   const timerOn = room.timerEnabled !== false
@@ -65,9 +68,12 @@ export function MultiLobby({
       )}
 
       {room.status === 'generating' && (
-        <p className="multi-lobby__hint" aria-live="polite">
-          Génération des questions en cours… Tout le monde reste synchronisé.
-        </p>
+        <WaitMiniGames
+          mode="multi"
+          statusLabel="Génération des questions… Tout le monde reste synchronisé."
+          onScoreChange={onTypingScore}
+          estimateSec={room.genEstimateSec ?? null}
+        />
       )}
 
       {statusMsg && room.status !== 'generating' && (

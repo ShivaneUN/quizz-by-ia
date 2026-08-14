@@ -2,7 +2,6 @@ import { DIFFICULTY_LABELS, type Difficulty, type TierAttempt } from '../types'
 import './Results.css'
 
 interface ResultsProps {
-  playerName: string
   theme: string
   totalScore: number
   tierAttempts: Record<Difficulty, TierAttempt>
@@ -10,7 +9,6 @@ interface ResultsProps {
 }
 
 export function Results({
-  playerName,
   theme,
   totalScore,
   tierAttempts,
@@ -20,7 +18,7 @@ export function Results({
     <section className="results">
       <h2 className="results__title">Bilan</h2>
       <p className="results__lead">
-        {playerName} — thème <strong>{theme}</strong>
+        Thème <strong>{theme}</strong>
       </p>
       <p className="results__total">
         Score total : <span>{totalScore}</span> bonnes réponses

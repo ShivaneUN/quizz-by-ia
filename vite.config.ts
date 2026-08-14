@@ -7,7 +7,12 @@ import {
   parseQuizContentMode,
   type Difficulty,
 } from './server/generate.ts'
+import {
+  getGenerationEstimateSec,
+  recordGenerationMs,
+} from './server/genStats.ts'
 import roomHandler from './api/room.ts'
+import genEtaHandler from './api/gen-eta.ts'
 
 function readBody(req: Connect.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -40,10 +45,14 @@ function localApiPlugin(): Plugin {
               scope: rawScope,
               provider: rawProvider,
               quizMode: rawQuizMode,
+              excludeQuestions: rawExclude,
             } = body
             const scope = rawScope === 'international' ? 'international' : 'fr'
             const provider = parseAiProvider(rawProvider)
             const quizMode = parseQuizContentMode(rawQuizMode)
+            const excludeQuestions = Array.isArray(rawExclude)
+              ? rawExclude.filter((x: unknown): x is string => typeof x === 'string')
+              : []
 
             if (!theme || typeof theme !== 'string' || !theme.trim()) {
               res.statusCode = 400
@@ -83,6 +92,7 @@ function localApiPlugin(): Plugin {
               quizMode === 'image'
                 ? `${baseSlug}--${scope}--image`
                 : `${baseSlug}--${scope}`
+            const started = Date.now()
             const result = await generateQuestions(
               theme.trim(),
               themeSlug,
@@ -91,7 +101,9 @@ function localApiPlugin(): Plugin {
               scope,
               provider,
               quizMode,
+              excludeQuestions,
             )
+            const generationMs = Date.now() - started
 
             if (result.error) {
               res.statusCode = 422
@@ -99,6 +111,9 @@ function localApiPlugin(): Plugin {
               res.end(JSON.stringify({ error: result.error }))
               return
             }
+
+            await recordGenerationMs(generationMs)
+            const { estimateSec } = await getGenerationEstimateSec('solo')
 
             res.statusCode = 200
             res.setHeader('Content-Type', 'application/json')
@@ -109,11 +124,59 @@ function localApiPlugin(): Plugin {
                 questions: result.questions,
                 source: result.source,
                 message: result.message,
+                generationMs,
+                estimateSec,
               }),
             )
           } catch (e) {
             const message = e instanceof Error ? e.message : 'Erreur serveur'
             console.error('[local api]', message)
+            res.statusCode = 500
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ error: message }))
+          }
+        })()
+      })
+
+      server.middlewares.use('/api/gen-eta', (req, res) => {
+        void (async () => {
+          try {
+            const url = new URL(req.url || '/', 'http://local')
+            const fakeReq = {
+              method: req.method,
+              body: {},
+              query: Object.fromEntries(url.searchParams.entries()),
+            }
+            const fakeRes = {
+              statusCode: 200,
+              headers: {} as Record<string, string>,
+              setHeader(k: string, v: string) {
+                this.headers[k] = v
+              },
+              status(code: number) {
+                this.statusCode = code
+                return this
+              },
+              json(payload: unknown) {
+                res.statusCode = this.statusCode
+                for (const [k, v] of Object.entries(this.headers)) {
+                  res.setHeader(k, v)
+                }
+                if (!res.getHeader('Content-Type')) {
+                  res.setHeader('Content-Type', 'application/json')
+                }
+                res.end(JSON.stringify(payload))
+                return this
+              },
+              end() {
+                res.statusCode = this.statusCode
+                res.end()
+                return this
+              },
+            }
+            await genEtaHandler(fakeReq as never, fakeRes as never)
+          } catch (e) {
+            const message = e instanceof Error ? e.message : 'Erreur serveur'
             res.statusCode = 500
             res.setHeader('Content-Type', 'application/json')
             res.end(JSON.stringify({ error: message }))

@@ -1,0 +1,117 @@
+.typing-board {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: color-mix(in srgb, #041022 72%, transparent);
+  backdrop-filter: blur(4px);
+  animation: typing-board-in 0.2s ease both;
+}
+
+.typing-board__card {
+  width: min(22rem, 100%);
+  display: grid;
+  gap: 0.75rem;
+  justify-items: stretch;
+  padding: 1.15rem 1rem 1rem;
+  border-radius: 16px;
+  background: #0a1835;
+  border: 2px solid color-mix(in srgb, #f0c14b 45%, transparent);
+  box-shadow: 0 12px 40px color-mix(in srgb, #000 45%, transparent);
+  text-align: center;
+}
+
+.typing-board__eyebrow {
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--teal);
+}
+
+.typing-board__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.45rem, 5vw, 1.85rem);
+  color: #fff;
+  -webkit-text-stroke: 2.5px #f0c14b;
+  paint-order: stroke fill;
+  line-height: 1.05;
+}
+
+.typing-board__list {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+  max-height: min(50vh, 16rem);
+  overflow: auto;
+}
+
+.typing-board__row {
+  display: grid;
+  grid-template-columns: 2.2rem 1fr auto;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 10px;
+  background: color-mix(in srgb, #041022 70%, transparent);
+  border: 1px solid color-mix(in srgb, #4db8ff 22%, transparent);
+  text-align: left;
+}
+
+.typing-board__row.is-you {
+  border-color: color-mix(in srgb, #f0c14b 55%, transparent);
+  background: color-mix(in srgb, #f0c14b 12%, #0a1835);
+}
+
+.typing-board__row.is-first .typing-board__rank {
+  color: #f0c14b;
+}
+
+.typing-board__rank {
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: var(--ink-muted);
+}
+
+.typing-board__name {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.typing-board__score {
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.typing-board__close {
+  width: 100%;
+  margin-top: 0.15rem;
+}
+
+.typing-board__hint {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+
+@keyframes typing-board-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

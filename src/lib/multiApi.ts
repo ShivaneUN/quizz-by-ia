@@ -8,6 +8,8 @@ export interface MultiPlayer {
   streakActuelle?: number
   meilleurStreak?: number
   bonusApplique?: number
+  /** Score duel de frappe (pendant génération) */
+  typingScore?: number
 }
 
 export interface MultiQuestion {
@@ -33,6 +35,8 @@ export interface MultiRoom {
   quizMode?: QuizContentMode
   /** Présent si status === 'error' */
   errorMessage?: string
+  /** ETA génération (secondes) pendant generating */
+  genEstimateSec?: number
   players: MultiPlayer[]
   questions: MultiQuestion[]
   questionIndex: number
@@ -252,6 +256,15 @@ export async function answerRoom(input: {
 }) {
   const data = await postRoom({ action: 'answer', ...input })
   return { room: data.room!, playerId: data.playerId, message: data.message }
+}
+
+export async function reportTypingScore(input: {
+  code: string
+  playerId: string
+  typingScore: number
+}) {
+  const data = await postRoom({ action: 'typingScore', ...input })
+  return { room: data.room! }
 }
 
 export async function pollRoom(code: string) {

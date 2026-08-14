@@ -34,6 +34,7 @@ export interface GeneratedQuestion {
   batchId: string
   explanation?: string
   sourceType?: string
+  dateReference?: string | null
   imageSubject?: string
   imageKind?: ImageKind
   imageUrl?: string
@@ -54,14 +55,11 @@ const GEMINI_MODELS = [
   'gemini-3.1-flash-lite',
 ] as const
 
-const AI_SYSTEM = `Générateur de quiz. JSON uniquement.
-Succès: {"questions":[...14 items...]}
-Échec thème: {"erreur":"..."}
-Clés obligatoires : question, reponses (4), bonne_reponse_index, explication, type_source, difficulte, portee.
-explication + type_source OBLIGATOIRES. Exactement 1 bonne réponse — les 3 autres indiscutablement fausses (sinon rejet).
-ANTI-SPOILER : jamais la bonne réponse dans l’énoncé.
-Calibrage : facile = grand public ; moyen = amateur ; difficile = passionné.
-Un seul niveau. Faits vérifiables, français, neutre. Pas d’URL.`
+const AI_SYSTEM = `Tu es un générateur de quiz expert et rigoureux. JSON uniquement.
+Succès: tableau de N questions OU {"questions":[...]}.
+Échec thème: {"erreur":"..."}.
+Chaque question: question, reponses (4), bonne_reponse_index, explication, source, date_reference, theme, sous_theme, difficulte, portee, justification_difficulte, fait_verifiable.
+1 seule bonne réponse. Faits vérifiables. Français naturel. Fidélité stricte au thème. Pas d’URL ni titre d’article inventé.`
 
 export function parseAiProvider(raw: unknown): AiProvider {
   if (raw === 'groq' || raw === 'gemini' || raw === 'auto') return raw
@@ -138,6 +136,9 @@ interface RawQuestion {
   explanation?: string
   type_source?: string
   sourceType?: string
+  source?: string
+  date_reference?: string | null
+  dateReference?: string | null
   sujet_image?: string
   type_image?: string
   imageSubject?: string
@@ -357,160 +358,157 @@ function splitThemeParts(theme: string): { theme: string; sousTheme: string } {
   return { theme: theme.trim(), sousTheme: 'Général' }
 }
 
-function buildPrompt(
+export function buildPrompt(
   themeFull: string,
   difficulty: Difficulty,
   scope: 'fr' | 'international',
-  contentMode: QuizContentMode,
+  _contentMode: QuizContentMode,
+  excludeQuestions: string[] = [],
+  questionCount = 10,
 ): string {
   const { theme, sousTheme } = splitThemeParts(themeFull)
   const difficulte = DIFFICULTY_FR[difficulty]
   const portee = SCOPE_FR[scope]
-  const mode = contentMode === 'image' ? 'image' : 'standard'
+  const n = Math.max(1, Math.min(10, questionCount))
+  const historique =
+    excludeQuestions.length === 0
+      ? '(aucune — première génération)'
+      : excludeQuestions
+          .map((q) => q.trim())
+          .filter(Boolean)
+          .slice(0, 60)
+          .map((q, i) => `${i + 1}. ${q}`)
+          .join('\n')
 
-  const modeBlock =
-    mode === 'image'
-      ? `
-MODE DE JEU — "image"
-RÈGLE CENTRALE (obligatoire) :
-37. CHAQUE question est une RECONNAISSANCE VISUELLE. Le texte de "question" doit être UNIQUEMENT une consigne générique du type :
-    - "À quoi correspond cette image ?"
-    - "Qui est représenté sur cette image ?"
-    - "Qu’est-ce que montre cette image ?"
-    Interdit : toute question factuelle autonome (ex. "Qui a créé Assassin's Creed ?", "Quelle est la capitale de… ?") — sans l’image, la question ne doit PAS être jouable ni contenir d’indice sur la réponse.
-38. L’image illustre EXACTEMENT la BONNE réponse (pas un contexte, pas un studio, pas une œuvre associée). "sujet_image" = l’entité de la bonne réponse (ex. bonne réponse "Patrice Désilets" → sujet_image "Patrice Désilets", PAS "Assassin's Creed").
-39. Les 4 réponses doivent être de la MÊME nature (4 personnes, 4 marques, 4 animaux, 4 monuments…) — jamais mélanger catégories (ex. studios + créateur).
-40. La difficulté vient de la reconnaissance visuelle (choix du sujet + type_image + distracteurs proches), PAS du texte de la question.
+  return `Tu es un générateur de quiz expert et rigoureux. Génère EXACTEMENT ${n} questions à choix multiples sur le thème "${theme}", sous-thème "${sousTheme}", niveau "${difficulte}", portée "${portee}".
 
-25. Pour CHAQUE question, ajoute "sujet_image" : nom exact à chercher sur Wikimedia Commons pour illustrer la BONNE réponse (ex: "Toyota Corolla", "Tom Hanks", "Banane"). Terme de recherche court, pas une description longue.
-26. Ajoute "type_image" : "logo" (marques/logos), "sujet_entier" (photo complète), ou "detail_zoome" (détail pour difficile, ex. phare/jante — seulement si le sujet s’y prête).
-27. Cohérence difficulté/image : si type_image = "detail_zoome", le niveau doit être difficile ; la consigne reste générique (règle 37).
-28. "sujet_image" doit viser une entité notoire susceptible d’exister sur Wikimedia Commons.
-29. Applicabilité du type d'image par thème — avant de choisir "type_image", vérifie si le sous-thème s’y prête :
-    - "logo" UNIQUEMENT si le sujet est une marque/organisation identifiable par un logo (voitures, sport, tech, jeux vidéo, espace, entreprises). Pour tout autre thème : JAMAIS "logo".
-    - "detail_zoome" pour sujets visuellement riches reconnaissables par fragment (voitures, art, cinéma, animaux, monuments). Moins pertinent pour sujets abstraits ou déjà simples (ex. fruit basique, drapeau).
-    - Si aucune déclinaison particulière : "sujet_entier" pour tous les niveaux ; la difficulté vient alors des distracteurs / sujets moins iconiques (PAS d’une question texte factuelle).
-30. Ne force jamais un type d'image qui n’a pas de sens — mieux vaut "sujet_entier" à tous les niveaux qu’un "logo" ou "detail_zoome" artificiel.
-31. "sujet_image" est un terme technique INTERNE (jamais affiché). Ne compte pas sur le fait que l’utilisateur verrait le nom du fichier / titre Wikimedia — ces titres contiennent souvent la réponse.
-32. Spécificité de recherche : évite les homonymes dans "sujet_image" (cf. règle 19). Si ambigu, ajoute un identifiant (ex: "Jaguar (voiture)" plutôt que "Jaguar").
-33. Non-confusion visuelle : l’image de la bonne réponse ne doit pas pouvoir être confondue avec une mauvaise réponse (ex. deux voitures trop similaires). Si risque → change les distracteurs pour qu’ils soient visuellement distincts.
-34. Modération visuelle : les règles de neutralité/contenu s’appliquent aussi à "sujet_image" — jamais de sujet susceptible d’images violentes, choquantes ou inappropriées.
-35. Difficulté visuelle : FACILE = icône / sujet ULTRA reconnaissable même sans être fan (Mario, Tour Eiffel, banane…) ; MOYEN = un peu moins iconique mais encore courant ; DIFFICILE = détail, sujet secondaire ou recognition fine (règle 27). Jamais de sujet « connu seulement des fans » en facile.
-36. Privilégie des "sujet_image" très probablement trouvables sur Wikimedia Commons (le serveur écartera les questions sans image exploitable).`
-      : `
-MODE DE JEU — "standard"
-Ignore "sujet_image" et "type_image" — ne les inclus PAS dans le JSON.`
+Historique à ne jamais répéter (questions déjà posées, tous niveaux) :
+${historique}
 
-  const jsonExample =
-    mode === 'image'
-      ? `{"questions":[{"question":"À quoi correspond cette image ?","reponses":["...","...","...","..."],"bonne_reponse_index":0,"explication":"...","type_source":"...","sujet_image":"...","type_image":"sujet_entier","theme":"${theme}","sous_theme":"${sousTheme}","difficulte":"${difficulte}","portee":"${portee}","justification_difficulte":"...","fait_verifiable":true}]}`
-      : `{"questions":[{"question":"...","reponses":["...","...","...","..."],"bonne_reponse_index":0,"explication":"...","type_source":"...","theme":"${theme}","sous_theme":"${sousTheme}","difficulte":"${difficulte}","portee":"${portee}","justification_difficulte":"...","fait_verifiable":true}]}`
-
-  return `Génère EXACTEMENT ${mode === 'image' ? 14 : 14} QCM — thème "${theme}", sous-thème "${sousTheme}", difficulté "${difficulte}", portée "${portee}", mode "${mode}".
-${mode === 'image' ? 'Mode image : 14 questions (marge). "sujet_image" = titre d’article Wikipedia probable de la BONNE réponse (ex. "Mario", "Tour Eiffel", "Lionel Messi").\n' : 'Génère 14 questions (marge) : le serveur écartera celles qui spoilent la réponse dans l’énoncé — vise donc des énoncés sans spoiler.\n'}
 FIABILITÉ
-- Faits réels vérifiables uniquement. Si doute → autre question. Jamais inventer.
-- 1 bonne réponse claire ; 3 distracteurs plausibles mais faux.
+- Faits réels, vérifiables, jamais inventés. Si incertain à 100%, remplace la question.
+- 1 seule bonne réponse par question. Les 3 fausses sont plausibles mais indiscutablement fausses dans TOUT contexte — teste chacune mentalement avant validation.
+- Si une reformulation ne garantit pas une réponse unique, abandonne la question.
 
-ANTI-AMBIGUÏTÉ / UNE SEULE BONNE RÉPONSE (critique — TOUS thèmes / niveaux)
-17. RÉPONSE UNIQUE GARANTIE (obligatoire) :
-    a) Exactement 1 bonne réponse. Les 3 autres doivent être FAUSSES de façon indiscutable, sans aucune interprétation où elles seraient aussi correctes.
-    b) Test : « Un joueur pourrait-il argumenter qu’une mauvaise réponse est aussi vraie ? » → si oui, REJETTE (reformule la question ou change le distracteur).
-    c) Interdit : questions où 2+ choix sont vrais (ex. plusieurs capitales possibles, plusieurs titres corrects, synonymes, marques liées, dates approchantes toutes acceptables, « aussi » / « également » dans l’explication).
-    d) Interdit : distracteurs qui sont des synonymes, abréviations, ou reformulations de la bonne réponse (ex. "PSG" et "Paris Saint-Germain" ; "ONU" et "Organisation des Nations unies" si les deux seraient justes).
-    e) Interdit : questions trop larges ("Parmi ces…", "Lequel est un…") où plusieurs options appartiennent à la catégorie demandée.
-    f) Préfère des faits à valeur unique et stable (un seul nom, une seule date exacte, une seule œuvre, un seul record non contesté).
-18. NE PAS MÉLANGER ŒUVRE ORIGINALE ET ADAPTATION : si plusieurs versions existent (livre/film, jeu/série, réel/dramatisation), tous les faits doivent venir de LA MÊME version — précise-la dans la question si besoin (ex. "Dans le roman..." vs "Dans le film...").
-19. VÉRIFICATION HOMONYMES : si le nom désigne plusieurs entités (personnes, lieux, œuvres), cible sans ambiguïté LA bonne (ajoute date, pays ou contexte) et assure-toi que le fait lui correspond, pas à l’homonyme.
-20. PRÉCISION HONNÊTE DES CHIFFRES : si un chiffre est une approximation ou varie selon les sources, ne le présente pas comme exact absolu — utilise "environ" ou choisis un fait à valeur stable et non contestée. Ne propose JAMAIS deux chiffres qui seraient tous deux acceptables.
+LANGUE / PÉRIMÈTRE
+- Français naturel et fluide, comme rédigé directement par un francophone natif — jamais de traduction littérale de l'anglais, jamais de tournure calquée ou de syntaxe étrangère.
+- Relis chaque question et réponse en te demandant : "Est-ce que je dirais ça naturellement à l'oral en français ?" Si la formulation sonne traduite ou artificielle, réécris-la entièrement plutôt que de l'ajuster.
+- Vocabulaire adapté au contexte francophone (unités, expressions, noms d'usage courants en France/francophonie), pas des termes traduits mot à mot qui n'existent pas dans l'usage courant.
+- Reste strictement dans ${theme} > ${sousTheme}.
 
-ANTI-PRÉMISSE FAUSSE (vérification critique, tous thèmes)
-14. Une question ne doit JAMAIS contenir une affirmation implicite fausse dans sa formulation, même si la bonne réponse est juste.
-   Ex. interdit : "Quel groupe interprète [chanson] ?" si l’artiste est un solo — la question présuppose une catégorie fausse.
-   Surveiller aussi : genre/catégorie erronée (groupe vs solo, film vs série, pays vs ville, roman vs nouvelle, sport individuel vs équipe) ; statut erroné (actuel/vivant vs disparu) ; attribution erronée dans l’énoncé (appeler "réalisateur" un scénariste) ; relation présupposée fausse (créateur/œuvre, pays/capitale, auteur/livre).
-15. AVANT de finaliser : relis l’énoncé (pas seulement les réponses) — chaque mot catégoriel (groupe, film, pays, réalisateur, capitale, inventeur…) correspond-il EXACTEMENT à la nature réelle du sujet ? Si un terme est incertain → vérifie ou reformule plus sûr (ex. "Qui interprète [chanson] ?" au lieu de présupposer groupe/chanteur).
-16. En cas de doute sur la nature d’une entité (solo/groupe, film/série, pays/région…), privilégie une formulation neutre qui ne présuppose rien.
+MODÉRATION
+- Sujets sensibles (histoire, religion, politique, conflits, tragédies) : factuel et neutre, zéro opinion.
+- Jamais de contenu violent, choquant, discriminatoire, sexuel — reformule ou remplace si risque de perception blessante malgré l'exactitude.
 
-ANTI-BIAIS STRUCTUREL (vérification critique)
-21. HOMOGÉNÉITÉ DES RÉPONSES : les 4 réponses doivent avoir une longueur et un niveau de détail similaires. N’écris JAMAIS la bonne réponse plus longue, plus précise ou plus qualifiée que les 3 fausses — cela la rend devinable. Les 4 doivent être interchangeables en forme.
-22. PRUDENCE SUR LES SUPERLATIFS : pour "le plus", "le premier", "le seul", "le plus grand/petit/ancien", vérifie que le fait est stable et non contesté. En doute → reformule sans superlatif ou autre fait.
-23. ÉVITER LES NÉGATIONS SAUF NÉCESSITÉ : évite "Lequel de ces X n’est PAS…" sauf si aucune formulation positive ne teste le même fait. Si utilisée, mets "PAS" en majuscules dans la question.
-24. NEUTRALITÉ GRAMMATICALE FRANÇAISE : formule pour que genre/nombre (quel/quelle/quels/quelles, accords) ne réduise pas artificiellement les réponses plausibles avant la réflexion sur le fond.
+EXPLICATION + SOURCE (chaque question)
+- "explication" : 1-3 phrases sur le POURQUOI, compréhensible sans connaître la réponse.
+- "source" : nomme la source de référence la PLUS PRÉCISE et RÉELLE possible, sans inventer de détail vérifiable (jamais de titre d'article précis, de date de publication, de nom de journaliste/auteur — ces détails précis sont les plus à risque d'hallucination).
+  Formats acceptés, du plus générique au plus précis, choisis le plus précis que tu peux garantir avec certitude :
+  - Nom d'un organisme/institution officiel réel (ex: "Site officiel de la NASA", "INSEE", "Ministère de la Culture", "FIFA", "Larousse")
+  - Nom d'une encyclopédie ou référence reconnue (ex: "Wikipédia", "Encyclopædia Universalis", "Larousse")
+  - Type de document officiel sans détail inventé (ex: "biographie officielle de l'artiste", "fiche technique constructeur", "registre des records du monde")
+  - Si aucun organisme précis ne peut être cité avec certitude : reste sur une catégorie générale ("fait historique largement documenté", "culture générale/notoriété publique", "fait scientifique établi dans la littérature académique")
+- Ne cite JAMAIS : un titre d'article spécifique, une date de publication précise, un nom d'auteur/journaliste, une URL — ce sont les détails que tu ne peux pas garantir exacts et qui risquent d'être inventés.
+- Toujours fournis, affichés côté app même si le joueur se trompe.
+- Si impossible à sourcer crédiblement même en restant générique → remplace la question.
 
-═══════════════════════════════
-ANTI-SPOILER — RÉPONSE DANS LA QUESTION (critique, TOUS thèmes / sous-thèmes / niveaux)
-═══════════════════════════════
-45. L’énoncé ne doit JAMAIS contenir la bonne réponse, ni une partie distinctive de celle-ci (marque, nom propre, titre, modèle).
-   INTERDIT :
-   - "…la Lamborghini Miura ?" → réponse "Lamborghini" (la marque est déjà dans la question)
-   - "…créé par Bentley en 1921 ?" → réponses dont une seule contient "Bentley" (devinable par élimination)
-   - "…film Titanic ?" → réponse "Titanic"
-   - citer dans la question un mot qui n’apparaît que dans la bonne réponse parmi les 4 choix.
-   OBLIGATOIRE : la question doit rester jouable sans révéler la réponse ; les 4 choix doivent rester tous plausibles après lecture de l’énoncé.
-   Si le fait nécessite de nommer l’entité → reformule pour QUE l’entité soit la réponse, pas un mot de l’énoncé
-   (ex. OK : "Quel constructeur italien a créé la Miura ?" → Lamborghini ; la Miura peut rester si ce n’est PAS la réponse).
-46. AUTO-TEST anti-spoiler : pour chaque question, masque mentalement les 4 réponses. Si un lecteur peut déduire la bonne réponse uniquement parce qu’un nom de l’énoncé ne figure que dans un seul choix → REJETTE et reformule.
-${modeBlock}
+DATATION DES FAITS ÉVOLUTIFS
+- Tout fait qui peut changer (record, poste occupé, nombre cumulatif, actualité) doit préciser sa date/période de référence dans la question elle-même.
+- "date_reference" renseigné dans le JSON (année/période, ou null si fait permanent).
+- Actualité : date obligatoire (mois + année) sur chaque question, sans exception.
+- Ne jamais inventer une date approximative — si incertain, choisis un fait non daté.
 
-QUALITÉ
-- Français naturel. Aucune redondance. Strictement "${theme}" > "${sousTheme}".
+ANTI-PRÉMISSE FAUSSE
+- La formulation elle-même ne doit jamais présupposer une catégorie/statut/rôle/relation erronés (ex: "quel groupe" pour un artiste solo, "réalisateur" pour un scénariste).
+- Relis chaque terme catégoriel de la question ; en cas de doute, formule de façon neutre.
 
-NEUTRALITÉ
-- Sujets sensibles : factuel, neutre. Pas de contenu violent/discriminatoire/sexuel.
+ANTI-CONFUSION
+- Ne mélange jamais œuvre originale et adaptation (livre/film, jeu/série) — reste sur une seule version, précise-la si besoin.
+- Vérifie l'absence d'homonymes ambigus (personne, lieu, œuvre) ; précise un identifiant si nécessaire.
+- Chiffres approximatifs → toujours "environ", jamais présentés comme exacts.
 
-EXPLICATION + SOURCE (obligatoire pour CHAQUE question)
-- "explication" : 1–3 phrases qui justifient POURQUOI la bonne réponse est correcte (fait clair, pas vague).
-- "type_source" OBLIGATOIRE, exactement l’une de :
-  "culture générale/notoriété publique" | "fait historique documenté" | "fait scientifique établi" | "statistique/donnée officielle" | "biographie/déclaration officielle" | "œuvre originale (livre, film...)".
-- Pas d’URL. Sans explication ET type_source valides → ne pas inclure la question (remplace-la).
-- Ces champs sont affichés au joueur après la bonne réponse : ils doivent être utiles et fiables.
+ANTI-DOUBLON
+- Aucune question ni fait redondant dans le lot de ${n}.
+- Aucun doublon avec un autre niveau de difficulté du même sous-thème (même reformulé — compare le FAIT testé, pas le texte).
+- Aucun doublon avec l'historique ci-dessus. Si le sous-thème est trop pointu pour ${n} questions inédites, élargis légèrement le périmètre plutôt que répéter.
 
-═══════════════════════════════
-CALIBRAGE STRICT DES NIVEAUX (critique — respecter à 100 %)
-═══════════════════════════════
-Ce lot est UNIQUEMENT "${difficulte}". Aucune question d’un autre niveau.
+COHÉRENCE INTERNE QUESTION-RÉPONSE (anti-mélange entre questions du lot)
+- Chaque question doit être strictement autonome : sa "bonne_reponse_index", ses "reponses", son "explication" et sa "source" doivent porter EXCLUSIVEMENT sur le sujet de CETTE question précise — jamais sur un fait ou une réponse appartenant à une autre question du même lot.
+- Erreur typique à éviter : générer des questions sur des sujets proches et laisser un fait ou une réponse "glisser" d'une question à l'autre par confusion entre sujets similaires.
+- AVANT de finaliser le lot, relis chaque question isolément (sans regarder les autres) et vérifie que sa bonne réponse et son explication correspondent bien à SON propre énoncé, pas à celui d'une question voisine du même lot.
+- Si le sous-thème comporte plusieurs sujets très proches ou similaires, sois particulièrement vigilant : reformule chaque question de façon suffisamment distincte pour ne pas risquer d'attribuer un fait au mauvais sujet.
 
-41. FACILE = GRAND PUBLIC ABSOLU (pas fan, pas amateur, pas passionné)
-   Public cible : quelqu’un qui a juste « déjà entendu parler » du thème / sous-thème, sans jamais le suivre.
-   Test OBLIGATOIRE avant chaque question facile : « Un ado de 14 ans, zéro fan de "${sousTheme}", a-t-il une chance réaliste de savoir sans Google ? »
-   Si la réponse est non → REJETTE et remplace. Si tu hésites → ce n’est PAS facile.
-   Autorisé en facile : icônes ultra connues, faits scolaires / culture pop de base, titres/franchises planétaires, capitales/pays célèbres, animaux/objets évidents, logos mythiques.
-   INTERDIT en facile (même si « connu des fans ») :
-   - créateurs, réalisateurs, scénaristes, compositeurs, designers, inventeurs secondaires ;
-   - dates exactes, chiffres précis, classements, stats, palmarès détaillés ;
-   - personnages secondaires, DLC, saisons obscures, albums hors hits, modèles peu connus ;
-   - jargon, coulisses, technique, lore avancé, trivia de niche ;
-   - toute question où seuls les passionnés / joueurs / cinéphiles / géeks réussiraient.
-   Ex. Jeux vidéo FACILE OK : Mario, Pokémon, Minecraft, GTA (franchise) — PAS le créateur d’Assassin’s Creed, PAS un boss secondaire.
-   Ex. Cinéma FACILE OK : Titanic, Star Wars, Harry Potter — PAS le monteur, PAS un second rôle obscur.
+DIVERSITÉ DES BONNES RÉPONSES DANS LE LOT
+- La BONNE RÉPONSE (le contenu, pas la position A/B/C/D) ne doit jamais se répéter d'une question à l'autre dans le même lot — chaque question doit avoir un sujet/élément de réponse correcte différent des autres.
+- Erreur typique à éviter : plusieurs questions différentes qui ont toutes la même bonne réponse (ex: "Paris" comme bonne réponse à 3 questions différentes), même si chaque question en elle-même est valide.
+- AVANT de finaliser, liste mentalement les bonnes réponses du lot : si un même élément apparaît comme bonne réponse à plusieurs questions, remplace l'une des questions concernées par un sujet différent au sein du même sous-thème.
+- Cette règle ne concerne que le CONTENU de la bonne réponse, pas sa position — la position (A/B/C/D) est gérée par le mélange aléatoire côté code.
 
-42. MOYEN = AMATEUR CURIEUX (suit un peu le sujet, pas un expert)
-   Public : quelqu’un qui aime "${sousTheme}" de façon occasionnelle (regarde/joue/écoute de temps en temps).
-   Un cran au-dessus du facile : noms un peu moins évidents, relations simples œuvre↔auteur connus, faits un peu plus précis mais encore largement médiatisés.
-   INTERDIT en moyen : trivia ultra-niche, détails de coulisses pro, chiffres obscurs, personnages vraiment secondaires — ça = difficile.
+DIVERSITÉ DES MAUVAISES RÉPONSES DANS LE LOT
+- Limite la réutilisation d'un même élément comme mauvaise réponse à travers le lot — évite qu'un même nom/lieu/date revienne comme option incorrecte dans trop de questions différentes.
+- INTERDICTION ABSOLUE : un élément qui a servi de MAUVAISE réponse à une question ne doit jamais devenir la BONNE réponse d'une autre question du même lot (et inversement).
 
-43. DIFFICILE = PASSIONNÉ / EXPERT
-   Public : fan assidu ou très bonne culture du sujet.
-   Autorisé : détails précis vérifiables, dates, stats stables, personnages secondaires connus des fans, coulisses documentées, distinctions fines entre œuvres proches.
-   Toujours vérifiable ; jamais inventé. Pas d’impossible absurde.
+CONTRÔLE FINAL DE QUANTITÉ
+- Avant de livrer le JSON, compte exactement les questions du tableau : il doit y en avoir EXACTEMENT ${n}, ni plus ni moins. Si une question a été supprimée en cours de vérification, génères-en une nouvelle pour compenser plutôt que de livrer un lot incomplet.
 
-44. AUTO-CONTRÔLE FINAL (chaque question)
-   - Relis la question + les 4 réponses.
-   - Classe-la mentalement : facile / moyen / difficile selon les règles 41–43.
-   - Si elle ne correspond PAS exactement à "${difficulte}" → remplace-la.
-   - "justification_difficulte" doit expliquer en 1 phrase POURQUOI elle est bien de ce niveau (ex. facile : « franchise connue de tous, pas de trivia fan »).
+NIVEAU FACILE — STRICT
+- Uniquement des faits "spectateur/grand public" (ce que perçoit un consommateur passif) — jamais de faits "coulisses/technique" (production, stats précises, dates exactes, pros non médiatisés).
+- INTERDIT en facile, quel que soit le thème : réalisateur, scénariste, producteur, compositeur, label, développeur, studio, architecte, inventeur/chef créateur — même si célèbre. Reclasse en moyen/difficile.
+- Le facile doit être NETTEMENT plus simple que le moyen, pas une variante légère. Priorise systématiquement le fait le PLUS connu du sujet.
+- Test de validation : une personne au hasard dans la rue, sans intérêt pour ${sousTheme}, devine/connaît-elle la réponse par simple exposition culturelle (télé, école, conversations) ? Si non → reclasse.
+- En cas de doute entre deux formulations, choisis toujours la plus simple.
+
+NIVEAU MOYEN — STRICT
+- Cible : une personne qui suit le sujet occasionnellement (lit parfois des articles, regarde des documentaires, discute du sujet entre amis) — ni un novice total, ni un passionné pointu.
+- INTERDIT de retomber dans le facile "déguisé" : si le fait est devinable par quelqu'un sans aucun intérêt pour ${sousTheme} (cf. test facile), ce n'est pas moyen, remonte le niveau de détail.
+- INTERDIT de monter au niveau difficile : pas de statistiques ultra-précises, pas de dates exactes secondaires, pas de faits réservés aux spécialistes — reste dans une zone de "curiosité qui demande un peu de réflexion ou de recoupement", pas de mémorisation experte.
+- Les rôles de production (réalisateur, compositeur, développeur...) SONT autorisés ici, mais seulement s'ils sont notoires dans leur domaine — pas des noms obscurs réservés aux crédits de fin.
+- Test de validation : quelqu'un qui a un intérêt modéré et régulier pour ${sousTheme} (pas un expert) devrait pouvoir répondre en réfléchissant un peu ou en faisant un lien logique, sans certitude immédiate ni ignorance totale.
+
+NIVEAU DIFFICILE — STRICT
+- Cible : un passionné/connaisseur réel du sujet — pas un expert académique ou professionnel du domaine, sauf si le sous-thème l'exige clairement.
+- Les faits précis (statistiques, dates exactes, détails techniques, noms de professionnels peu médiatisés) sont autorisés ET attendus ici — mais TOUJOURS vérifiables dans des sources fiables, jamais des détails si obscurs qu'ils sont invérifiables ou quasi impossibles à documenter.
+- INTERDIT de générer une question à laquelle même un passionné aurait une chance quasi nulle de répondre (trivia extrême, anecdote ultra-confidentielle, détail non documenté publiquement) — le difficile doit rester "gagnable" par la bonne personne, pas être un piège impossible.
+- INTERDIT d'utiliser un fait dont l'exactitude est disputée entre sources ou repose sur une seule source peu fiable — la règle "vérifiable et non inventé" s'applique avec la même rigueur qu'en facile, seule la notoriété du fait change.
+- Test de validation : un connaisseur reconnu du sujet ${sousTheme} (pas un expert professionnel) répondrait-il correctement sans avoir besoin de rechercher l'information ? Si même ce profil ne saurait probablement pas, la question est trop obscure — remplace-la par un fait difficile mais accessible à ce niveau de passion.
+
+ANCRAGE SPECTATEUR/COULISSES PAR THÈME (calibrage, non exhaustif)
+Histoire: événements connus / dates-traités précis. Sport: champions connus / entraîneurs-stats. Musique: artiste-tube connu / compositeur-label. Cinéma: acteurs-répliques cultes / réalisateur-studio. Géographie: pays-monuments connus / relief-démographie. Sciences: faits scolaires / chercheur-process. Tech: marques connues / specs-dates précises. Nature: animaux connus / classification scientifique. Cuisine: plats-origine connus / technique-chef-date. Art: œuvres célèbres / mouvement-technique. Mythologie: dieux-héros connus / généalogies-variantes. Littérature: livres-auteurs connus / courants-dates précises. Animaux: animaux du quotidien / classification-comportements. Espace: astronomie scolaire / missions-données techniques. Jeux vidéo: jeux-persos populaires / studio-moteur-date. Actualité: tendances connues et datées / détails ponctuels précis — jamais de fait instable non daté.
+Thème libre : applique le même principe spectateur/coulisses de façon autonome.
 
 PORTÉE
-- Français : priorise France/francophonie si pertinent ; facile = grand public FR (ce qu’on voit à la TV / à l’école / dans la rue).
-- International : faits connus mondialement ; évite le franco-français.
-La portée change le périmètre, pas le niveau.
-Actualité : faits stables seulement (pas d’événements trop récents/évolutifs).
-Thème libre / niche : si pas assez de faits grand public pour le niveau demandé → élargis le sous-thème ou {"erreur":"Thème non valide ou insuffisamment documenté pour générer un quiz fiable."}.
+- "Français" : priorise faits France/francophonie sur thèmes pertinents (Histoire, Cinéma, Musique, Littérature, Actualité, Cuisine) ; thèmes universels restent internationaux avec ancrage français si possible ; facile = grand public français.
+- "International" : vivier mondial, sans priorité géographique ; facile = notoriété mondiale.
+- Dans les deux cas, le principe spectateur/coulisses prime — la portée ajuste le périmètre, pas la difficulté.
 
-SORTIE JSON seule :
-${jsonExample}
+THÈME LIBRE (hors thèmes prédéfinis)
+- Identifie la famille de rattachement, applique strictement les règles facile/fiabilité/anti-doublon.
+- Si trop pointu pour ${n} questions fiables et non redondantes, élargis le périmètre plutôt qu'inventer.
+- Si ambigu/mal orthographié, choisis l'interprétation la plus probable et grand public.
+- Si inapproprié ou insuffisamment documenté : ne génère rien, retourne {"erreur": "Thème non valide ou insuffisamment documenté pour générer un quiz fiable."}
 
-Génère les 14 questions maintenant.`
+AUTO-VÉRIFICATION FINALE (avant de répondre, ne pas écrire ce raisonnement)
+Repasse sur les ${n} questions : niveau respecté ? Facile = vraiment facile, pas de rôle production, pas de fait moyen déguisé. Moyen = ni facile déguisé ni difficile déguisé, rôles de production autorisés seulement si notoires. Difficile = gagnable par un vrai passionné, jamais une trivia invérifiable ou quasi impossible. Faits vérifiables ? Explication/source présentes et crédibles ? Fait évolutif daté ? Zéro redondance (lot + niveaux + historique) ? Chaque bonne réponse/explication correspond-elle STRICTEMENT à sa propre question, sans mélange avec une autre question du lot ? Les bonnes réponses portent-elles bien sur des éléments différents, sans répétition du même contenu de réponse ? Aucune mauvaise réponse d'une question n'est-elle devenue la bonne réponse d'une autre ? Le tableau contient-il exactement ${n} questions ? Portée respectée ? Zéro prémisse fausse ? Réponses fausses indiscutablement fausses, sans mélange œuvre/adaptation ni homonyme ? Chiffres honnêtes ? Toute question qui échoue est remplacée.
+
+FORMAT DE SORTIE — JSON strict uniquement, rien d'autre :
+[
+  {
+    "question": "...",
+    "reponses": ["...", "...", "...", "..."],
+    "bonne_reponse_index": 0,
+    "explication": "...",
+    "source": "...",
+    "date_reference": "... ou null",
+    "theme": "${theme}",
+    "sous_theme": "${sousTheme}",
+    "difficulte": "${difficulte}",
+    "portee": "${portee}",
+    "justification_difficulte": "...",
+    "fait_verifiable": true
+  }
+]
+
+Génère maintenant les ${n} questions sur "${theme}" > "${sousTheme}", niveau "${difficulte}", portée "${portee}".`
 }
 
 function normalizeRawAnswers(raw: RawQuestion): string[] | null {
@@ -530,29 +528,14 @@ type ParseOutcome =
   | { kind: 'theme_error'; message: string }
   | { kind: 'invalid' }
 
-const ALLOWED_SOURCE_TYPES = [
-  'culture générale/notoriété publique',
-  'fait historique documenté',
-  'fait scientifique établi',
-  'statistique/donnée officielle',
-  'biographie/déclaration officielle',
-  'œuvre originale (livre, film...)',
-] as const
-
 function normalizeSourceType(raw: string): string | undefined {
   const t = raw.trim()
   if (!t) return undefined
-  const lower = t.toLowerCase()
-  const exact = ALLOWED_SOURCE_TYPES.find((s) => s.toLowerCase() === lower)
-  if (exact) return exact
-  if (/culture|notori/.test(lower)) return ALLOWED_SOURCE_TYPES[0]
-  if (/histor/.test(lower)) return ALLOWED_SOURCE_TYPES[1]
-  if (/scientif/.test(lower)) return ALLOWED_SOURCE_TYPES[2]
-  if (/statisti|donn/.test(lower)) return ALLOWED_SOURCE_TYPES[3]
-  if (/biograph|d[eé]clar/.test(lower)) return ALLOWED_SOURCE_TYPES[4]
-  if (/oeuvre|œuvre|livre|film|original/.test(lower)) return ALLOWED_SOURCE_TYPES[5]
-  if (!/^https?:/i.test(t) && t.length <= 80) return t
-  return undefined
+  // Jamais d’URL (hallucination / inventé)
+  if (/^https?:/i.test(t) || /\bwww\./i.test(t)) return undefined
+  // Sources libres (organisme, encyclopédie, catégorie) — plafonnées
+  if (t.length < 3) return undefined
+  return t.length <= 120 ? t : t.slice(0, 120)
 }
 
 function parseAndCap(
@@ -562,6 +545,7 @@ function parseAndCap(
   batchId: string,
   now: string,
   contentMode: QuizContentMode,
+  maxQuestions = 10,
 ): ParseOutcome {
   const extracted = extractJson(text)
   if (extracted?.erreur) {
@@ -597,11 +581,17 @@ function parseAndCap(
       raw.explication ?? raw.explanation ?? '',
     ).trim()
     const sourceType = normalizeSourceType(
-      String(raw.type_source ?? raw.sourceType ?? ''),
+      String(raw.source ?? raw.type_source ?? raw.sourceType ?? ''),
     )
     // Explication + source obligatoires (affichées après la réponse)
     if (explanation.length < 20 || !sourceType) continue
     if (explanationSuggestsMultipleCorrect(explanation)) continue
+
+    const rawDate = raw.date_reference ?? raw.dateReference
+    const dateReference =
+      rawDate === null || rawDate === undefined
+        ? null
+        : String(rawDate).trim() || null
 
     const imageSubject =
       contentMode === 'image'
@@ -623,13 +613,14 @@ function parseAndCap(
         batchId,
         explanation,
         sourceType,
+        dateReference,
         imageSubject,
         imageKind,
       }),
     )
   }
 
-  const capped = questions.slice(0, 14)
+  const capped = questions.slice(0, maxQuestions)
   return capped.length > 0
     ? { kind: 'ok', questions: capped }
     : { kind: 'invalid' }
@@ -697,11 +688,20 @@ async function generateOneTier(
   scope: 'fr' | 'international',
   provider: AiProvider,
   contentMode: QuizContentMode,
+  excludeQuestions: string[] = [],
+  questionCount = 5,
 ): Promise<
   | { questions: GeneratedQuestion[]; source: 'groq' | 'gemini'; model: string }
   | { error: string; themeInvalid?: boolean }
 > {
-  const prompt = buildPrompt(theme, difficulty, scope, contentMode)
+  const prompt = buildPrompt(
+    theme,
+    difficulty,
+    scope,
+    contentMode,
+    excludeQuestions,
+    questionCount,
+  )
   const errors: string[] = []
   const order: Array<'groq' | 'gemini'> =
     provider === 'groq'
@@ -725,7 +725,9 @@ async function generateOneTier(
       }
       for (const model of groqModels) {
         try {
-          const text = await callGroq(groqKey, model, prompt)
+          const text = await withAiRetry(() =>
+            callGroq(groqKey, model, prompt),
+          )
           const parsed = parseAndCap(
             text,
             themeSlug,
@@ -733,6 +735,7 @@ async function generateOneTier(
             batchId,
             now,
             contentMode,
+            questionCount,
           )
           if (parsed.kind === 'ok') {
             const questions =
@@ -765,7 +768,9 @@ async function generateOneTier(
     }
     for (const model of geminiModels) {
       try {
-        const text = await callGemini(geminiKey, model, prompt)
+        const text = await withAiRetry(() =>
+          callGemini(geminiKey, model, prompt),
+        )
         const parsed = parseAndCap(
           text,
           themeSlug,
@@ -773,6 +778,7 @@ async function generateOneTier(
           batchId,
           now,
           contentMode,
+          questionCount,
         )
         if (parsed.kind === 'ok') {
           const questions =
@@ -800,9 +806,55 @@ async function generateOneTier(
   return { error: errors[0] ?? 'Aucun provider IA disponible' }
 }
 
+function isTimeoutLikeError(msg: string): boolean {
+  return /504|503|429|524|502|délai dépassé|timeout|timed out|gateway|abort/i.test(
+    msg,
+  )
+}
+
+/** 2 tentatives max, backoff 800ms → 1600ms, uniquement 429/503/504/timeout */
+async function withAiRetry<T>(fn: () => Promise<T>): Promise<T> {
+  let lastErr: unknown
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await fn()
+    } catch (e) {
+      lastErr = e
+      const msg = e instanceof Error ? e.message : String(e)
+      const retryable =
+        isTimeoutLikeError(msg) || /\b(429|503|504|502)\b/.test(msg)
+      if (!retryable || attempt === 1) throw e
+      await new Promise((r) => setTimeout(r, 800 * (attempt + 1)))
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
+}
+
+/** Schéma minimal d’une question prête pour le front */
+function isStrictQuestion(q: GeneratedQuestion): boolean {
+  if (!q.question?.trim()) return false
+  if (!Array.isArray(q.answers) || q.answers.length !== 4) return false
+  if (q.answers.some((a) => !String(a).trim())) return false
+  if (q.correctIndex !== 0 && q.correctIndex !== 1 && q.correctIndex !== 2 && q.correctIndex !== 3) {
+    return false
+  }
+  if (!q.explanation || q.explanation.trim().length < 20) return false
+  if (!q.sourceType || q.sourceType.trim().length < 3) return false
+  return true
+}
+
+function assertExactBatch(
+  questions: GeneratedQuestion[],
+  expected: number,
+): GeneratedQuestion[] | null {
+  const valid = questions.filter(isStrictQuestion)
+  if (valid.length < expected) return null
+  return valid.slice(0, expected)
+}
+
 /**
  * Un seul palier par appel. provider: auto | groq | gemini.
- * Mode image : écarte les Q sans image Commons et relance pour compléter jusqu’à 10.
+ * Stratégie : 10 d’un coup ; si échec type 504/timeout → fallback 2×5.
  */
 export async function generateQuestions(
   theme: string,
@@ -812,6 +864,7 @@ export async function generateQuestions(
   scope: 'fr' | 'international' = 'fr',
   provider: AiProvider = 'auto',
   contentMode: QuizContentMode = 'standard',
+  excludeQuestions: string[] = [],
 ): Promise<{
   questions: GeneratedQuestion[]
   source: GenerateSource
@@ -837,19 +890,42 @@ export async function generateQuestions(
   }
 
   const TARGET = 10
-  /** Plusieurs rounds si le filtre anti-spoiler écarte trop de Q */
-  const MAX_ROUNDS = contentMode === 'image' ? 1 : 3
   const deadline = Date.now() + 55_000
   const collected: GeneratedQuestion[] = []
   const seen = new Set<string>()
+  const excluded = new Set(
+    excludeQuestions.map((q) => q.trim().toLowerCase().replace(/\s+/g, ' ')),
+  )
+  let excludeLive = [...excludeQuestions]
   let lastSource: 'groq' | 'gemini' | null = null
   let lastModel = ''
   let lastError: string | undefined
-  let themeInvalid = false
+  let usedFallback2x5 = false
 
-  for (let round = 0; round < MAX_ROUNDS; round++) {
-    if (Date.now() >= deadline) break
+  function ingest(
+    qs: GeneratedQuestion[],
+  ): void {
+    for (const q of qs) {
+      if (q.difficulty !== tier) continue
+      if (contentMode === 'image' && !q.imageUrl && !q.imageSubject) continue
+      const key = questionKey(q)
+      if (seen.has(key) || excluded.has(key)) continue
+      seen.add(key)
+      excluded.add(key)
+      collected.push(q)
+      excludeLive.push(q.question)
+      if (collected.length >= TARGET) break
+    }
+  }
 
+  async function runBatch(count: number): Promise<{
+    ok: boolean
+    themeInvalid?: boolean
+    timeoutLike?: boolean
+  }> {
+    if (Date.now() >= deadline) {
+      return { ok: false, timeoutLike: true }
+    }
     const result = await generateOneTier(
       theme,
       themeSlug,
@@ -859,30 +935,65 @@ export async function generateQuestions(
       scope,
       provider,
       contentMode,
+      excludeLive,
+      count,
     )
     if ('error' in result) {
       lastError = result.error
-      themeInvalid = Boolean(result.themeInvalid)
-      if (themeInvalid) break
-      continue
+      if (result.themeInvalid) return { ok: false, themeInvalid: true }
+      return {
+        ok: false,
+        timeoutLike: isTimeoutLikeError(result.error),
+      }
     }
-
     lastSource = result.source
     lastModel = result.model
-    for (const q of result.questions) {
-      if (q.difficulty !== tier) continue
-      if (contentMode === 'image' && !q.imageUrl && !q.imageSubject) continue
-      const key = questionKey(q)
-      if (seen.has(key)) continue
-      seen.add(key)
-      collected.push(q)
-      if (collected.length >= TARGET) break
-    }
-    if (collected.length >= TARGET) break
+    ingest(result.questions)
+    return { ok: collected.length > 0 }
   }
 
-  if (themeInvalid && lastError) {
+  // 1) Tentative principale : 10 d’un coup
+  const first = await runBatch(TARGET)
+  if (first.themeInvalid && lastError) {
     return { questions: [], source: 'mock', error: lastError }
+  }
+
+  // 2) Si 504/timeout (ou 0 question) → fallback 2×5
+  if (
+    collected.length < TARGET &&
+    (first.timeoutLike || collected.length === 0)
+  ) {
+    usedFallback2x5 = true
+    collected.length = 0
+    seen.clear()
+    excluded.clear()
+    for (const q of excludeQuestions) {
+      const fp = q.trim().toLowerCase().replace(/\s+/g, ' ')
+      if (fp) excluded.add(fp)
+    }
+    excludeLive = [...excludeQuestions]
+
+    for (let i = 0; i < 2 && collected.length < TARGET; i++) {
+      const need = Math.min(5, TARGET - collected.length)
+      const part = await runBatch(need)
+      if (part.themeInvalid && lastError) {
+        return { questions: [], source: 'mock', error: lastError }
+      }
+      if (!part.ok && part.timeoutLike) {
+        // un demi-lot a timeout : tente encore l’autre moitié / round suivant
+        continue
+      }
+    }
+  } else if (collected.length < TARGET) {
+    // Succès partiel (filtres) : complète par lots de 5 sans reset
+    while (collected.length < TARGET && Date.now() < deadline) {
+      const need = Math.min(5, TARGET - collected.length)
+      const part = await runBatch(need)
+      if (part.themeInvalid && lastError) {
+        return { questions: [], source: 'mock', error: lastError }
+      }
+      if (!part.ok) break
+    }
   }
 
   if (collected.length < TARGET) {
@@ -895,10 +1006,21 @@ export async function generateQuestions(
     }
   }
 
+  const strict = assertExactBatch(collected, TARGET)
+  if (!strict) {
+    return {
+      questions: [],
+      source: 'mock',
+      error:
+        'JSON invalide : le lot ne contient pas exactement 10 questions conformes. Réessaie.',
+    }
+  }
+
+  const modeLabel = usedFallback2x5 ? ' · fallback 2×5' : ''
   return {
-    questions: collected.slice(0, TARGET),
+    questions: strict,
     source: lastSource ?? 'mock',
-    message: `Généré avec ${lastSource} (${lastModel}) — ${tier}`,
+    message: `Généré avec ${lastSource} (${lastModel}) — ${tier}${modeLabel}`,
   }
 }
 

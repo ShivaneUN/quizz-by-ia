@@ -128,5 +128,12 @@
 }
 
 .answer-audit--compact .answer-audit__list {
-  max-height: 12rem;
+  max-height: 14rem;
+}
+
+.answer-audit--compact .answer-audit__explain {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }

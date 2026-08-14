@@ -28,6 +28,8 @@ export interface RoomPlayer {
   meilleurStreak?: number
   /** Bonus streak appliqué à la fin (0 si pas encore) */
   bonusApplique?: number
+  /** Score du mini-jeu de frappe pendant la génération */
+  typingScore?: number
 }
 
 export interface RoomQuestion {
@@ -87,6 +89,8 @@ export interface RoomState {
   currentAnswers: Record<string, number>
   /** Bonus streak déjà comptés dans score (évite double application) */
   scoresFinalized?: boolean
+  /** ETA génération (secondes) pendant status === generating */
+  genEstimateSec?: number
   createdAt: number
   updatedAt: number
 }
@@ -160,7 +164,7 @@ export async function getRoom(code: string): Promise<RoomState | null> {
   // Compat salles anciennes
   room.status = normalizeRoomStatus(room.status)
   if (typeof room.timerEnabled !== 'boolean') {
-    room.timerEnabled = true
+    room.timerEnabled = false
   }
   if (
     room.difficulty !== 'easy' &&
@@ -276,6 +280,7 @@ export function resetPlayersForNewGame(room: RoomState): void {
     streakActuelle: 0,
     meilleurStreak: 0,
     bonusApplique: 0,
+    typingScore: 0,
   }))
 }
 
