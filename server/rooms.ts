@@ -57,8 +57,8 @@ export interface RoomState {
   playMode: 'progression' | 'free'
   /** Difficulté des questions générées pour la manche */
   difficulty: 'easy' | 'medium' | 'hard'
-  /** IA : auto (Groq→Gemini), groq ou gemini */
-  aiProvider: 'auto' | 'groq' | 'gemini'
+  /** IA : auto ou provider forcé */
+  aiProvider: 'auto' | 'groq' | 'gemini' | 'cerebras' | 'deepseek' | 'openrouter'
   /** Toujours standard en multi (images désactivées) */
   quizMode?: 'standard' | 'image'
   /** Message si status === 'error' */
@@ -529,6 +529,7 @@ export function maybeCloseRound(
   if (!q) {
     finalizeScores(room)
     room.status = 'finished'
+    void import('./calibStats.js').then((m) => m.recordCalibHandsFromRoom(room))
     return { room, changed: true }
   }
 
@@ -583,6 +584,7 @@ export function hostNextQuestion(room: RoomState, now = Date.now()): RoomState {
     room.currentAnswers = {}
     room.roundPhase = 'answering'
     room.roundDeadlineAt = 0
+    void import('./calibStats.js').then((m) => m.recordCalibHandsFromRoom(room))
     return room
   }
 

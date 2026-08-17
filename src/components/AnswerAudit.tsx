@@ -1,14 +1,24 @@
 import type { AuditEntry } from '../types/audit'
+import { QuestionFeedback } from './QuestionFeedback'
 import './AnswerAudit.css'
 
 interface AnswerAuditProps {
   entries: AuditEntry[]
   /** Compacte pendant le jeu ; détaillée en fin de palier */
   compact?: boolean
+  theme?: string
+  difficulty?: string
+  mode?: 'solo' | 'multi'
 }
 
 /** Historique correct / faux au fil des réponses */
-export function AnswerAudit({ entries, compact = true }: AnswerAuditProps) {
+export function AnswerAudit({
+  entries,
+  compact = true,
+  theme,
+  difficulty,
+  mode = 'solo',
+}: AnswerAuditProps) {
   if (entries.length === 0) return null
 
   const ok = entries.filter((e) => e.correct).length
@@ -55,6 +65,22 @@ export function AnswerAudit({ entries, compact = true }: AnswerAuditProps) {
               )}
               {e.sourceType && (
                 <p className="answer-audit__source">Source : {e.sourceType}</p>
+              )}
+
+              {!compact && e.correctIndex >= 0 && e.correctIndex <= 3 && (
+                <QuestionFeedback
+                  questionId={e.questionId}
+                  question={e.question}
+                  answers={e.answers}
+                  correctIndex={e.correctIndex as 0 | 1 | 2 | 3}
+                  explanation={e.explanation}
+                  sourceType={e.sourceType}
+                  theme={theme}
+                  difficulty={difficulty}
+                  mode={mode}
+                  playerCorrect={e.correct}
+                  selectedIndex={e.selectedIndex}
+                />
               )}
             </div>
           </li>

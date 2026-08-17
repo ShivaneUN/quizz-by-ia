@@ -13,6 +13,9 @@ import {
 } from './server/genStats.ts'
 import roomHandler from './api/room.ts'
 import genEtaHandler from './api/gen-eta.ts'
+import calibStatsHandler from './api/calib-stats.ts'
+import questionFeedbackHandler from './api/question-feedback.ts'
+import chatHandler from './api/chat.ts'
 
 function readBody(req: Connect.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -184,6 +187,177 @@ function localApiPlugin(): Plugin {
         })()
       })
 
+      server.middlewares.use('/api/calib-stats', (req, res) => {
+        void (async () => {
+          try {
+            const url = new URL(req.url || '/', 'http://local')
+            const raw =
+              req.method === 'GET' || req.method === 'HEAD'
+                ? '{}'
+                : await readBody(req)
+            const body = JSON.parse(raw || '{}')
+            const fakeReq = {
+              method: req.method,
+              body,
+              query: Object.fromEntries(url.searchParams.entries()),
+              headers: req.headers,
+            }
+            const fakeRes = {
+              statusCode: 200,
+              headers: {} as Record<string, string>,
+              setHeader(k: string, v: string) {
+                this.headers[k] = v
+              },
+              status(code: number) {
+                this.statusCode = code
+                return this
+              },
+              json(payload: unknown) {
+                res.statusCode = this.statusCode
+                for (const [k, v] of Object.entries(this.headers)) {
+                  res.setHeader(k, v)
+                }
+                if (!res.getHeader('Content-Type')) {
+                  res.setHeader('Content-Type', 'application/json')
+                }
+                res.end(JSON.stringify(payload))
+                return this
+              },
+              send(payload: string) {
+                res.statusCode = this.statusCode
+                for (const [k, v] of Object.entries(this.headers)) {
+                  res.setHeader(k, v)
+                }
+                res.end(payload)
+                return this
+              },
+              end() {
+                res.statusCode = this.statusCode
+                res.end()
+                return this
+              },
+            }
+            await calibStatsHandler(fakeReq as never, fakeRes as never)
+          } catch (e) {
+            const message = e instanceof Error ? e.message : 'Erreur serveur'
+            res.statusCode = 500
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ error: message }))
+          }
+        })()
+      })
+
+      server.middlewares.use('/api/question-feedback', (req, res) => {
+        void (async () => {
+          try {
+            const url = new URL(req.url || '/', 'http://local')
+            const raw =
+              req.method === 'GET' || req.method === 'HEAD'
+                ? '{}'
+                : await readBody(req)
+            const body = JSON.parse(raw || '{}')
+            const fakeReq = {
+              method: req.method,
+              body,
+              query: Object.fromEntries(url.searchParams.entries()),
+              headers: req.headers,
+            }
+            const fakeRes = {
+              statusCode: 200,
+              headers: {} as Record<string, string>,
+              setHeader(k: string, v: string) {
+                this.headers[k] = v
+              },
+              status(code: number) {
+                this.statusCode = code
+                return this
+              },
+              json(payload: unknown) {
+                res.statusCode = this.statusCode
+                for (const [k, v] of Object.entries(this.headers)) {
+                  res.setHeader(k, v)
+                }
+                if (!res.getHeader('Content-Type')) {
+                  res.setHeader('Content-Type', 'application/json')
+                }
+                res.end(JSON.stringify(payload))
+                return this
+              },
+              send(payload: string) {
+                res.statusCode = this.statusCode
+                for (const [k, v] of Object.entries(this.headers)) {
+                  res.setHeader(k, v)
+                }
+                res.end(payload)
+                return this
+              },
+              end() {
+                res.statusCode = this.statusCode
+                res.end()
+                return this
+              },
+            }
+            await questionFeedbackHandler(fakeReq as never, fakeRes as never)
+          } catch (e) {
+            const message = e instanceof Error ? e.message : 'Erreur serveur'
+            res.statusCode = 500
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ error: message }))
+          }
+        })()
+      })
+
+      server.middlewares.use('/api/chat', (req, res) => {
+        void (async () => {
+          try {
+            const raw =
+              req.method === 'GET' || req.method === 'HEAD'
+                ? '{}'
+                : await readBody(req)
+            const body = JSON.parse(raw || '{}')
+            const fakeReq = {
+              method: req.method,
+              body,
+              query: {},
+              headers: req.headers,
+            }
+            const fakeRes = {
+              statusCode: 200,
+              headers: {} as Record<string, string>,
+              setHeader(k: string, v: string) {
+                this.headers[k] = v
+              },
+              status(code: number) {
+                this.statusCode = code
+                return this
+              },
+              json(payload: unknown) {
+                res.statusCode = this.statusCode
+                for (const [k, v] of Object.entries(this.headers)) {
+                  res.setHeader(k, v)
+                }
+                if (!res.getHeader('Content-Type')) {
+                  res.setHeader('Content-Type', 'application/json')
+                }
+                res.end(JSON.stringify(payload))
+                return this
+              },
+              end() {
+                res.statusCode = this.statusCode
+                res.end()
+                return this
+              },
+            }
+            await chatHandler(fakeReq as never, fakeRes as never)
+          } catch (e) {
+            const message = e instanceof Error ? e.message : 'Erreur serveur'
+            res.statusCode = 500
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ error: message }))
+          }
+        })()
+      })
+
       server.middlewares.use('/api/room', (req, res) => {
         void (async () => {
           try {
@@ -242,7 +416,19 @@ function localApiPlugin(): Plugin {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   if (env.GROQ_API_KEY) process.env.GROQ_API_KEY = env.GROQ_API_KEY
+  if (env.GROQ_API_KEY_2) process.env.GROQ_API_KEY_2 = env.GROQ_API_KEY_2
   if (env.GEMINI_API_KEY) process.env.GEMINI_API_KEY = env.GEMINI_API_KEY
+  if (env.GEMINI_API_KEY_2) process.env.GEMINI_API_KEY_2 = env.GEMINI_API_KEY_2
+  if (env.CEREBRAS_API_KEY) process.env.CEREBRAS_API_KEY = env.CEREBRAS_API_KEY
+  if (env.CEREBRAS_API_Gemma431B_KEY)
+    process.env.CEREBRAS_API_Gemma431B_KEY = env.CEREBRAS_API_Gemma431B_KEY
+  if (env.CEREBRAS_API_OpenAIGPTOSS_KEY)
+    process.env.CEREBRAS_API_OpenAIGPTOSS_KEY = env.CEREBRAS_API_OpenAIGPTOSS_KEY
+  if (env.DEEPSEEK_API_KEY) process.env.DEEPSEEK_API_KEY = env.DEEPSEEK_API_KEY
+  if (env.OPENROUTER_API_KEY)
+    process.env.OPENROUTER_API_KEY = env.OPENROUTER_API_KEY
+  if (env.OPENROUTER_API_KEY_2)
+    process.env.OPENROUTER_API_KEY_2 = env.OPENROUTER_API_KEY_2
   if (env.UNSPLASH_ACCESS_KEY) process.env.UNSPLASH_ACCESS_KEY = env.UNSPLASH_ACCESS_KEY
   if (env.UPSTASH_REDIS_REST_URL)
     process.env.UPSTASH_REDIS_REST_URL = env.UPSTASH_REDIS_REST_URL
@@ -252,6 +438,8 @@ export default defineConfig(({ mode }) => {
   if (env.KV_REST_API_TOKEN)
     process.env.KV_REST_API_TOKEN = env.KV_REST_API_TOKEN
   if (env.KV_URL) process.env.KV_URL = env.KV_URL
+  if (env.CALIB_STATS_SECRET)
+    process.env.CALIB_STATS_SECRET = env.CALIB_STATS_SECRET
 
   return {
     plugins: [react(), localApiPlugin()],

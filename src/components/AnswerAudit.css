@@ -42,6 +42,10 @@
   max-height: 7.5rem;
 }
 
+.answer-audit:not(.answer-audit--compact) .answer-audit__list {
+  max-height: min(70vh, 28rem);
+}
+
 .answer-audit__item {
   display: flex;
   gap: 0.55rem;

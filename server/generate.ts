@@ -1,9 +1,17 @@
 /**
- * Génération de questions — Groq / Gemini (choix + fallback Auto).
+ * Génération de questions — multi-providers IA (choix + fallback Auto).
  * Clés API uniquement côté serveur (.env).
  */
 
 import { fetchCommonsImageUrl } from './wikimedia.js'
+import {
+  enginesWithKeys,
+  fallbackEngines,
+  listApiKeys,
+  pickAiForGeneration,
+  releaseAiSlot,
+  type RotateEngine,
+} from './aiRotate.js'
 
 export function normalizeThemeSlug(theme: string): string {
   return theme
@@ -16,12 +24,24 @@ export function normalizeThemeSlug(theme: string): string {
 }
 
 export type Difficulty = 'easy' | 'medium' | 'hard'
-/** auto = Groq puis Gemini ; groq/gemini = forcé */
-export type AiProvider = 'auto' | 'groq' | 'gemini'
+/** auto = chaîne de fallback ; sinon provider forcé */
+export type AiProvider =
+  | 'auto'
+  | 'groq'
+  | 'gemini'
+  | 'cerebras'
+  | 'deepseek'
+  | 'openrouter'
 /** standard = texte ; image = QCM illustré Wikimedia */
 export type QuizContentMode = 'standard' | 'image'
 export type ImageKind = 'logo' | 'sujet_entier' | 'detail_zoome'
-export type GenerateSource = 'groq' | 'gemini' | 'mock'
+export type GenerateSource =
+  | 'groq'
+  | 'gemini'
+  | 'cerebras'
+  | 'deepseek'
+  | 'openrouter'
+  | 'mock'
 
 export interface GeneratedQuestion {
   id: string
@@ -42,10 +62,11 @@ export interface GeneratedQuestion {
 
 const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard']
 
+type LlmEngine = Exclude<AiProvider, 'auto'>
+
 const GROQ_MODELS = [
-  'llama-3.3-70b-versatile',
-  'llama-3.1-8b-instant',
   'openai/gpt-oss-120b',
+  'openai/gpt-oss-20b',
 ] as const
 
 /** Flash uniquement — 2.5-flash retiré pour les nouveaux comptes */
@@ -55,15 +76,93 @@ const GEMINI_MODELS = [
   'gemini-3.1-flash-lite',
 ] as const
 
+const CEREBRAS_MODELS = ['gemma-4-31b', 'gpt-oss-120b', 'zai-glm-4.7'] as const
+const DEEPSEEK_MODELS = ['deepseek-chat'] as const
+/** Uniquement modèles :free OpenRouter (après 10$ → ~1000 req/jour). */
+const OPENROUTER_MODELS = [
+  'openai/gpt-oss-20b:free',
+  'google/gemma-4-31b-it:free',
+  'openrouter/free',
+] as const
+
 const AI_SYSTEM = `Tu es un générateur de quiz expert et rigoureux. JSON uniquement.
 Succès: tableau de N questions OU {"questions":[...]}.
 Échec thème: {"erreur":"..."}.
 Chaque question: question, reponses (4), bonne_reponse_index, explication, source, date_reference, theme, sous_theme, difficulte, portee, justification_difficulte, fait_verifiable.
 1 seule bonne réponse. Faits vérifiables. Français naturel. Fidélité stricte au thème. Pas d’URL ni titre d’article inventé.`
 
+/** Auto = free only (Cerebras/DeepSeek payants exclus pour l’instant). */
+const AUTO_FREE_ENGINES: LlmEngine[] = ['groq', 'gemini', 'openrouter']
+
 export function parseAiProvider(raw: unknown): AiProvider {
-  if (raw === 'groq' || raw === 'gemini' || raw === 'auto') return raw
+  if (
+    raw === 'groq' ||
+    raw === 'gemini' ||
+    raw === 'cerebras' ||
+    raw === 'deepseek' ||
+    raw === 'openrouter' ||
+    raw === 'auto'
+  ) {
+    return raw
+  }
   return 'auto'
+}
+
+function enginesForProvider(provider: AiProvider): LlmEngine[] {
+  if (provider === 'auto') {
+    const live = enginesWithKeys()
+    return live.length > 0 ? live : [...AUTO_FREE_ENGINES]
+  }
+  return [provider]
+}
+
+function envKeyFor(engine: LlmEngine): string | undefined {
+  if (engine === 'cerebras') {
+    return (
+      process.env.CEREBRAS_API_KEY?.trim() ||
+      process.env.CEREBRAS_API_Gemma431B_KEY?.trim() ||
+      process.env.CEREBRAS_API_OpenAIGPTOSS_KEY?.trim()
+    )
+  }
+  if (engine === 'deepseek') return process.env.DEEPSEEK_API_KEY
+  if (engine === 'groq' || engine === 'gemini' || engine === 'openrouter') {
+    return listApiKeys(engine)[0]
+  }
+  return undefined
+}
+
+function keysForEngine(engine: LlmEngine): string[] {
+  if (engine === 'groq' || engine === 'gemini' || engine === 'openrouter') {
+    return listApiKeys(engine)
+  }
+  if (engine === 'cerebras') {
+    const keys = [
+      process.env.CEREBRAS_API_KEY,
+      process.env.CEREBRAS_API_Gemma431B_KEY,
+      process.env.CEREBRAS_API_OpenAIGPTOSS_KEY,
+    ]
+      .map((k) => String(k ?? '').trim())
+      .filter(Boolean)
+    return [...new Set(keys)]
+  }
+  const one = envKeyFor(engine)?.trim()
+  return one ? [one] : []
+}
+
+function modelsFor(engine: LlmEngine, contentMode: QuizContentMode): string[] {
+  const cap = contentMode === 'image' ? 2 : 99
+  switch (engine) {
+    case 'groq':
+      return GROQ_MODELS.slice(0, cap)
+    case 'gemini':
+      return GEMINI_MODELS.slice(0, cap)
+    case 'cerebras':
+      return CEREBRAS_MODELS.slice(0, cap)
+    case 'deepseek':
+      return DEEPSEEK_MODELS.slice(0, cap)
+    case 'openrouter':
+      return OPENROUTER_MODELS.slice(0, cap)
+  }
 }
 
 export function parseQuizContentMode(_raw: unknown): QuizContentMode {
@@ -691,7 +790,7 @@ async function generateOneTier(
   excludeQuestions: string[] = [],
   questionCount = 5,
 ): Promise<
-  | { questions: GeneratedQuestion[]; source: 'groq' | 'gemini'; model: string }
+  | { questions: GeneratedQuestion[]; source: LlmEngine; model: string }
   | { error: string; themeInvalid?: boolean }
 > {
   const prompt = buildPrompt(
@@ -703,116 +802,111 @@ async function generateOneTier(
     questionCount,
   )
   const errors: string[] = []
-  const order: Array<'groq' | 'gemini'> =
-    provider === 'groq'
-      ? ['groq']
-      : provider === 'gemini'
-        ? ['gemini']
-        : ['groq', 'gemini']
 
-  // Mode image : moins de modèles pour rester sous le timeout serverless
-  const groqModels =
-    contentMode === 'image' ? GROQ_MODELS.slice(0, 2) : [...GROQ_MODELS]
-  const geminiModels =
-    contentMode === 'image' ? GEMINI_MODELS.slice(0, 2) : [...GEMINI_MODELS]
+  let pickedSlot: string | undefined
+  let engineOrder: LlmEngine[] = enginesForProvider(provider)
 
-  for (const engine of order) {
-    if (engine === 'groq') {
-      const groqKey = process.env.GROQ_API_KEY
-      if (!groqKey) {
-        errors.push('GROQ_API_KEY manquante')
+  if (provider === 'auto') {
+    const picked = await pickAiForGeneration()
+    if (picked) {
+      pickedSlot = picked.slot
+      engineOrder = fallbackEngines(
+        picked.engine,
+        enginesWithKeys() as RotateEngine[],
+      ) as LlmEngine[]
+    }
+  }
+
+  try {
+    engineLoop: for (const engine of engineOrder) {
+      const keys =
+        provider === 'auto' && pickedSlot?.startsWith(`${engine}#`)
+          ? [
+              listApiKeys(engine as RotateEngine)[
+                Number(pickedSlot.split('#')[1]) || 0
+              ],
+            ].filter(Boolean)
+          : keysForEngine(engine)
+
+      if (keys.length === 0) {
+        if (engine !== 'cerebras') {
+          errors.push(`${engine.toUpperCase()}_API_KEY manquante`)
+        }
         continue
       }
-      for (const model of groqModels) {
-        try {
-          const text = await withAiRetry(() =>
-            callGroq(groqKey, model, prompt),
-          )
-          const parsed = parseAndCap(
-            text,
-            themeSlug,
-            difficulty,
-            batchId,
-            now,
-            contentMode,
-            questionCount,
-          )
-          if (parsed.kind === 'ok') {
-            const questions =
-              contentMode === 'image'
-                ? await enrichWithCommonsImages(parsed.questions)
-                : parsed.questions
-            if (questions.length === 0) {
-              errors.push(`groq/${model}: aucune question valide (filtrées)`)
-              continue
-            }
-            return { questions, source: 'groq', model }
-          }
-          if (parsed.kind === 'theme_error') {
-            return { error: parsed.message, themeInvalid: true }
-          }
-          errors.push(`groq/${model}: JSON invalide`)
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e)
-          errors.push(msg)
-          console.warn(`[groq] ${model}:`, msg.slice(0, 200))
-        }
-      }
-      continue
-    }
 
-    const geminiKey = process.env.GEMINI_API_KEY
-    if (!geminiKey) {
-      errors.push('GEMINI_API_KEY manquante')
-      continue
-    }
-    for (const model of geminiModels) {
-      try {
-        const text = await withAiRetry(() =>
-          callGemini(geminiKey, model, prompt),
-        )
-        const parsed = parseAndCap(
-          text,
-          themeSlug,
-          difficulty,
-          batchId,
-          now,
-          contentMode,
-          questionCount,
-        )
-        if (parsed.kind === 'ok') {
-          const questions =
-            contentMode === 'image'
-              ? await enrichWithCommonsImages(parsed.questions)
-              : parsed.questions
-          if (questions.length === 0) {
-            errors.push(`gemini/${model}: aucune question valide (filtrées)`)
-            continue
+      for (const apiKey of keys) {
+        for (const model of modelsFor(engine, contentMode)) {
+          try {
+            // 429 → pas de retry ici : on bascule tout de suite sur une autre IA
+            const text = await withAiRetry(() =>
+              engine === 'gemini'
+                ? callGemini(apiKey, model, prompt)
+                : callOpenAiCompatible(
+                    engine as Exclude<LlmEngine, 'gemini'>,
+                    apiKey,
+                    model,
+                    prompt,
+                  ),
+            )
+            const parsed = parseAndCap(
+              text,
+              themeSlug,
+              difficulty,
+              batchId,
+              now,
+              contentMode,
+              questionCount,
+            )
+            if (parsed.kind === 'ok') {
+              const questions =
+                contentMode === 'image'
+                  ? await enrichWithCommonsImages(parsed.questions)
+                  : parsed.questions
+              if (questions.length === 0) {
+                errors.push(
+                  `${engine}/${model}: aucune question valide (filtrées)`,
+                )
+                continue
+              }
+              return { questions, source: engine, model }
+            }
+            if (parsed.kind === 'theme_error') {
+              return { error: parsed.message, themeInvalid: true }
+            }
+            errors.push(`${engine}/${model}: JSON invalide`)
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e)
+            errors.push(msg)
+            console.warn(`[${engine}] ${model}:`, msg.slice(0, 200))
+            // Rate limit → autre IA immédiatement (pas d’insistance)
+            if (isRateLimitError(msg)) {
+              continue engineLoop
+            }
           }
-          return { questions, source: 'gemini', model }
         }
-        if (parsed.kind === 'theme_error') {
-          return { error: parsed.message, themeInvalid: true }
-        }
-        errors.push(`gemini/${model}: JSON invalide`)
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e)
-        errors.push(msg)
-        console.warn(`[gemini] ${model}:`, msg.slice(0, 200))
       }
     }
+  } finally {
+    await releaseAiSlot(pickedSlot)
   }
 
   return { error: errors[0] ?? 'Aucun provider IA disponible' }
 }
 
-function isTimeoutLikeError(msg: string): boolean {
-  return /504|503|429|524|502|délai dépassé|timeout|timed out|gateway|abort/i.test(
+function isRateLimitError(msg: string): boolean {
+  return /\b429\b|rate limit|too many requests|quota|resource.exhausted|resource_exhausted/i.test(
     msg,
   )
 }
 
-/** 2 tentatives max, backoff 800ms → 1600ms, uniquement 429/503/504/timeout */
+function isTimeoutLikeError(msg: string): boolean {
+  return /504|503|524|502|délai dépassé|timeout|timed out|gateway|abort/i.test(
+    msg,
+  )
+}
+
+/** Retry uniquement timeouts / gateway — pas les 429 (bascule IA). */
 async function withAiRetry<T>(fn: () => Promise<T>): Promise<T> {
   let lastErr: unknown
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -821,8 +915,9 @@ async function withAiRetry<T>(fn: () => Promise<T>): Promise<T> {
     } catch (e) {
       lastErr = e
       const msg = e instanceof Error ? e.message : String(e)
+      if (isRateLimitError(msg)) throw e
       const retryable =
-        isTimeoutLikeError(msg) || /\b(429|503|504|502)\b/.test(msg)
+        isTimeoutLikeError(msg) || /\b(503|504|502)\b/.test(msg)
       if (!retryable || attempt === 1) throw e
       await new Promise((r) => setTimeout(r, 800 * (attempt + 1)))
     }
@@ -853,7 +948,7 @@ function assertExactBatch(
 }
 
 /**
- * Un seul palier par appel. provider: auto | groq | gemini.
+ * Un seul palier par appel. provider: auto | groq | gemini | cerebras | deepseek | openrouter.
  * Stratégie : 10 d’un coup ; si échec type 504/timeout → fallback 2×5.
  */
 export async function generateQuestions(
@@ -876,16 +971,14 @@ export async function generateQuestions(
   const now = new Date().toISOString()
   const tier: Difficulty =
     difficulty === 'medium' || difficulty === 'hard' ? difficulty : 'easy'
-  const hasKey = Boolean(
-    process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY,
-  )
+  const hasKey = AUTO_FREE_ENGINES.some((e) => keysForEngine(e).length > 0)
 
   if (!hasKey) {
     return {
       questions: buildMockQuestions(theme, themeSlug, 'complementary', tier),
       source: 'mock',
       message:
-        'Aucune clé API — questions mock. Ajoute GROQ_API_KEY ou GEMINI_API_KEY.',
+        'Aucune clé API free — questions mock. Ajoute GROQ_API_KEY, GEMINI_API_KEY ou OPENROUTER_API_KEY.',
     }
   }
 
@@ -897,7 +990,7 @@ export async function generateQuestions(
     excludeQuestions.map((q) => q.trim().toLowerCase().replace(/\s+/g, ' ')),
   )
   let excludeLive = [...excludeQuestions]
-  let lastSource: 'groq' | 'gemini' | null = null
+  let lastSource: LlmEngine | null = null
   let lastModel = ''
   let lastError: string | undefined
   let usedFallback2x5 = false
@@ -1043,19 +1136,32 @@ async function fetchWithTimeout(
   }
 }
 
-async function callGroq(
+async function callOpenAiCompatible(
+  engine: Exclude<LlmEngine, 'gemini'>,
   apiKey: string,
   model: string,
   prompt: string,
 ): Promise<string> {
+  const endpoints: Record<Exclude<LlmEngine, 'gemini'>, string> = {
+    groq: 'https://api.groq.com/openai/v1/chat/completions',
+    cerebras: 'https://api.cerebras.ai/v1/chat/completions',
+    deepseek: 'https://api.deepseek.com/chat/completions',
+    openrouter: 'https://openrouter.ai/api/v1/chat/completions',
+  }
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    authorization: `Bearer ${apiKey}`,
+  }
+  if (engine === 'openrouter') {
+    headers['HTTP-Referer'] = 'https://quizz-by-ia.vercel.app'
+    headers['X-Title'] = 'Quizz By IA'
+  }
+
   const res = await fetchWithTimeout(
-    'https://api.groq.com/openai/v1/chat/completions',
+    endpoints[engine],
     {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${apiKey}`,
-      },
+      headers,
       body: JSON.stringify({
         model,
         temperature: 0.35,
@@ -1072,7 +1178,9 @@ async function callGroq(
 
   if (!res.ok) {
     const detail = await res.text()
-    throw new Error(`Groq ${res.status} (${model}): ${detail.slice(0, 400)}`)
+    throw new Error(
+      `${engine} ${res.status} (${model}): ${detail.slice(0, 400)}`,
+    )
   }
 
   const data = (await res.json()) as {

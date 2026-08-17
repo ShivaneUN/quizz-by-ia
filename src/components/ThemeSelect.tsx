@@ -28,9 +28,9 @@ export interface ThemeStartOptions {
 }
 
 const AI_OPTIONS: { id: AiProvider; label: string; hint: string }[] = [
-  { id: 'auto', label: 'Auto', hint: 'Groq → Gemini' },
-  { id: 'groq', label: 'Groq', hint: 'Prioritaire' },
-  { id: 'gemini', label: 'Gemini', hint: 'Google' },
+  { id: 'auto', label: 'Auto', hint: 'Rotation Groq / Gemini / OpenRouter' },
+  { id: 'groq', label: 'Groq', hint: 'Free rapide' },
+  { id: 'gemini', label: 'Gemini', hint: 'Free Google' },
 ]
 
 interface ThemeSelectProps {

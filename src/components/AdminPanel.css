@@ -1,0 +1,335 @@
+.admin-gear {
+  position: fixed;
+  top: max(0.75rem, env(safe-area-inset-top));
+  left: max(0.75rem, env(safe-area-inset-left));
+  bottom: auto;
+  right: auto;
+  z-index: 55;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 12px;
+  border: 2px solid color-mix(in srgb, #4db8ff 40%, transparent);
+  background: #0a1835;
+  color: #fff;
+  font-size: 1.15rem;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 6px 18px color-mix(in srgb, #000 35%, transparent);
+  opacity: 0.85;
+}
+
+.admin-gear:hover {
+  opacity: 1;
+  border-color: #f0c14b;
+}
+
+.admin-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.admin-panel__backdrop {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, #020814 72%, transparent);
+}
+
+.admin-panel__card {
+  position: relative;
+  width: min(36rem, 100%);
+  max-height: min(88vh, 40rem);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 0.75rem;
+  padding: 1rem 1.05rem 1.1rem;
+  border-radius: 18px;
+  background: #0a1835;
+  border: 2px solid color-mix(in srgb, #4db8ff 45%, transparent);
+  box-shadow: 0 18px 48px color-mix(in srgb, #000 50%, transparent);
+  overflow: hidden;
+}
+
+.admin-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.admin-panel__title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #fff;
+}
+
+.admin-panel__close {
+  border: none;
+  background: transparent;
+  color: var(--ink-muted);
+  font: inherit;
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+}
+
+.admin-panel__gate {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.admin-panel__gate label {
+  display: grid;
+  gap: 0.35rem;
+  text-align: left;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--ink-muted);
+}
+
+.admin-panel__gate input {
+  border: 1.5px solid color-mix(in srgb, #4db8ff 40%, transparent);
+  border-radius: 10px;
+  background: #041022;
+  color: #fff;
+  font: inherit;
+  font-size: 1rem;
+  padding: 0.65rem 0.75rem;
+  outline: none;
+}
+
+.admin-panel__gate input:focus {
+  border-color: #f0c14b;
+}
+
+.admin-panel__body {
+  display: grid;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  gap: 0.65rem;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.admin-panel__help {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  background: #041022;
+  border: 1px solid color-mix(in srgb, #4db8ff 22%, transparent);
+  text-align: left;
+  max-height: 9.5rem;
+  overflow-y: auto;
+}
+
+.admin-panel__help p {
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--ink-muted);
+  line-height: 1.35;
+}
+
+.admin-panel__help strong {
+  color: #fff;
+  font-weight: 800;
+}
+
+.admin-panel__tab-help {
+  margin: 0 0 0.35rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--ink-muted);
+  line-height: 1.35;
+  text-align: left;
+}
+
+.admin-panel__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.admin-panel__danger {
+  border: 1.5px solid color-mix(in srgb, #ff6b6b 55%, transparent);
+  background: color-mix(in srgb, #ff6b6b 12%, #0a1835);
+  color: #ffb4b4;
+  font: inherit;
+  font-weight: 800;
+  font-size: 0.8rem;
+  border-radius: 10px;
+  padding: 0.55rem 0.85rem;
+  cursor: pointer;
+}
+
+.admin-panel__danger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.admin-panel__file {
+  border: 1.5px solid color-mix(in srgb, #4db8ff 45%, transparent);
+  background: color-mix(in srgb, #4db8ff 12%, #0a1835);
+  color: #9fd6ff;
+  font: inherit;
+  font-weight: 800;
+  font-size: 0.8rem;
+  border-radius: 10px;
+  padding: 0.55rem 0.85rem;
+  cursor: pointer;
+}
+
+.admin-panel__file:hover {
+  border-color: #f0c14b;
+  color: #fff;
+}
+
+.admin-panel__error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.admin-panel__status {
+  margin: 0;
+  color: #3dd68c;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.admin-panel__tabs {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.admin-panel__tab {
+  border: 1.5px solid color-mix(in srgb, #4db8ff 35%, transparent);
+  background: transparent;
+  color: var(--ink-muted);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.admin-panel__tab.is-on {
+  border-color: #f0c14b;
+  color: #fff;
+  background: color-mix(in srgb, #f0c14b 16%, transparent);
+}
+
+.admin-panel__section {
+  overflow-y: auto;
+  min-height: 0;
+  display: grid;
+  gap: 0.75rem;
+  align-content: start;
+}
+
+.admin-panel__meta {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--ink-muted);
+}
+
+.admin-panel__bars {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.admin-bar__label {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #fff;
+  margin-bottom: 0.25rem;
+  text-transform: capitalize;
+}
+
+.admin-bar__track {
+  height: 0.55rem;
+  border-radius: 999px;
+  background: #041022;
+  overflow: hidden;
+}
+
+.admin-bar__fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #4db8ff, #f0c14b);
+}
+
+.admin-panel__fb-stats {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.9rem;
+  font-weight: 800;
+  color: #fff;
+}
+
+.admin-panel__log {
+  overflow-y: auto;
+  min-height: 0;
+  display: grid;
+  gap: 0.45rem;
+  align-content: start;
+}
+
+.admin-log-row {
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  background: #041022;
+  border: 1px solid color-mix(in srgb, #4db8ff 20%, transparent);
+}
+
+.admin-log-row header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  align-items: baseline;
+  margin-bottom: 0.2rem;
+}
+
+.admin-log-row strong {
+  font-size: 0.78rem;
+  color: #fff;
+}
+
+.admin-log-row time {
+  font-size: 0.65rem;
+  color: var(--ink-muted);
+  flex-shrink: 0;
+}
+
+.admin-log-row p {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--ink-muted);
+  line-height: 1.35;
+}
+
+.admin-log-row__ans {
+  color: #f0c14b !important;
+  font-weight: 700;
+}
+
+.admin-panel__empty {
+  margin: 0;
+  text-align: center;
+  color: var(--ink-muted);
+  font-size: 0.8rem;
+  padding: 1.5rem 0.5rem;
+}

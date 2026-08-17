@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { MultiRoom } from '../lib/multiApi'
 import { HostPlayersPanel } from './HostPlayersPanel'
 import { PlayersStreakBar } from './PlayersStreakBar'
+import { QuestionFeedback } from './QuestionFeedback'
 import { StreakFlame } from './StreakFlame'
 import './MultiPlay.css'
 
@@ -292,6 +293,23 @@ export function MultiPlay({
           )}
           {q.sourceType && (
             <p className="multi-play__source">Source : {q.sourceType}</p>
+          )}
+          {typeof correctIndex === 'number' &&
+            correctIndex >= 0 &&
+            correctIndex <= 3 && (
+            <QuestionFeedback
+              questionId={q.id}
+              question={q.question}
+              answers={q.answers}
+              correctIndex={correctIndex as 0 | 1 | 2 | 3}
+              explanation={q.explanation}
+              sourceType={q.sourceType}
+              theme={room.theme}
+              difficulty={room.difficulty}
+              mode="multi"
+              playerCorrect={Boolean(myCorrect)}
+              selectedIndex={typeof myAnswer === 'number' ? myAnswer : -1}
+            />
           )}
         </div>
       )}

@@ -13,6 +13,7 @@ import {
   saveHistory,
 } from './lib/bankStorage'
 import { createEmptyTierAttempts, resolveTierOutcome } from './lib/progression'
+import { reportCalibHand } from './lib/calibTelemetry'
 import { bankSlug, isEphemeralTheme } from './lib/themeSlug'
 import {
   answerRoom,
@@ -48,6 +49,8 @@ import {
   type TypingScoreEntry,
 } from './components/TypingScorePopup'
 import { ModeSelect } from './components/ModeSelect'
+import { AdminPanel } from './components/AdminPanel'
+import { MultiChat } from './components/MultiChat'
 import { MultiGate } from './components/MultiGate'
 import { MultiLobby } from './components/MultiLobby'
 import { MultiPlay } from './components/MultiPlay'
@@ -741,6 +744,15 @@ export default function App() {
     }
 
     if (session.playMode === 'manual') {
+      reportCalibHand({
+        mode: 'solo',
+        theme: session.theme,
+        scope: session.scope,
+        difficulty: session.currentDifficulty,
+        correct: tier.correct,
+        answered: tier.answered,
+        playMode: 'manual',
+      })
       setSession({
         ...session,
         status: 'tier-result',
@@ -768,6 +780,16 @@ export default function App() {
       tier.answered,
       session.currentDifficulty,
     )
+
+    reportCalibHand({
+      mode: 'solo',
+      theme: session.theme,
+      scope: session.scope,
+      difficulty: session.currentDifficulty,
+      correct: tier.correct,
+      answered: tier.answered,
+      playMode: 'progression',
+    })
 
     setSession({
       ...session,
@@ -1358,6 +1380,24 @@ export default function App() {
           onClose={() => setTypingBoard(null)}
         />
       )}
+      {(() => {
+        const chatId = multiPlayerId ?? getOrCreatePlayerId()
+        const preferred =
+          multiName.trim().length >= 2
+            ? multiName.trim()
+            : session.playerName.trim().length >= 2
+              ? session.playerName.trim()
+              : ''
+        const inRoom = Boolean(multiRoom && multiPlayerId)
+        return (
+          <MultiChat
+            playerId={chatId}
+            preferredName={preferred}
+            roomCode={inRoom ? multiRoom!.code : null}
+            roomChatEnabled={inRoom}
+          />
+        )
+      })()}
       {showHeader && (
         <header className="app__header">
           <p className="brand">Quizz By IA</p>
@@ -1410,20 +1450,23 @@ export default function App() {
         ) : null}
 
         {screen === 'mode' && (
-          <ModeSelect
-            onSolo={() => {
-              setError(null)
-              setScreen('home')
-            }}
-            onMulti={() => {
-              setError(null)
-              setScreen('multi-gate')
-            }}
-            onMinigames={() => {
-              setError(null)
-              setScreen('minigames')
-            }}
-          />
+          <>
+            <AdminPanel />
+            <ModeSelect
+              onSolo={() => {
+                setError(null)
+                setScreen('home')
+              }}
+              onMulti={() => {
+                setError(null)
+                setScreen('multi-gate')
+              }}
+              onMinigames={() => {
+                setError(null)
+                setScreen('minigames')
+              }}
+            />
+          </>
         )}
 
         {screen === 'minigames' && (
@@ -1485,8 +1528,15 @@ export default function App() {
               onContinue={handleNextAfterFeedback}
               disabled={selectedIndex !== null}
               timerEnabled={session.timerEnabled}
+              theme={session.theme}
             />
-            <AnswerAudit entries={audit} compact />
+            <AnswerAudit
+              entries={audit}
+              compact
+              theme={session.theme}
+              difficulty={session.currentDifficulty}
+              mode="solo"
+            />
           </>
         )}
 
@@ -1509,7 +1559,13 @@ export default function App() {
                 setScreen('finished')
               }}
             />
-            <AnswerAudit entries={audit} compact={false} />
+            <AnswerAudit
+              entries={audit}
+              compact={false}
+              theme={session.theme}
+              difficulty={tierSnapshot.difficulty}
+              mode="solo"
+            />
           </>
         )}
 
@@ -1564,7 +1620,13 @@ export default function App() {
               onKick={(id) => void handleMultiKick(id)}
               busy={multiBusy}
             />
-            <AnswerAudit entries={audit} compact />
+            <AnswerAudit
+              entries={audit}
+              compact
+              theme={multiRoom.theme}
+              difficulty={multiRoom.difficulty}
+              mode="multi"
+            />
           </>
         )}
 
@@ -1587,7 +1649,13 @@ export default function App() {
               onLeave={() => void handleMultiLeave()}
               onKick={(id) => void handleMultiKick(id)}
             />
-            <AnswerAudit entries={audit} compact={false} />
+            <AnswerAudit
+              entries={audit}
+              compact={false}
+              theme={multiRoom.theme}
+              difficulty={multiRoom.difficulty}
+              mode="multi"
+            />
           </>
         )}
 

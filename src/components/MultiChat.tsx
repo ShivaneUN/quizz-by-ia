@@ -1,0 +1,610 @@
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
+import {
+  listChat,
+  pingPresence,
+  sendChat,
+  type ChatChannel,
+  type ChatMessage,
+} from '../lib/chatApi'
+import './MultiChat.css'
+
+const CHAT_NAME_KEY = 'quizz:chatDisplayName'
+const CHAT_LAYOUT_KEY = 'quizz:chatLayout'
+
+const EMOJIS = [
+  '😀',
+  '😂',
+  '🤣',
+  '😊',
+  '😍',
+  '😎',
+  '🤔',
+  '😴',
+  '😭',
+  '😡',
+  '👍',
+  '👎',
+  '👏',
+  '🙌',
+  '🔥',
+  '💯',
+  '🎉',
+  '❤️',
+  '💪',
+  '👀',
+  '🎯',
+  '🏆',
+  '⚡',
+  '✨',
+  '🎮',
+  '🧠',
+  '😅',
+  '🫡',
+  '💀',
+  '🤝',
+]
+
+const DEFAULT_W = 328
+const DEFAULT_H = 420
+const MIN_W = 280
+const MIN_H = 320
+const MAX_W = 720
+const MAX_H = 800
+
+type ChatLayout = {
+  x: number | null
+  y: number | null
+  w: number
+  h: number
+}
+
+function loadChatName(): string {
+  try {
+    return localStorage.getItem(CHAT_NAME_KEY)?.trim() ?? ''
+  } catch {
+    return ''
+  }
+}
+
+function saveChatName(name: string) {
+  try {
+    localStorage.setItem(CHAT_NAME_KEY, name.trim().slice(0, 24))
+  } catch {
+    /* ignore */
+  }
+}
+
+function loadLayout(): ChatLayout {
+  try {
+    const raw = localStorage.getItem(CHAT_LAYOUT_KEY)
+    if (!raw) return { x: null, y: null, w: DEFAULT_W, h: DEFAULT_H }
+    const p = JSON.parse(raw) as Partial<ChatLayout>
+    return {
+      x: typeof p.x === 'number' ? p.x : null,
+      y: typeof p.y === 'number' ? p.y : null,
+      w: clamp(typeof p.w === 'number' ? p.w : DEFAULT_W, MIN_W, MAX_W),
+      h: clamp(typeof p.h === 'number' ? p.h : DEFAULT_H, MIN_H, MAX_H),
+    }
+  } catch {
+    return { x: null, y: null, w: DEFAULT_W, h: DEFAULT_H }
+  }
+}
+
+function saveLayout(layout: ChatLayout) {
+  try {
+    localStorage.setItem(CHAT_LAYOUT_KEY, JSON.stringify(layout))
+  } catch {
+    /* ignore */
+  }
+}
+
+function clamp(n: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, n))
+}
+
+/** Clear local uniquement — clé par canal (+ salle). */
+function clearStorageKey(channel: ChatChannel, roomCode?: string | null) {
+  if (channel === 'room' && roomCode) {
+    return `quizz:chatCleared:room:${roomCode.toUpperCase()}`
+  }
+  return 'quizz:chatCleared:global'
+}
+
+function loadClearedAt(channel: ChatChannel, roomCode?: string | null): number {
+  try {
+    const raw = localStorage.getItem(clearStorageKey(channel, roomCode))
+    const n = raw ? Number(raw) : 0
+    return Number.isFinite(n) && n > 0 ? n : 0
+  } catch {
+    return 0
+  }
+}
+
+function saveClearedAt(
+  channel: ChatChannel,
+  roomCode: string | null | undefined,
+  at: number,
+) {
+  try {
+    localStorage.setItem(clearStorageKey(channel, roomCode), String(at))
+  } catch {
+    /* ignore */
+  }
+}
+
+interface MultiChatProps {
+  playerId: string
+  preferredName?: string
+  roomCode?: string | null
+  roomChatEnabled?: boolean
+}
+
+/**
+ * Chat site-wide : Général + Salle, déplaçable / redimensionnable, emoji.
+ */
+export function MultiChat({
+  playerId,
+  preferredName = '',
+  roomCode = null,
+  roomChatEnabled = false,
+}: MultiChatProps) {
+  const [open, setOpen] = useState(false)
+  const [channel, setChannel] = useState<ChatChannel>('global')
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [text, setText] = useState('')
+  const [displayName, setDisplayName] = useState(() => {
+    const pref = preferredName.trim()
+    if (pref.length >= 2) return pref
+    return loadChatName()
+  })
+  const [error, setError] = useState<string | null>(null)
+  const [sending, setSending] = useState(false)
+  const [unread, setUnread] = useState(0)
+  const [online, setOnline] = useState(0)
+  const [emojiOpen, setEmojiOpen] = useState(false)
+  const [layout, setLayout] = useState<ChatLayout>(() => loadLayout())
+  const listRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const panelRef = useRef<HTMLElement>(null)
+  const lastIdRef = useRef<string | undefined>(undefined)
+  const clearedAtRef = useRef(0)
+  const openRef = useRef(open)
+  const layoutRef = useRef(layout)
+  openRef.current = open
+  layoutRef.current = layout
+
+  useEffect(() => {
+    const pref = preferredName.trim()
+    if (pref.length >= 2) {
+      setDisplayName(pref)
+      saveChatName(pref)
+    }
+  }, [preferredName])
+
+  useEffect(() => {
+    if (!playerId) return
+    let cancelled = false
+    const tick = async () => {
+      try {
+        const n = await pingPresence(playerId)
+        if (!cancelled) setOnline(n)
+      } catch {
+        /* ignore */
+      }
+    }
+    void tick()
+    const id = window.setInterval(() => void tick(), 12_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [playerId])
+
+  useEffect(() => {
+    let cancelled = false
+    lastIdRef.current = undefined
+    clearedAtRef.current = loadClearedAt(channel, roomCode)
+    setMessages([])
+
+    if (channel === 'room' && (!roomChatEnabled || !roomCode)) {
+      return
+    }
+
+    const tick = async () => {
+      try {
+        const next = await listChat({
+          channel,
+          code: channel === 'room' ? roomCode ?? undefined : undefined,
+          afterId: lastIdRef.current,
+        })
+        if (cancelled) return
+        if (next.clearedAt > clearedAtRef.current) {
+          clearedAtRef.current = next.clearedAt
+          setMessages([])
+          lastIdRef.current = undefined
+        }
+        if (next.messages.length === 0) return
+        const floor = clearedAtRef.current
+        const visible = next.messages.filter((m) => m.at > floor)
+        setMessages((prev) => {
+          if (!lastIdRef.current) return visible.slice(-80)
+          const ids = new Set(prev.map((m) => m.id))
+          const merged = [...prev]
+          for (const m of visible) {
+            if (!ids.has(m.id)) merged.push(m)
+          }
+          return merged.slice(-80)
+        })
+        lastIdRef.current =
+          next.messages[next.messages.length - 1]?.id ?? lastIdRef.current
+        if (!openRef.current) {
+          const others = visible.filter((m) => m.playerId !== playerId).length
+          if (others > 0) setUnread((u) => u + others)
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
+    void tick()
+    const id = window.setInterval(() => void tick(), 1500)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [channel, roomCode, roomChatEnabled, playerId])
+
+  function clearChatForMe() {
+    const at = Date.now()
+    clearedAtRef.current = at
+    saveClearedAt(channel, roomCode, at)
+    setMessages([])
+    setUnread(0)
+    setError(null)
+  }
+
+  useEffect(() => {
+    if (!open) return
+    setUnread(0)
+    const el = listRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [open, messages, channel])
+
+  function updateLayout(next: ChatLayout) {
+    setLayout(next)
+    saveLayout(next)
+  }
+
+  function clampPos(x: number, y: number, w: number, h: number) {
+    const maxX = Math.max(8, window.innerWidth - w - 8)
+    const maxY = Math.max(8, window.innerHeight - h - 8)
+    return {
+      x: clamp(x, 8, maxX),
+      y: clamp(y, 8, maxY),
+    }
+  }
+
+  function onDragStart(e: ReactPointerEvent<HTMLElement>) {
+    if (e.button !== 0) return
+    const target = e.target as HTMLElement
+    if (target.closest('button')) return
+    e.preventDefault()
+    const startX = e.clientX
+    const startY = e.clientY
+    const rect = panelRef.current?.getBoundingClientRect()
+    const cur = layoutRef.current
+    const originX = cur.x ?? rect?.left ?? window.innerWidth - cur.w - 16
+    const originY = cur.y ?? rect?.top ?? window.innerHeight - cur.h - 24
+
+    const onMove = (ev: PointerEvent) => {
+      const pos = clampPos(
+        originX + (ev.clientX - startX),
+        originY + (ev.clientY - startY),
+        cur.w,
+        cur.h,
+      )
+      updateLayout({ ...cur, ...pos })
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
+  function onResizeStart(e: ReactPointerEvent<HTMLButtonElement>) {
+    e.preventDefault()
+    e.stopPropagation()
+    const startX = e.clientX
+    const startY = e.clientY
+    const cur = layoutRef.current
+    const originW = cur.w
+    const originH = cur.h
+    const originX = cur.x
+    const originY = cur.y
+
+    const onMove = (ev: PointerEvent) => {
+      const w = clamp(originW + (ev.clientX - startX), MIN_W, MAX_W)
+      const h = clamp(originH + (ev.clientY - startY), MIN_H, MAX_H)
+      let x = originX
+      let y = originY
+      if (x != null && y != null) {
+        const pos = clampPos(x, y, w, h)
+        x = pos.x
+        y = pos.y
+      }
+      updateLayout({ x, y, w, h })
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
+  function insertEmoji(emoji: string) {
+    setText((prev) => {
+      const next = (prev + emoji).slice(0, 200)
+      return next
+    })
+    setEmojiOpen(false)
+    queueMicrotask(() => inputRef.current?.focus())
+  }
+
+  async function handleSend(e: FormEvent) {
+    e.preventDefault()
+    const body = text.trim()
+    const name = displayName.trim()
+    if (!body || sending) return
+    if (name.length < 2) {
+      setError('Choisis un pseudo (2 caractères min.)')
+      return
+    }
+    if (channel === 'room' && (!roomChatEnabled || !roomCode)) {
+      setError('Rejoins une salle pour le chat salle')
+      return
+    }
+    setSending(true)
+    setError(null)
+    setEmojiOpen(false)
+    saveChatName(name)
+    try {
+      const msg = await sendChat({
+        channel,
+        code: channel === 'room' ? roomCode ?? undefined : undefined,
+        playerId,
+        playerName: name,
+        text: body,
+      })
+      setText('')
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === msg.id)) return prev
+        return [...prev, msg].slice(-80)
+      })
+      lastIdRef.current = msg.id
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Envoi impossible')
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const panelStyle =
+    open && layout.x != null && layout.y != null
+      ? {
+          left: layout.x,
+          top: layout.y,
+          right: 'auto',
+          bottom: 'auto',
+        }
+      : undefined
+
+  return (
+    <div
+      className={`multi-chat${open ? ' is-open' : ''}`}
+      style={panelStyle}
+    >
+      {!open && (
+        <button
+          type="button"
+          className="multi-chat__fab"
+          onClick={() => setOpen(true)}
+          aria-label="Ouvrir le chat"
+        >
+          Chat
+          {unread > 0 && (
+            <span className="multi-chat__badge">
+              {unread > 9 ? '9+' : unread}
+            </span>
+          )}
+        </button>
+      )}
+
+      {open && (
+        <section
+          ref={panelRef}
+          className="multi-chat__panel"
+          aria-label="Chat"
+          style={{ width: layout.w, height: layout.h }}
+        >
+          <header
+            className="multi-chat__head"
+            onPointerDown={onDragStart}
+            title="Glisser pour déplacer"
+          >
+            <div className="multi-chat__tabs" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                className={`multi-chat__tab${channel === 'global' ? ' is-on' : ''}`}
+                aria-selected={channel === 'global'}
+                onClick={() => setChannel('global')}
+              >
+                Général
+              </button>
+              <button
+                type="button"
+                role="tab"
+                className={`multi-chat__tab${channel === 'room' ? ' is-on' : ''}`}
+                aria-selected={channel === 'room'}
+                title={
+                  roomChatEnabled
+                    ? 'Chat de ta salle'
+                    : 'Disponible dans une salle multi'
+                }
+                onClick={() => setChannel('room')}
+              >
+                Salle
+              </button>
+            </div>
+            <div className="multi-chat__head-actions">
+              <button
+                type="button"
+                className="multi-chat__clear"
+                onClick={clearChatForMe}
+                title="Efface l’historique chez toi seulement"
+                disabled={messages.length === 0}
+              >
+                Effacer
+              </button>
+              <button
+                type="button"
+                className="multi-chat__close"
+                onClick={() => {
+                  setEmojiOpen(false)
+                  setOpen(false)
+                }}
+                aria-label="Fermer"
+              >
+                ✕
+              </button>
+            </div>
+          </header>
+
+          <p className="multi-chat__online" aria-live="polite">
+            <span className="multi-chat__online-dot" aria-hidden />
+            {online > 0 ? `${online} en ligne` : '…'}
+          </p>
+
+          <label className="multi-chat__nick">
+            <span className="visually-hidden">Pseudo chat</span>
+            <input
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value.slice(0, 24))}
+              onBlur={() => {
+                const n = displayName.trim()
+                if (n.length >= 2) saveChatName(n)
+              }}
+              placeholder="Ton pseudo…"
+              maxLength={24}
+              autoComplete="nickname"
+            />
+          </label>
+
+          {!roomChatEnabled && (
+            <p className="multi-chat__hint">
+              Général = tout le site. Salle = uniquement si tu es en multi.
+            </p>
+          )}
+
+          <div className="multi-chat__list" ref={listRef}>
+            {channel === 'room' && !roomChatEnabled ? (
+              <p className="multi-chat__empty">
+                Rejoins une salle multi pour chatter ici
+              </p>
+            ) : messages.length === 0 ? (
+              <p className="multi-chat__empty">Aucun message pour l’instant</p>
+            ) : (
+              messages.map((m) => (
+                <div
+                  key={m.id}
+                  className={`multi-chat__msg${m.playerId === playerId ? ' is-me' : ''}`}
+                >
+                  <span className="multi-chat__name">{m.playerName}</span>
+                  <span className="multi-chat__text">{m.text}</span>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="multi-chat__composer">
+            {emojiOpen && (
+              <div className="multi-chat__emoji-pop" role="listbox" aria-label="Émojis">
+                {EMOJIS.map((em) => (
+                  <button
+                    key={em}
+                    type="button"
+                    className="multi-chat__emoji-btn"
+                    onClick={() => insertEmoji(em)}
+                  >
+                    {em}
+                  </button>
+                ))}
+              </div>
+            )}
+            <form
+              className="multi-chat__form"
+              onSubmit={(e) => void handleSend(e)}
+            >
+              <button
+                type="button"
+                className={`multi-chat__emoji-toggle${emojiOpen ? ' is-on' : ''}`}
+                onClick={() => setEmojiOpen((v) => !v)}
+                aria-label="Émojis"
+                aria-expanded={emojiOpen}
+                disabled={channel === 'room' && !roomChatEnabled}
+              >
+                😊
+              </button>
+              <input
+                ref={inputRef}
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                maxLength={200}
+                placeholder={
+                  channel === 'room'
+                    ? 'Message à la salle…'
+                    : 'Message général…'
+                }
+                disabled={sending || (channel === 'room' && !roomChatEnabled)}
+                autoComplete="off"
+              />
+              <button
+                type="submit"
+                className="btn btn--primary multi-chat__send"
+                disabled={
+                  sending ||
+                  !text.trim() ||
+                  (channel === 'room' && !roomChatEnabled)
+                }
+              >
+                OK
+              </button>
+            </form>
+          </div>
+          {error && (
+            <p className="multi-chat__error" role="alert">
+              {error}
+            </p>
+          )}
+
+          <button
+            type="button"
+            className="multi-chat__resize"
+            aria-label="Redimensionner le chat"
+            title="Agrandir / réduire"
+            onPointerDown={onResizeStart}
+          />
+        </section>
+      )}
+    </div>
+  )
+}

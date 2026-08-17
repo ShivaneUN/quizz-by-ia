@@ -68,7 +68,13 @@ export type QuizScope = 'fr' | 'international'
 export type QuizContentMode = 'standard' | 'image'
 
 /** Choix d’IA pour la génération */
-export type AiProvider = 'auto' | 'groq' | 'gemini'
+export type AiProvider =
+  | 'auto'
+  | 'groq'
+  | 'gemini'
+  | 'cerebras'
+  | 'deepseek'
+  | 'openrouter'
 
 export const QUIZ_SCOPE_LABELS: Record<QuizScope, string> = {
   fr: 'Français',
@@ -84,7 +90,13 @@ export const AI_PROVIDER_LABELS: Record<AiProvider, string> = {
   auto: 'Auto',
   groq: 'Groq',
   gemini: 'Gemini',
+  cerebras: 'Cerebras',
+  deepseek: 'DeepSeek',
+  openrouter: 'OpenRouter',
 }
+
+/** Providers proposés dans l’UI (les autres restent en fallback Auto) */
+export const AI_PROVIDER_UI: AiProvider[] = ['auto', 'groq', 'gemini']
 
 /** Session de jeu solo */
 export type SoloPlayMode = 'progression' | 'manual'

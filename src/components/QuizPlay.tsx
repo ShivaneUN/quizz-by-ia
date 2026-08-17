@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Question } from '../types'
 import { ROUND_MS } from '../types'
+import { QuestionFeedback } from './QuestionFeedback'
 import './QuizPlay.css'
 
 interface QuizPlayProps {
@@ -14,6 +15,7 @@ interface QuizPlayProps {
   disabled?: boolean
   timerEnabled?: boolean
   durationMs?: number
+  theme?: string
 }
 
 export function QuizPlay({
@@ -26,6 +28,7 @@ export function QuizPlay({
   disabled,
   timerEnabled = false,
   durationMs = ROUND_MS,
+  theme,
 }: QuizPlayProps) {
   const revealed = selectedIndex !== null
   const timedOut = selectedIndex === -1
@@ -166,6 +169,19 @@ export function QuizPlay({
           {question.sourceType && (
             <p className="quiz-play__source">Source : {question.sourceType}</p>
           )}
+          <QuestionFeedback
+            questionId={question.id}
+            question={question.question}
+            answers={question.answers}
+            correctIndex={question.correctIndex}
+            explanation={question.explanation}
+            sourceType={question.sourceType}
+            theme={theme}
+            difficulty={question.difficulty}
+            mode="solo"
+            playerCorrect={isCorrect}
+            selectedIndex={selectedIndex ?? undefined}
+          />
           {onContinue && (
             <button
               type="button"
