@@ -14,6 +14,8 @@ interface MultiLobbyProps {
   onStart: () => void
   onLeave: () => void
   onKick: (targetPlayerId: string) => void
+  onChangeTheme?: () => void
+  onCancelGenerate?: () => void
   onTypingScore?: (score: number) => void
 }
 
@@ -26,6 +28,8 @@ export function MultiLobby({
   onStart,
   onLeave,
   onKick,
+  onChangeTheme,
+  onCancelGenerate,
   onTypingScore,
 }: MultiLobbyProps) {
   const isHost = playerId === room.hostId
@@ -48,6 +52,7 @@ export function MultiLobby({
       <p className="multi-lobby__code">{room.code}</p>
       <p className="multi-lobby__theme">
         {room.theme} · {room.scope === 'fr' ? 'Français' : 'International'}
+        {room.quizMode === 'audio' ? ' · Musique Deezer' : ''}
         {playMode === 'progression' ? ' · Paliers' : ' · Libre'}
         {` · ${DIFFICULTY_LABELS[difficulty]}`}
         {timerOn ? ' · Chrono 10 s' : ' · Sans chrono'}
@@ -64,6 +69,18 @@ export function MultiLobby({
       {playMode === 'progression' && (
         <p className="multi-lobby__info">
           Mode paliers : tout le monde doit faire 10/10 pour avancer
+        </p>
+      )}
+
+      {room.hostPickingTheme && !isHost && (
+        <p className="multi-lobby__info">
+          L’hôte choisit un nouveau thème… Tu es dans la salle, patiente.
+        </p>
+      )}
+
+      {room.hostPickingTheme && isHost && (
+        <p className="multi-lobby__info">
+          Choix de thème en cours — les joueurs attendent dans la salle.
         </p>
       )}
 
@@ -86,25 +103,50 @@ export function MultiLobby({
       )}
 
       {isHost ? (
-        <button
-          type="button"
-          className="btn btn--primary"
-          disabled={generating || room.players.length < 1}
-          onClick={onStart}
-        >
-          {generating
-            ? 'Génération…'
-            : room.status === 'error'
-              ? `Réessayer (10 Q · ${DIFFICULTY_LABELS[difficulty]}${timerOn ? ' · 10 s' : ''})`
-              : `Démarrer (10 Q · ${DIFFICULTY_LABELS[difficulty]}${timerOn ? ' · 10 s' : ''})`}
-        </button>
+        <div className="multi-lobby__actions">
+          {room.status === 'generating' ? (
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={onCancelGenerate}
+              disabled={!onCancelGenerate}
+            >
+              Annuler la génération
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={generating || room.players.length < 1}
+                onClick={onStart}
+              >
+                {room.status === 'error'
+                  ? `Réessayer (10 Q · ${DIFFICULTY_LABELS[difficulty]}${timerOn ? ' · 10 s' : ''})`
+                  : `Démarrer (10 Q · ${DIFFICULTY_LABELS[difficulty]}${timerOn ? ' · 10 s' : ''})`}
+              </button>
+              {onChangeTheme && (
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  disabled={busy}
+                  onClick={onChangeTheme}
+                >
+                  Changer de thème
+                </button>
+              )}
+            </>
+          )}
+        </div>
       ) : (
         <p className="multi-lobby__wait">
-          {room.status === 'generating'
-            ? 'L’hôte génère les questions…'
-            : room.status === 'error'
-              ? 'En attente que l’hôte relance…'
-              : 'En attente de l’hôte…'}
+          {room.hostPickingTheme
+            ? 'L’hôte choisit un thème…'
+            : room.status === 'generating'
+              ? 'L’hôte génère les questions…'
+              : room.status === 'error'
+                ? 'En attente que l’hôte relance…'
+                : 'En attente de l’hôte…'}
         </p>
       )}
 

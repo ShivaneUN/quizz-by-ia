@@ -185,7 +185,34 @@ export function MultiPlay({
 
       <h2 className="multi-play__question">{q.question}</h2>
 
-      {q.imageUrl && (
+      {q.previewUrl && (
+        <figure className="multi-play__media multi-play__media--audio">
+          {q.coverUrl && (
+            <img
+              className="multi-play__cover"
+              src={q.coverUrl}
+              alt=""
+              loading="eager"
+              decoding="async"
+              referrerPolicy="no-referrer"
+            />
+          )}
+          <audio
+            key={q.id}
+            className="multi-play__audio"
+            controls
+            preload="auto"
+            src={q.previewUrl}
+          >
+            Ton navigateur ne lit pas l’audio.
+          </audio>
+          <figcaption className="multi-play__audio-caption">
+            Extrait Deezer (~30 s)
+          </figcaption>
+        </figure>
+      )}
+
+      {q.imageUrl && !q.previewUrl && (
         <figure className="multi-play__media">
           <img
             className="multi-play__image"

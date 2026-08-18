@@ -93,7 +93,34 @@ export function QuizPlay({
 
       <h2 className="quiz-play__question">{question.question}</h2>
 
-      {question.imageUrl && (
+      {question.previewUrl && (
+        <figure className="quiz-play__media quiz-play__media--audio">
+          {question.coverUrl && (
+            <img
+              className="quiz-play__cover"
+              src={question.coverUrl}
+              alt=""
+              loading="eager"
+              decoding="async"
+              referrerPolicy="no-referrer"
+            />
+          )}
+          <audio
+            key={question.id}
+            className="quiz-play__audio"
+            controls
+            preload="auto"
+            src={question.previewUrl}
+          >
+            Ton navigateur ne lit pas l’audio.
+          </audio>
+          <figcaption className="quiz-play__audio-caption">
+            Extrait Deezer (~30 s)
+          </figcaption>
+        </figure>
+      )}
+
+      {question.imageUrl && !question.previewUrl && (
         <figure className="quiz-play__media">
           <img
             className="quiz-play__image"

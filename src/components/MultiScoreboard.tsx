@@ -218,6 +218,14 @@ export function MultiScoreboard({
 
       {isHost ? (
         <div className="multi-dash__actions">
+          <button
+            type="button"
+            className="btn btn--secondary"
+            onClick={onChangeTheme}
+            disabled={busy}
+          >
+            Changer de thème
+          </button>
           {playMode === 'progression' ? (
             <>
               {allTiersDone ? (
@@ -284,14 +292,6 @@ export function MultiScoreboard({
               </button>
             </>
           )}
-          <button
-            type="button"
-            className="btn btn--secondary"
-            onClick={onChangeTheme}
-            disabled={busy}
-          >
-            Changer de thème
-          </button>
           <button
             type="button"
             className="btn btn--ghost"

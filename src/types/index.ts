@@ -27,6 +27,10 @@ export interface Question {
   imageSubject?: string
   imageKind?: 'logo' | 'sujet_entier' | 'detail_zoome'
   imageUrl?: string
+  /** Mode musique Deezer : extrait + pochette */
+  previewUrl?: string
+  coverUrl?: string
+  deezerTrackId?: string
 }
 
 /** Métadonnées d'une banque de thème */
@@ -64,8 +68,8 @@ export interface TierAttempt {
 /** Portée culturelle des questions */
 export type QuizScope = 'fr' | 'international'
 
-/** Texte seul ou QCM illustré (Wikimedia) */
-export type QuizContentMode = 'standard' | 'image'
+/** Texte seul, QCM illustré, ou quiz musical Deezer */
+export type QuizContentMode = 'standard' | 'image' | 'audio'
 
 /** Choix d’IA pour la génération */
 export type AiProvider =
@@ -84,6 +88,7 @@ export const QUIZ_SCOPE_LABELS: Record<QuizScope, string> = {
 export const QUIZ_CONTENT_MODE_LABELS: Record<QuizContentMode, string> = {
   standard: 'Texte',
   image: 'Images',
+  audio: 'Musique Deezer',
 }
 
 export const AI_PROVIDER_LABELS: Record<AiProvider, string> = {

@@ -120,6 +120,10 @@
 }
 
 .app--home .app__main {
+  width: min(54rem, 100%);
+}
+
+.app--home .app__main {
   width: 100%;
 }
 
@@ -155,6 +159,11 @@
 .loading--duel {
   padding: 1rem 0 2rem;
   width: 100%;
+}
+
+.loading__cancel {
+  margin-top: 0.75rem;
+  min-width: min(18rem, 100%);
 }
 
 .loading__pulse {

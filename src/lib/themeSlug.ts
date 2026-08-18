@@ -24,7 +24,9 @@ export function bankSlug(
   if (!base) return ''
   return quizMode === 'image'
     ? `${base}--${scope}--image`
-    : `${base}--${scope}`
+    : quizMode === 'audio'
+      ? `${base}--${scope}--audio`
+      : `${base}--${scope}`
 }
 
 /** Actualité : jamais en banque (régénération à chaque manche) */

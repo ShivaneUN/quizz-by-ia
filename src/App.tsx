@@ -33,7 +33,10 @@ import {
   setRoomTheme,
   setRoomTimer,
   startRoom,
+  runRoomGenerate,
   reportTypingScore,
+  cancelRoomGenerate,
+  backRoomToLobby,
   type MultiRoom,
 } from './lib/multiApi'
 import {
@@ -137,6 +140,11 @@ export default function App() {
   const [pendingScored, setPendingScored] = useState(false)
   /** Évite de doubler l’audit multi à chaque poll en phase reveal */
   const multiAuditKeysRef = useRef<Set<string>>(new Set())
+  const soloGenAbortRef = useRef<AbortController | null>(null)
+  const multiGenAbortRef = useRef<AbortController | null>(null)
+  const multiThemeReturnRef = useRef<'lobby' | 'score'>('lobby')
+  const screenRef = useRef(screen)
+  screenRef.current = screen
 
   // —— Multijoueur ——
   const [multiName, setMultiName] = useState('')
@@ -229,7 +237,8 @@ export default function App() {
       difficulty: Difficulty,
       scope: QuizScope,
       provider: AiProvider = 'auto',
-      quizMode: 'standard' | 'image' = 'standard',
+      quizMode: 'standard' | 'image' | 'audio' = 'standard',
+      signal?: AbortSignal,
     ): Promise<{ hand: Question[]; msg?: string } | { error: string }> => {
       const playerId = getOrCreatePlayerId()
       let history = loadHistory(playerId, themeSlug)
@@ -240,25 +249,37 @@ export default function App() {
         return attachImagesToQuestions(qs)
       }
 
-      // Actualité : toujours régénérer, jamais stocker en banque
-      if (isEphemeralTheme(theme, themeSlug)) {
+      function finalizeAudioQs(qs: Question[]): Question[] {
+        if (quizMode !== 'audio') return qs
+        return qs.filter((q) => Boolean(q.previewUrl))
+      }
+
+      // Actualité / Deezer : régénérer (pas de banque figée)
+      if (isEphemeralTheme(theme, themeSlug) || quizMode === 'audio') {
         try {
-          const gen = await generateQuestions({
-            theme,
-            mode: 'complementary',
-            difficulty,
-            scope,
-            provider,
-            quizMode,
-            excludeQuestions: collectExcludeQuestionTexts(themeSlug, playerId),
-          })
+          const gen = await generateQuestions(
+            {
+              theme,
+              mode: 'complementary',
+              difficulty,
+              scope,
+              provider,
+              quizMode,
+              excludeQuestions: collectExcludeQuestionTexts(themeSlug, playerId),
+            },
+            signal,
+          )
           let hand = await finalizeImageQs(
             gen.questions.filter((q) => q.difficulty === difficulty),
           )
+          hand = finalizeAudioQs(hand)
           hand = hand.slice(0, QUESTIONS_PER_TIER)
           if (hand.length < QUESTIONS_PER_TIER) {
             return {
-              error: `Impossible de constituer 10 questions illustrées (${hand.length}/10). Réessaie.`,
+              error:
+                quizMode === 'audio'
+                  ? `Impossible de constituer 10 questions musicales (${hand.length}/10). Réessaie avec un autre style.`
+                  : `Impossible de constituer 10 questions illustrées (${hand.length}/10). Réessaie.`,
             }
           }
           history = markSeen(
@@ -283,15 +304,18 @@ export default function App() {
 
       if (!bank) {
         try {
-          const gen = await generateQuestions({
-            theme,
-            mode: 'complementary',
-            difficulty,
-            scope,
-            provider,
-            quizMode,
-            excludeQuestions: collectExcludeQuestionTexts(themeSlug, playerId),
-          })
+          const gen = await generateQuestions(
+            {
+              theme,
+              mode: 'complementary',
+              difficulty,
+              scope,
+              provider,
+              quizMode,
+              excludeQuestions: collectExcludeQuestionTexts(themeSlug, playerId),
+            },
+            signal,
+          )
           const tierQs = await finalizeImageQs(
             gen.questions.filter((q) => q.difficulty === difficulty),
           )
@@ -328,17 +352,23 @@ export default function App() {
 
       let refillTries = 0
       while (hand.length < QUESTIONS_PER_TIER && refillTries < 3) {
+        if (signal?.aborted) {
+          return { error: 'Génération annulée' }
+        }
         refillTries++
         try {
-          const gen = await generateQuestions({
-            theme,
-            mode: 'complementary',
-            difficulty,
-            scope,
-            provider,
-            quizMode,
-            excludeQuestions: collectExcludeQuestionTexts(themeSlug, playerId),
-          })
+          const gen = await generateQuestions(
+            {
+              theme,
+              mode: 'complementary',
+              difficulty,
+              scope,
+              provider,
+              quizMode,
+              excludeQuestions: collectExcludeQuestionTexts(themeSlug, playerId),
+            },
+            signal,
+          )
           const tierQs = await finalizeImageQs(
             gen.questions.filter((q) => q.difficulty === difficulty),
           )
@@ -420,11 +450,18 @@ export default function App() {
           return
         }
         setMultiRoom((prev) => preferNewerRoom(prev, room))
-        // Pendant le choix de thème, ne pas forcer le lobby
-        if (screen === 'multi-theme') return
+        // Pendant le choix de thème, ne pas forcer le lobby / score
+        if (screenRef.current === 'multi-theme') return
         // Navigation pilotée par le status serveur (relance = generating → playing)
         const next = multiScreenForStatus(room.status)
-        if (next !== screen) setScreen(next)
+        if (next !== screenRef.current) {
+          // Efface une vieille erreur 504 de génération une fois la partie OK
+          if (next === 'multi-play' || next === 'multi-score') {
+            setError(null)
+            setStatusMsg(null)
+          }
+          setScreen(next)
+        }
       } catch (e) {
         if (cancelled) return
         const msg = e instanceof Error ? e.message : ''
@@ -611,6 +648,9 @@ export default function App() {
   ) {
     setError(null)
     setStatusMsg(null)
+    soloGenAbortRef.current?.abort()
+    const ac = new AbortController()
+    soloGenAbortRef.current = ac
     setScreen('loading')
     soloTypingScoreRef.current = 0
 
@@ -621,7 +661,7 @@ export default function App() {
     const unlocked: Difficulty[] =
       playMode === 'manual' ? [...DIFFICULTIES] : ['easy']
     const aiProvider = options.aiProvider ?? 'auto'
-    const quizMode = 'standard' as const
+    const quizMode = options.quizMode === 'audio' ? 'audio' : 'standard'
 
     const attempts = createEmptyTierAttempts()
     if (playMode === 'manual') {
@@ -664,8 +704,11 @@ export default function App() {
         scope,
         aiProvider,
         quizMode,
+        ac.signal,
       )
+      if (ac.signal.aborted) return
       if ('error' in result) {
+        if (result.error === 'Génération annulée') return
         setError(result.error)
         setScreen('home')
         return
@@ -684,8 +727,11 @@ export default function App() {
       pushSoloTypingBoard(soloTypingScoreRef.current)
       setScreen('play')
     } catch (e) {
+      if (ac.signal.aborted) return
       setError(e instanceof Error ? e.message : 'Erreur au démarrage')
       setScreen('home')
+    } finally {
+      if (soloGenAbortRef.current === ac) soloGenAbortRef.current = null
     }
   }
 
@@ -815,6 +861,9 @@ export default function App() {
 
   async function startSoloHand(nextDiff: Difficulty) {
     setError(null)
+    soloGenAbortRef.current?.abort()
+    const ac = new AbortController()
+    soloGenAbortRef.current = ac
     setScreen('loading')
     soloTypingScoreRef.current = 0
     setStatusMsg('Préparation de la manche…')
@@ -827,14 +876,13 @@ export default function App() {
         session.scope,
         session.aiProvider ?? 'auto',
         session.quizMode ?? 'standard',
+        ac.signal,
       )
+      if (ac.signal.aborted) return
       if ('error' in result) {
-        setSession((s) => ({
-          ...s,
-          status: 'finished',
-          currentDifficulty: nextDiff,
-        }))
-        setScreen('finished')
+        if (result.error === 'Génération annulée') return
+        setError(result.error)
+        setScreen('tier-result')
         return
       }
 
@@ -863,8 +911,11 @@ export default function App() {
       pushSoloTypingBoard(soloTypingScoreRef.current)
       setScreen('play')
     } catch (e) {
+      if (ac.signal.aborted) return
       setError(e instanceof Error ? e.message : 'Erreur')
       setScreen('tier-result')
+    } finally {
+      if (soloGenAbortRef.current === ac) soloGenAbortRef.current = null
     }
   }
 
@@ -896,6 +947,10 @@ export default function App() {
         : `Nouvelle manche ${DIFFICULTY_LABELS[nextDiff]}…`,
     )
 
+    soloGenAbortRef.current?.abort()
+    const ac = new AbortController()
+    soloGenAbortRef.current = ac
+
     try {
       const result = await ensureHand(
         session.theme,
@@ -904,14 +959,13 @@ export default function App() {
         session.scope,
         session.aiProvider ?? 'auto',
         session.quizMode ?? 'standard',
+        ac.signal,
       )
+      if (ac.signal.aborted) return
       if ('error' in result) {
-        setSession((s) => ({
-          ...s,
-          status: 'finished',
-          currentDifficulty: nextDiff,
-        }))
-        setScreen('finished')
+        if (result.error === 'Génération annulée') return
+        setError(result.error)
+        setScreen('tier-result')
         return
       }
 
@@ -939,12 +993,19 @@ export default function App() {
       pushSoloTypingBoard(soloTypingScoreRef.current)
       setScreen('play')
     } catch (e) {
+      if (ac.signal.aborted) return
       setError(e instanceof Error ? e.message : 'Erreur')
       setScreen('tier-result')
+    } finally {
+      if (soloGenAbortRef.current === ac) soloGenAbortRef.current = null
     }
   }
 
   function resetAll() {
+    soloGenAbortRef.current?.abort()
+    soloGenAbortRef.current = null
+    multiGenAbortRef.current?.abort()
+    multiGenAbortRef.current = null
     setSession(initialSession())
     setTierSnapshot(null)
     setAudit([])
@@ -967,8 +1028,19 @@ export default function App() {
     const pid = multiPlayerId
     const name = multiName.trim()
     const theme = multiRoom?.theme
+    const wasGenerating = multiRoom?.status === 'generating'
+    const isHost = Boolean(pid && multiRoom && pid === multiRoom.hostId)
     if (code && name) {
       saveLastMultiRoom({ code, playerName: name, theme })
+    }
+    multiGenAbortRef.current?.abort()
+    multiGenAbortRef.current = null
+    if (code && pid && wasGenerating && isHost) {
+      try {
+        await cancelRoomGenerate({ code, playerId: pid })
+      } catch {
+        /* on quitte quand même */
+      }
     }
     if (code && pid) {
       try {
@@ -1050,7 +1122,7 @@ export default function App() {
           theme,
           scope,
           aiProvider: options.aiProvider,
-          quizMode: 'standard',
+          quizMode: options.quizMode === 'audio' ? 'audio' : 'standard',
         })
         setMultiRoom(res.room)
         const mode = options.gameMode
@@ -1099,7 +1171,7 @@ export default function App() {
         playMode: options.gameMode,
         difficulty: options.difficulty,
         aiProvider: options.aiProvider,
-        quizMode: 'standard',
+        quizMode: options.quizMode === 'audio' ? 'audio' : 'standard',
       })
       setMultiPlayerId(res.playerId!)
       setMultiRoom(res.room)
@@ -1143,6 +1215,8 @@ export default function App() {
 
   async function runSharedMultiStart() {
     if (!multiRoom || !multiPlayerId) return
+    const code = multiRoom.code
+    const playerId = multiPlayerId
     setMultiBusy(true)
     setError(null)
     setStatusMsg('Génération des questions…')
@@ -1171,21 +1245,190 @@ export default function App() {
         : prev,
     )
     setScreen('multi-lobby')
+    multiGenAbortRef.current?.abort()
+    const ac = new AbortController()
+    multiGenAbortRef.current = ac
+
+    async function syncFromPoll(): Promise<MultiRoom | null> {
+      try {
+        const { room } = await pollRoom(code)
+        setMultiRoom((prev) => preferNewerRoom(prev, room))
+        return room
+      } catch {
+        return null
+      }
+    }
+
     try {
-      const res = await startRoom({
-        code: multiRoom.code,
-        playerId: multiPlayerId,
-      })
-      setMultiRoom(res.room)
-      setStatusMsg(res.message ?? null)
-      setScreen(multiScreenForStatus(res.room.status))
+      // 1) Marque generating (rapide) — plus de 504 sur ce POST
+      const started = await startRoom({ code, playerId }, ac.signal)
+      if (ac.signal.aborted) return
+      setMultiRoom(started.room)
+
+      // 2) Génération IA (peut être longue) — en cas de timeout, on se fie au poll
+      let genRoom: MultiRoom | null = null
+      try {
+        const gen = await runRoomGenerate({ code, playerId }, ac.signal)
+        if (ac.signal.aborted) return
+        genRoom = gen.room
+        setMultiRoom(gen.room)
+        setStatusMsg(gen.message ?? null)
+      } catch (e) {
+        if (ac.signal.aborted) return
+        const fromErr = roomFromError(e)
+        if (fromErr) {
+          setMultiRoom(fromErr)
+          genRoom = fromErr
+        }
+        // Timeout / 504 : la gen a peut‑être quand même fini côté serveur
+        const polled = await syncFromPoll()
+        if (polled) genRoom = polled
+        if (
+          genRoom &&
+          (genRoom.status === 'playing' || genRoom.status === 'finished')
+        ) {
+          setError(null)
+          setStatusMsg(null)
+          setScreen(multiScreenForStatus(genRoom.status))
+          return
+        }
+        if (genRoom?.status === 'error') {
+          setError(
+            genRoom.errorMessage ||
+              (e instanceof Error ? e.message : 'Génération échouée'),
+          )
+          setScreen('multi-lobby')
+          return
+        }
+        // Toujours generating : laisser le poll / bouton Réessayer — pas d’erreur sticky 504
+        setError(null)
+        setStatusMsg(
+          'La génération prend plus de temps que prévu… elle continue en arrière-plan.',
+        )
+        setScreen('multi-lobby')
+        return
+      }
+
+      if (genRoom) {
+        setError(null)
+        setScreen(multiScreenForStatus(genRoom.status))
+      }
     } catch (e) {
+      if (ac.signal.aborted) return
+      const polled = await syncFromPoll()
+      if (
+        polled &&
+        (polled.status === 'playing' ||
+          polled.status === 'finished' ||
+          polled.status === 'generating')
+      ) {
+        setError(null)
+        setScreen(multiScreenForStatus(polled.status))
+        return
+      }
       const room = roomFromError(e)
       if (room) setMultiRoom(room)
       setError(e instanceof Error ? e.message : 'Erreur')
       setScreen('multi-lobby')
     } finally {
+      if (multiGenAbortRef.current === ac) multiGenAbortRef.current = null
       setMultiBusy(false)
+    }
+  }
+
+  async function handleMultiCancelGenerate() {
+    if (!multiRoom || !multiPlayerId) return
+    multiGenAbortRef.current?.abort()
+    multiGenAbortRef.current = null
+    setMultiBusy(true)
+    setError(null)
+    try {
+      const res = await cancelRoomGenerate({
+        code: multiRoom.code,
+        playerId: multiPlayerId,
+      })
+      setMultiRoom(res.room)
+      setStatusMsg(res.message ?? 'Génération annulée')
+      setScreen('multi-lobby')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erreur')
+    } finally {
+      setMultiBusy(false)
+    }
+  }
+
+  function handleMultiChangeTheme(from: 'lobby' | 'score' = 'lobby') {
+    multiThemeReturnRef.current = 'lobby'
+    setError(null)
+    setStatusMsg(null)
+    void (async () => {
+      if (!multiRoom || !multiPlayerId) {
+        setScreen('multi-theme')
+        return
+      }
+      setMultiBusy(true)
+      try {
+        // Remet tout le monde au lobby + signale que l’hôte choisit un thème
+        const res = await backRoomToLobby({
+          code: multiRoom.code,
+          playerId: multiPlayerId,
+          pickingTheme: true,
+        })
+        setMultiRoom(res.room)
+        setScreen('multi-theme')
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Erreur')
+        if (from === 'score') setScreen('multi-score')
+      } finally {
+        setMultiBusy(false)
+      }
+    })()
+  }
+
+  /** Quitte l’écran thèmes → salle active (multi) ou accueil (solo). */
+  async function handleLeaveThemePage() {
+    setError(null)
+    setStatusMsg(null)
+
+    // Solo
+    if (!multiRoom || !multiPlayerId) {
+      if (screen === 'multi-theme') setScreen('multi-gate')
+      else setScreen('mode')
+      return
+    }
+
+    // Multi : ramène hôte + participants sur le lobby de la salle
+    setMultiBusy(true)
+    try {
+      const res = await backRoomToLobby({
+        code: multiRoom.code,
+        playerId: multiPlayerId,
+        pickingTheme: false,
+      })
+      setMultiRoom(res.room)
+    } catch (e) {
+      // Même si l’API échoue, on affiche le lobby localement
+      setMultiRoom((prev) =>
+        prev
+          ? { ...prev, status: 'lobby', hostPickingTheme: false }
+          : prev,
+      )
+      setError(e instanceof Error ? e.message : null)
+    } finally {
+      setMultiBusy(false)
+    }
+    multiThemeReturnRef.current = 'lobby'
+    setScreen('multi-lobby')
+  }
+
+  function handleCancelSoloGenerate() {
+    soloGenAbortRef.current?.abort()
+    setStatusMsg(null)
+    setError(null)
+    if (tierSnapshot) {
+      setScreen('tier-result')
+    } else {
+      setScreen('home')
     }
   }
 
@@ -1279,7 +1522,10 @@ export default function App() {
         answerIndex,
       })
       setMultiRoom((prev) => preferNewerRoom(prev, res.room))
-      if (res.room.status === 'finished') setScreen('multi-score')
+      if (res.room.status === 'finished') {
+        setError(null)
+        setScreen('multi-score')
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur')
     }
@@ -1348,7 +1594,10 @@ export default function App() {
         playerId: multiPlayerId,
       })
       setMultiRoom((prev) => preferNewerRoom(prev, res.room))
-      if (res.room.status === 'finished') setScreen('multi-score')
+      if (res.room.status === 'finished') {
+        setError(null)
+        setScreen('multi-score')
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur')
     } finally {
@@ -1361,7 +1610,7 @@ export default function App() {
     screen !== 'mode' &&
     screen !== 'home' &&
     screen !== 'multi-gate' &&
-    !(screen === 'multi-theme' && !multiRoom)
+    screen !== 'multi-theme'
   const isHomeLike =
     screen === 'mode' ||
     screen === 'home' ||
@@ -1420,19 +1669,16 @@ export default function App() {
               type="button"
               className="btn-home"
               onClick={() => {
-                if (screen === 'multi-theme' && multiRoom) {
-                  setError(null)
-                  setScreen('multi-score')
-                  return
-                }
                 if (multiRoom && multiPlayerId) {
                   void handleMultiLeave()
                   return
                 }
+                // Solo (ex. pendant génération) : coupe la requête puis Accueil
+                soloGenAbortRef.current?.abort()
                 resetAll()
               }}
             >
-              {screen === 'multi-theme' && multiRoom ? 'Retour' : 'Accueil'}
+              Accueil
             </button>
           </div>
         </header>
@@ -1502,8 +1748,13 @@ export default function App() {
           <ThemeSelect
             onStart={handleMultiThemeStart}
             variant="multi"
+            existingRoom={Boolean(multiRoom)}
             busy={multiBusy}
             error={error}
+            onBack={() => void handleLeaveThemePage()}
+            backLabel={
+              multiRoom ? '← Retour à la salle' : '← Retour'
+            }
           />
         )}
 
@@ -1514,6 +1765,13 @@ export default function App() {
               statusLabel={statusMsg ?? 'Génération du quiz…'}
               onScoreChange={handleSoloTypingScore}
             />
+            <button
+              type="button"
+              className="btn btn--secondary loading__cancel"
+              onClick={handleCancelSoloGenerate}
+            >
+              Annuler la génération
+            </button>
           </div>
         )}
 
@@ -1592,6 +1850,8 @@ export default function App() {
             onStart={handleMultiStart}
             onLeave={() => void handleMultiLeave()}
             onKick={(id) => void handleMultiKick(id)}
+            onChangeTheme={() => handleMultiChangeTheme('lobby')}
+            onCancelGenerate={() => void handleMultiCancelGenerate()}
             onTypingScore={handleMultiTypingScore}
           />
         )}
@@ -1640,10 +1900,7 @@ export default function App() {
               onReplay={handleMultiStart}
               onContinueTier={() => void handleMultiContinueTier()}
               onRestartTiers={() => void handleMultiRestartTiers()}
-              onChangeTheme={() => {
-                setError(null)
-                setScreen('multi-theme')
-              }}
+              onChangeTheme={() => handleMultiChangeTheme('score')}
               onSetDifficulty={handleMultiSetDifficulty}
               onCloseRoom={handleMultiClose}
               onLeave={() => void handleMultiLeave()}

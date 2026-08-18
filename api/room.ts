@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { generateQuestions, normalizeThemeSlug, parseAiProvider } from '../server/generate.js'
+import { generateQuestions, normalizeThemeSlug, parseAiProvider, parseQuizContentMode } from '../server/generate.js'
 import {
   ROUND_MS,
   MULTI_QUESTION_COUNT,
@@ -55,7 +55,7 @@ function json(res: VercelResponse, status: number, body: unknown) {
 
 /**
  * POST /api/room
- * actions: create | join | start | begin | pause | resume | answer | next | leave | kick | state | setTheme | setTimer | setDifficulty | setPlayMode | close | typingScore
+ * actions: create | join | start | runGenerate | begin | pause | resume | answer | next | leave | kick | state | setTheme | setTimer | setDifficulty | setPlayMode | close | typingScore | cancelGenerate | backToLobby
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') {
@@ -95,6 +95,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const difficulty =
         playMode === 'progression' ? 'easy' : parseDifficulty(body.difficulty)
       const aiProvider = parseAiProvider(body.aiProvider)
+      const quizMode = parseQuizContentMode(body.quizMode)
       const hostId = newPlayerId()
       let code = makeRoomCode()
       for (let i = 0; i < 5; i++) {
@@ -113,7 +114,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         playMode,
         difficulty,
         aiProvider,
-        quizMode: 'standard',
+        quizMode: quizMode === 'audio' ? 'audio' : 'standard',
         players: [
           {
             id: hostId,
@@ -207,9 +208,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return json(res, 400, { error: 'Pas assez de joueurs' })
       }
 
-      // Feedback partagé : tous les clients voient « génération » via le poll
+      // Marque « generating » tout de suite et rend la main (évite 504 client)
       room.status = 'generating'
-      room.quizMode = 'standard'
+      delete room.hostPickingTheme
+      // conserve quizMode (audio Deezer ou standard)
+      if (room.quizMode !== 'audio') room.quizMode = 'standard'
       room.timerStarted = false
       room.timerPaused = false
       room.timerPausedLeftMs = undefined
@@ -224,8 +227,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const eta = await getGenerationEstimateSec('multi')
       room.genEstimateSec = eta.estimateSec
       await saveRoom(room)
+      return json(res, 200, {
+        room: publicRoomView(room),
+        message: 'Génération démarrée',
+      })
+    }
 
-      const themeSlug = `${normalizeThemeSlug(room.theme)}--${room.scope}`
+    if (action === 'runGenerate') {
+      const code = String(body.code ?? '').trim().toUpperCase()
+      const playerId = String(body.playerId ?? '')
+      let room = await getRoom(code)
+      if (!room) return json(res, 404, { error: 'Salle introuvable' })
+      if (playerId !== room.hostId) {
+        return json(res, 403, { error: 'Seul l’hôte peut générer' })
+      }
+      if (room.status === 'playing') {
+        return json(res, 200, { room: publicRoomView(room) })
+      }
+      if (room.status !== 'generating') {
+        return json(res, 400, {
+          error: 'Aucune génération en cours — démarre d’abord la partie',
+        })
+      }
+
+      const contentMode = room.quizMode === 'audio' ? 'audio' : 'standard'
+      const themeSlug =
+        contentMode === 'audio'
+          ? `${normalizeThemeSlug(room.theme)}--${room.scope}--audio`
+          : `${normalizeThemeSlug(room.theme)}--${room.scope}`
       const difficulty = parseDifficulty(room.difficulty)
       const provider = parseAiProvider(room.aiProvider ?? 'auto')
       const excludeQuestions = await getSeenQuestionTexts(themeSlug)
@@ -240,16 +269,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           difficulty,
           room.scope,
           provider,
-          'standard',
+          contentMode,
           excludeQuestions,
         )
       } catch (e) {
         const message =
           e instanceof Error ? e.message : 'Erreur de génération'
         const latest = (await getRoom(code)) ?? room
+        if (latest.status !== 'generating') {
+          return json(res, 200, { room: publicRoomView(latest) })
+        }
         latest.status = 'error'
         latest.errorMessage = message
-        latest.quizMode = 'standard'
         delete latest.genEstimateSec
         await saveRoom(latest)
         return json(res, 422, {
@@ -262,7 +293,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await recordGenerationMs(generationMs)
       }
 
-      // Recharge : un leave/kick a pu modifier la salle pendant la génération
+      // Recharge : cancel / leave pendant la génération
       room = (await getRoom(code)) ?? room
       if (room.status !== 'generating') {
         return json(res, 200, { room: publicRoomView(room) })
@@ -271,7 +302,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (gen.error) {
         room.status = 'error'
         room.errorMessage = gen.error
-        room.quizMode = 'standard'
         delete room.genEstimateSec
         await saveRoom(room)
         return json(res, 422, {
@@ -290,13 +320,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         correctIndex: q.correctIndex,
         explanation: q.explanation,
         sourceType: q.sourceType,
+        previewUrl: q.previewUrl,
+        coverUrl: q.coverUrl,
+        deezerTrackId: q.deezerTrackId,
       }))
 
       if (questions.length < MULTI_QUESTION_COUNT) {
         const err = `Pas assez de questions (${questions.length}/${MULTI_QUESTION_COUNT}). Réessaie.`
         room.status = 'error'
         room.errorMessage = err
-        room.quizMode = 'standard'
         delete room.genEstimateSec
         await saveRoom(room)
         return json(res, 422, {
@@ -314,7 +346,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       room.status = 'playing'
       delete room.errorMessage
       delete room.genEstimateSec
-      room.quizMode = 'standard'
       room.questions = questions
       room.questionIndex = 0
       prepareRound(room, now)
@@ -345,8 +376,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (body.aiProvider !== undefined) {
         room.aiProvider = parseAiProvider(body.aiProvider)
       }
-      room.quizMode = 'standard'
+      if (body.quizMode !== undefined) {
+        const qm = parseQuizContentMode(body.quizMode)
+        room.quizMode = qm === 'audio' ? 'audio' : 'standard'
+      }
       delete room.errorMessage
+      delete room.hostPickingTheme
       room.status = 'lobby'
       room.timerStarted = false
       room.timerPaused = false
@@ -365,6 +400,74 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         typingScore: 0,
       }))
       room.scoresFinalized = false
+      await saveRoom(room)
+      return json(res, 200, { room: publicRoomView(room) })
+    }
+
+    if (action === 'cancelGenerate') {
+      const code = String(body.code ?? '').trim().toUpperCase()
+      const playerId = String(body.playerId ?? '')
+      const room = await getRoom(code)
+      if (!room) return json(res, 404, { error: 'Salle introuvable' })
+      if (playerId !== room.hostId) {
+        return json(res, 403, { error: 'Seul l’hôte peut annuler' })
+      }
+      if (room.status !== 'generating') {
+        return json(res, 200, { room: publicRoomView(room) })
+      }
+      room.status = 'lobby'
+      delete room.errorMessage
+      delete room.genEstimateSec
+      room.questions = []
+      room.questionIndex = 0
+      room.currentAnswers = {}
+      room.timerStarted = false
+      room.timerPaused = false
+      room.timerPausedLeftMs = undefined
+      room.roundStartedAt = 0
+      room.roundDeadlineAt = 0
+      await saveRoom(room)
+      return json(res, 200, {
+        room: publicRoomView(room),
+        message: 'Génération annulée',
+      })
+    }
+
+    if (action === 'backToLobby') {
+      const code = String(body.code ?? '').trim().toUpperCase()
+      const playerId = String(body.playerId ?? '')
+      const pickingTheme = Boolean(body.pickingTheme)
+      const room = await getRoom(code)
+      if (!room) return json(res, 404, { error: 'Salle introuvable' })
+      if (playerId !== room.hostId) {
+        return json(res, 403, { error: 'Seul l’hôte peut revenir au lobby' })
+      }
+      if (room.status === 'playing' || room.status === 'generating') {
+        return json(res, 400, { error: 'Impossible pendant une partie' })
+      }
+      room.status = 'lobby'
+      delete room.errorMessage
+      delete room.genEstimateSec
+      room.questions = []
+      room.questionIndex = 0
+      room.roundPhase = 'answering'
+      room.currentAnswers = {}
+      room.timerStarted = false
+      room.timerPaused = false
+      room.timerPausedLeftMs = undefined
+      room.roundStartedAt = 0
+      room.roundDeadlineAt = 0
+      room.players = room.players.map((p) => ({
+        ...p,
+        score: 0,
+        streakActuelle: 0,
+        meilleurStreak: 0,
+        bonusApplique: 0,
+        typingScore: 0,
+      }))
+      room.scoresFinalized = false
+      if (pickingTheme) room.hostPickingTheme = true
+      else delete room.hostPickingTheme
       await saveRoom(room)
       return json(res, 200, { room: publicRoomView(room) })
     }

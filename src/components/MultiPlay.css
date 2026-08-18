@@ -76,6 +76,36 @@
   justify-content: center;
 }
 
+.multi-play__media--audio {
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: none;
+  padding: 1rem;
+  background: color-mix(in srgb, var(--teal) 8%, var(--paper-elevated));
+  border: 1px solid color-mix(in srgb, var(--teal) 25%, transparent);
+}
+
+.multi-play__cover {
+  width: min(100%, 140px);
+  height: auto;
+  border-radius: 10px;
+  object-fit: cover;
+  aspect-ratio: 1;
+}
+
+.multi-play__audio {
+  width: min(100%, 22rem);
+}
+
+.multi-play__audio-caption {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
 .multi-play__image {
   display: block;
   width: 100%;

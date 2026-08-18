@@ -4,6 +4,7 @@
  */
 
 import { fetchCommonsImageUrl } from './wikimedia.js'
+import { buildDeezerQuiz } from './deezerQuiz.js'
 import {
   enginesWithKeys,
   fallbackEngines,
@@ -32,8 +33,8 @@ export type AiProvider =
   | 'cerebras'
   | 'deepseek'
   | 'openrouter'
-/** standard = texte ; image = QCM illustré Wikimedia */
-export type QuizContentMode = 'standard' | 'image'
+/** standard = texte ; image = QCM illustré Wikimedia ; audio = quiz Deezer */
+export type QuizContentMode = 'standard' | 'image' | 'audio'
 export type ImageKind = 'logo' | 'sujet_entier' | 'detail_zoome'
 export type GenerateSource =
   | 'groq'
@@ -41,6 +42,7 @@ export type GenerateSource =
   | 'cerebras'
   | 'deepseek'
   | 'openrouter'
+  | 'deezer'
   | 'mock'
 
 export interface GeneratedQuestion {
@@ -58,6 +60,9 @@ export interface GeneratedQuestion {
   imageSubject?: string
   imageKind?: ImageKind
   imageUrl?: string
+  previewUrl?: string
+  coverUrl?: string
+  deezerTrackId?: string
 }
 
 const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard']
@@ -165,7 +170,8 @@ function modelsFor(engine: LlmEngine, contentMode: QuizContentMode): string[] {
   }
 }
 
-export function parseQuizContentMode(_raw: unknown): QuizContentMode {
+export function parseQuizContentMode(raw: unknown): QuizContentMode {
+  if (raw === 'audio') return 'audio'
   // Mode image temporairement désactivé
   return 'standard'
 }
@@ -818,15 +824,18 @@ async function generateOneTier(
   }
 
   try {
-    engineLoop: for (const engine of engineOrder) {
+    for (const engine of engineOrder) {
+      // Auto : clé claimée d’abord, puis les autres clés du même provider, puis autre IA
+      const allKeys = keysForEngine(engine)
       const keys =
         provider === 'auto' && pickedSlot?.startsWith(`${engine}#`)
-          ? [
-              listApiKeys(engine as RotateEngine)[
-                Number(pickedSlot.split('#')[1]) || 0
-              ],
-            ].filter(Boolean)
-          : keysForEngine(engine)
+          ? (() => {
+              const idx = Number(pickedSlot.split('#')[1]) || 0
+              const primary = allKeys[idx]
+              const rest = allKeys.filter((_, i) => i !== idx)
+              return [primary, ...rest].filter(Boolean) as string[]
+            })()
+          : allKeys
 
       if (keys.length === 0) {
         if (engine !== 'cerebras') {
@@ -838,7 +847,7 @@ async function generateOneTier(
       for (const apiKey of keys) {
         for (const model of modelsFor(engine, contentMode)) {
           try {
-            // 429 → pas de retry ici : on bascule tout de suite sur une autre IA
+            // 429 → withAiRetry relance ; on enchaîne clé suivante puis autre IA
             const text = await withAiRetry(() =>
               engine === 'gemini'
                 ? callGemini(apiKey, model, prompt)
@@ -879,9 +888,9 @@ async function generateOneTier(
             const msg = e instanceof Error ? e.message : String(e)
             errors.push(msg)
             console.warn(`[${engine}] ${model}:`, msg.slice(0, 200))
-            // Rate limit → autre IA immédiatement (pas d’insistance)
+            // Rate limit → autre clé du même provider, puis autre IA
             if (isRateLimitError(msg)) {
-              continue engineLoop
+              break
             }
           }
         }
@@ -971,6 +980,27 @@ export async function generateQuestions(
   const now = new Date().toISOString()
   const tier: Difficulty =
     difficulty === 'medium' || difficulty === 'hard' ? difficulty : 'easy'
+
+  // Quiz musical Deezer — pas d’IA, API publique
+  if (contentMode === 'audio') {
+    const deezer = await buildDeezerQuiz({
+      theme,
+      themeSlug,
+      difficulty: tier,
+      scope,
+      excludeQuestions,
+      count: 10,
+    })
+    if ('error' in deezer) {
+      return { questions: [], source: 'deezer', error: deezer.error }
+    }
+    return {
+      questions: deezer.questions,
+      source: 'deezer',
+      message: deezer.message,
+    }
+  }
+
   const hasKey = AUTO_FREE_ENGINES.some((e) => keysForEngine(e).length > 0)
 
   if (!hasKey) {
@@ -1045,48 +1075,66 @@ export async function generateQuestions(
     return { ok: collected.length > 0 }
   }
 
-  // 1) Tentative principale : 10 d’un coup
-  const first = await runBatch(TARGET)
-  if (first.themeInvalid && lastError) {
-    return { questions: [], source: 'mock', error: lastError }
-  }
-
-  // 2) Si 504/timeout (ou 0 question) → fallback 2×5
-  if (
-    collected.length < TARGET &&
-    (first.timeoutLike || collected.length === 0)
-  ) {
+  // Difficile : 2×5 d’emblée (moins de JSON tronqué / 504)
+  // Autres paliers : 10 d’un coup, puis fallback 2×5 si timeout / vide
+  if (tier === 'hard') {
     usedFallback2x5 = true
-    collected.length = 0
-    seen.clear()
-    excluded.clear()
-    for (const q of excludeQuestions) {
-      const fp = q.trim().toLowerCase().replace(/\s+/g, ' ')
-      if (fp) excluded.add(fp)
-    }
-    excludeLive = [...excludeQuestions]
-
     for (let i = 0; i < 2 && collected.length < TARGET; i++) {
       const need = Math.min(5, TARGET - collected.length)
       const part = await runBatch(need)
       if (part.themeInvalid && lastError) {
         return { questions: [], source: 'mock', error: lastError }
       }
-      if (!part.ok && part.timeoutLike) {
-        // un demi-lot a timeout : tente encore l’autre moitié / round suivant
-        continue
+      if (!part.ok && part.timeoutLike) continue
+    }
+  } else {
+    const first = await runBatch(TARGET)
+    if (first.themeInvalid && lastError) {
+      return { questions: [], source: 'mock', error: lastError }
+    }
+
+    if (
+      collected.length < TARGET &&
+      (first.timeoutLike || collected.length === 0)
+    ) {
+      usedFallback2x5 = true
+      collected.length = 0
+      seen.clear()
+      excluded.clear()
+      for (const q of excludeQuestions) {
+        const fp = q.trim().toLowerCase().replace(/\s+/g, ' ')
+        if (fp) excluded.add(fp)
+      }
+      excludeLive = [...excludeQuestions]
+
+      for (let i = 0; i < 2 && collected.length < TARGET; i++) {
+        const need = Math.min(5, TARGET - collected.length)
+        const part = await runBatch(need)
+        if (part.themeInvalid && lastError) {
+          return { questions: [], source: 'mock', error: lastError }
+        }
+        if (!part.ok && part.timeoutLike) continue
+      }
+    } else if (collected.length < TARGET) {
+      while (collected.length < TARGET && Date.now() < deadline) {
+        const need = Math.min(5, TARGET - collected.length)
+        const part = await runBatch(need)
+        if (part.themeInvalid && lastError) {
+          return { questions: [], source: 'mock', error: lastError }
+        }
+        if (!part.ok) break
       }
     }
-  } else if (collected.length < TARGET) {
-    // Succès partiel (filtres) : complète par lots de 5 sans reset
-    while (collected.length < TARGET && Date.now() < deadline) {
-      const need = Math.min(5, TARGET - collected.length)
-      const part = await runBatch(need)
-      if (part.themeInvalid && lastError) {
-        return { questions: [], source: 'mock', error: lastError }
-      }
-      if (!part.ok) break
+  }
+
+  // Complément si encore incomplet (tous paliers)
+  while (collected.length < TARGET && Date.now() < deadline) {
+    const need = Math.min(5, TARGET - collected.length)
+    const part = await runBatch(need)
+    if (part.themeInvalid && lastError) {
+      return { questions: [], source: 'mock', error: lastError }
     }
+    if (!part.ok) break
   }
 
   if (collected.length < TARGET) {

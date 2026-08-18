@@ -79,7 +79,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const themeSlug =
       quizMode === 'image'
         ? `${baseSlug}--${scope}--image`
-        : `${baseSlug}--${scope}`
+        : quizMode === 'audio'
+          ? `${baseSlug}--${scope}--audio`
+          : `${baseSlug}--${scope}`
 
     const started = Date.now()
     const result = await generateQuestions(

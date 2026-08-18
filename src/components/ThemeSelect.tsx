@@ -6,7 +6,11 @@ import {
   getThemeById,
   type ThemeTile,
 } from '../lib/themes'
-import type { Difficulty, QuizScope } from '../types'
+import {
+  DEEZER_STYLE_OPTIONS,
+  formatDeezerTheme,
+} from '../lib/deezerStyles'
+import type { Difficulty, QuizContentMode, QuizScope } from '../types'
 import {
   DIFFICULTIES,
   DIFFICULTY_LABELS,
@@ -23,8 +27,7 @@ export interface ThemeStartOptions {
   difficulty: Difficulty
   gameMode: GameModeOption
   aiProvider: AiProvider
-  /** Toujours standard — mode image désactivé */
-  quizMode: 'standard'
+  quizMode: QuizContentMode
 }
 
 const AI_OPTIONS: { id: AiProvider; label: string; hint: string }[] = [
@@ -42,8 +45,11 @@ interface ThemeSelectProps {
   ) => void
   /** Accueil solo ou création / changement de thème multi */
   variant?: 'solo' | 'multi'
-  /** Retour vers le choix Solo / Multi */
+  /** Salle multi déjà créée — valide le thème sans recréer la salle */
+  existingRoom?: boolean
+  /** Retour vers le choix Solo / Multi / lobby */
   onBack?: () => void
+  backLabel?: string
   busy?: boolean
   error?: string | null
 }
@@ -51,7 +57,9 @@ interface ThemeSelectProps {
 export function ThemeSelect({
   onStart,
   variant = 'solo',
+  existingRoom = false,
   onBack,
+  backLabel,
   busy,
   error,
 }: ThemeSelectProps) {
@@ -63,12 +71,19 @@ export function ThemeSelect({
   const [timerEnabled, setTimerEnabled] = useState(false)
   const [gameMode, setGameMode] = useState<GameModeOption>('free')
   const [aiProvider, setAiProvider] = useState<AiProvider>('auto')
+  const [quizMode, setQuizMode] = useState<QuizContentMode>('standard')
+  const [deezerStyleId, setDeezerStyleId] = useState<string>('pop')
+  const [deezerQuery, setDeezerQuery] = useState('')
 
   const isMulti = variant === 'multi'
   const showDifficulty = gameMode === 'free'
+  const isDeezer = quizMode === 'audio'
 
   const parent = themeId ? getThemeById(themeId) : undefined
   const subs = themeId ? (SUBTHEMES[themeId] ?? ['Général']) : []
+  const deezerStyle =
+    DEEZER_STYLE_OPTIONS.find((s) => s.id === deezerStyleId) ??
+    DEEZER_STYLE_OPTIONS[0]
 
   function selectTheme(t: ThemeTile) {
     setThemeId(t.id)
@@ -78,13 +93,29 @@ export function ThemeSelect({
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
+    if (busy) return
+
+    if (isDeezer) {
+      const custom = deezerQuery.trim()
+      const t = formatDeezerTheme(custom || deezerStyle.label)
+      if (!t) return
+      onStart(t, '', scope, {
+        timerEnabled,
+        difficulty: gameMode === 'free' ? difficulty : 'easy',
+        gameMode,
+        aiProvider,
+        quizMode: 'audio',
+      })
+      return
+    }
+
     const custom = customTheme.trim()
     const t = custom
       ? custom
       : parent
         ? formatThemeQuery(parent.label, subtheme)
         : ''
-    if (!t || busy) return
+    if (!t) return
     onStart(t, '', scope, {
       timerEnabled,
       difficulty: gameMode === 'free' ? difficulty : 'easy',
@@ -94,34 +125,87 @@ export function ThemeSelect({
     })
   }
 
-  const activeLabel = customTheme.trim()
-    ? customTheme.trim()
-    : parent
-      ? formatThemeQuery(parent.label, subtheme)
-      : ''
+  const activeLabel = isDeezer
+    ? formatDeezerTheme(deezerQuery.trim() || deezerStyle.label)
+    : customTheme.trim()
+      ? customTheme.trim()
+      : parent
+        ? formatThemeQuery(parent.label, subtheme)
+        : ''
   const canPlay = Boolean(activeLabel) && !busy
 
-  const centerBlock = (
-    <div className="game-home__center">
-      <div className="brand-hero">
-        <span className="brand-hero__crown" aria-hidden>
-          <svg viewBox="0 0 64 40" width="28" height="17">
-            <path
-              fill="#f0c14b"
-              d="M8 32 4 12l14 10L32 4l14 18 14-10-4 20H8z"
-            />
-            <rect x="6" y="30" width="52" height="6" rx="2" fill="#e0a820" />
-            <circle cx="4" cy="12" r="3" fill="#ffe08a" />
-            <circle cx="32" cy="4" r="3.5" fill="#ffe08a" />
-            <circle cx="60" cy="12" r="3" fill="#ffe08a" />
-          </svg>
-        </span>
-        <h1 className="brand-hero__title">Quizz By IA</h1>
-      </div>
-
+  const brandBlock = (
+    <div className="brand-hero">
+      <span className="brand-hero__crown" aria-hidden>
+        <svg viewBox="0 0 64 40" width="28" height="17">
+          <path
+            fill="#f0c14b"
+            d="M8 32 4 12l14 10L32 4l14 18 14-10-4 20H8z"
+          />
+          <rect x="6" y="30" width="52" height="6" rx="2" fill="#e0a820" />
+          <circle cx="4" cy="12" r="3" fill="#ffe08a" />
+          <circle cx="32" cy="4" r="3.5" fill="#ffe08a" />
+          <circle cx="60" cy="12" r="3" fill="#ffe08a" />
+        </svg>
+      </span>
+      <h1 className="brand-hero__title">Quizz By IA</h1>
       <p className="brand-hero__tagline">
-        Choisis un thème, puis joue !
+        {existingRoom
+          ? 'Change de thème — la salle et les joueurs restent.'
+          : isDeezer
+            ? 'Quiz musical avec vrais extraits Deezer'
+            : 'Choisis un thème, puis joue !'}
       </p>
+    </div>
+  )
+
+  const playButton = (
+    <button className="btn-jouer" type="submit" disabled={!canPlay}>
+      <span className="btn-jouer__icon" aria-hidden>
+        ▶
+      </span>
+      {busy
+        ? 'Préparation…'
+        : existingRoom
+          ? 'Valider le thème'
+          : isMulti
+            ? isDeezer
+              ? 'Créer la salle musicale'
+              : 'Créer la salle'
+            : isDeezer
+              ? 'Lancer le quiz musical'
+              : 'Jouer'}
+    </button>
+  )
+
+  const settingsFields = (
+    <div className="game-home__options">
+      <fieldset className="scope-field">
+        <legend className="scope-field__label">Type</legend>
+        <div className="scope-field__toggle" role="group" aria-label="Type">
+          <button
+            type="button"
+            className={`scope-chip${!isDeezer ? ' is-selected' : ''}`}
+            onClick={() => setQuizMode('standard')}
+            disabled={busy}
+            aria-pressed={!isDeezer}
+          >
+            Texte (IA)
+          </button>
+          <button
+            type="button"
+            className={`scope-chip${isDeezer ? ' is-selected' : ''}`}
+            onClick={() => {
+              setQuizMode('audio')
+              setGameMode('free')
+            }}
+            disabled={busy}
+            aria-pressed={isDeezer}
+          >
+            Deezer
+          </button>
+        </div>
+      </fieldset>
 
       <fieldset className="scope-field">
         <legend className="scope-field__label">Portée</legend>
@@ -143,12 +227,12 @@ export function ThemeSelect({
 
       <fieldset className="scope-field">
         <legend className="scope-field__label">Mode</legend>
-        <div className="scope-field__toggle" role="group">
+        <div className="scope-field__toggle" role="group" aria-label="Mode">
           <button
             type="button"
             className={`scope-chip${gameMode === 'progression' ? ' is-selected' : ''}`}
             onClick={() => setGameMode('progression')}
-            disabled={busy}
+            disabled={busy || isDeezer}
             aria-pressed={gameMode === 'progression'}
           >
             Paliers
@@ -185,24 +269,28 @@ export function ThemeSelect({
         </fieldset>
       )}
 
-      <fieldset className="scope-field">
-        <legend className="scope-field__label">Intelligence artificielle</legend>
-        <div className="scope-field__toggle" role="group" aria-label="IA">
-          {AI_OPTIONS.map((opt) => (
-            <button
-              key={opt.id}
-              type="button"
-              className={`scope-chip${aiProvider === opt.id ? ' is-selected' : ''}`}
-              onClick={() => setAiProvider(opt.id)}
-              disabled={busy}
-              aria-pressed={aiProvider === opt.id}
-              title={opt.hint}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      </fieldset>
+      {!isDeezer && (
+        <fieldset className="scope-field">
+          <legend className="scope-field__label">
+            Intelligence artificielle
+          </legend>
+          <div className="scope-field__toggle" role="group" aria-label="IA">
+            {AI_OPTIONS.map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                className={`scope-chip${aiProvider === opt.id ? ' is-selected' : ''}`}
+                onClick={() => setAiProvider(opt.id)}
+                disabled={busy}
+                aria-pressed={aiProvider === opt.id}
+                title={opt.hint}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </fieldset>
+      )}
 
       <button
         type="button"
@@ -217,18 +305,23 @@ export function ThemeSelect({
           <span className="chrono-switch__thumb" />
         </span>
       </button>
-
-      <button className="btn-jouer" type="submit" disabled={!canPlay}>
-        <span className="btn-jouer__icon" aria-hidden>
-          ▶
-        </span>
-        {busy ? 'Préparation…' : isMulti ? 'Créer la salle' : 'Jouer'}
-      </button>
     </div>
   )
 
+  function orbitCenter() {
+    return (
+      <div className="game-home__center">
+        {brandBlock}
+        {settingsFields}
+        {playButton}
+      </div>
+    )
+  }
+
   return (
-    <section className={`game-home${isMulti ? ' game-home--multi' : ''}`}>
+    <section
+      className={`game-home${isMulti ? ' game-home--multi' : ''}${isDeezer ? ' game-home--deezer' : ''}`}
+    >
       {onBack && (
         <button
           type="button"
@@ -236,83 +329,147 @@ export function ThemeSelect({
           onClick={onBack}
           disabled={busy}
         >
-          ← Retour
+          {backLabel ?? '← Retour'}
         </button>
       )}
       <form className="game-home__form" onSubmit={handleSubmit}>
-        <div className="game-home__mobile-top">{centerBlock}</div>
+        {isDeezer ? (
+          <div className="deezer-layout">
+            <div className="deezer-layout__hero">{brandBlock}</div>
 
-        <div className="game-home__stage">
-          <div className="game-home__orbit-ring" aria-hidden />
+            <div className="deezer-panel">
+              <fieldset className="subthemes">
+                <legend className="subthemes__title">Styles musicaux</legend>
+                <div className="subthemes__grid" role="group">
+                  {DEEZER_STYLE_OPTIONS.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      className={`subtheme-chip${deezerStyleId === s.id && !deezerQuery.trim() ? ' is-selected' : ''}`}
+                      onClick={() => {
+                        setDeezerStyleId(s.id)
+                        setDeezerQuery('')
+                      }}
+                      disabled={busy}
+                      aria-pressed={
+                        deezerStyleId === s.id && !deezerQuery.trim()
+                      }
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
 
-          <div className="game-home__themes" role="group" aria-label="Thèmes">
-            {ORBIT_THEMES.map((t: ThemeTile) => (
-              <button
-                key={t.id}
-                type="button"
-                className={`theme-bubble${themeId === t.id && !customTheme ? ' is-selected' : ''}`}
-                style={
-                  {
-                    '--angle': `${t.angle}deg`,
-                    '--bubble-color': t.color,
-                  } as CSSProperties
-                }
-                onClick={() => selectTheme(t)}
-                disabled={busy}
-                aria-pressed={themeId === t.id && !customTheme}
-              >
-                <span className="theme-bubble__icon">
-                  <ThemeIcon id={t.id} />
+              <label className="custom-theme deezer-search">
+                <span className="custom-theme__label">
+                  Ou génère ton thème Deezer (artiste, genre, année…)
                 </span>
-                <span className="theme-bubble__label">{t.label}</span>
-              </button>
-            ))}
-          </div>
-
-          <div className="game-home__desktop-center">{centerBlock}</div>
-        </div>
-
-        {parent && !customTheme.trim() && (
-          <fieldset className="subthemes">
-            <legend className="subthemes__title">
-              Sous-thèmes — {parent.label}
-            </legend>
-            <div className="subthemes__grid" role="group">
-              {subs.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  className={`subtheme-chip${subtheme === s ? ' is-selected' : ''}`}
-                  onClick={() => setSubtheme(s)}
+                <input
+                  value={deezerQuery}
+                  onChange={(e) => setDeezerQuery(e.target.value)}
+                  placeholder="Ex. Daft Punk, années 80, jazz manouche…"
+                  maxLength={80}
+                  enterKeyHint="go"
                   disabled={busy}
-                  aria-pressed={subtheme === s}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-            <p className="subthemes__chosen">
-              Thème choisi : <strong>{activeLabel}</strong>
-            </p>
-          </fieldset>
-        )}
+                />
+              </label>
 
-        <label className="custom-theme">
-          <span className="custom-theme__label">Ou écris ton propre thème</span>
-          <input
-            value={customTheme}
-            onChange={(e) => {
-              setCustomTheme(e.target.value)
-              if (e.target.value.trim()) {
-                setThemeId(null)
-                setSubtheme('Général')
-              }
-            }}
-            placeholder="Ex. Musique — K-pop…"
-            maxLength={80}
-            enterKeyHint="go"
-          />
-        </label>
+              <p className="subthemes__chosen">
+                Thème musical : <strong>{activeLabel}</strong>
+              </p>
+            </div>
+
+            <div className="deezer-layout__settings">
+              {settingsFields}
+              {playButton}
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="game-home__mobile-top">{orbitCenter()}</div>
+
+            <div className="game-home__stage">
+              <div className="game-home__orbit-ring" aria-hidden />
+
+              <div
+                className="game-home__themes"
+                role="group"
+                aria-label="Thèmes"
+              >
+                {ORBIT_THEMES.map((t: ThemeTile) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    className={`theme-bubble${themeId === t.id && !customTheme ? ' is-selected' : ''}`}
+                    style={
+                      {
+                        '--angle': `${t.angle}deg`,
+                        '--bubble-color': t.color,
+                      } as CSSProperties
+                    }
+                    onClick={() => selectTheme(t)}
+                    disabled={busy}
+                    aria-pressed={themeId === t.id && !customTheme}
+                  >
+                    <span className="theme-bubble__icon">
+                      <ThemeIcon id={t.id} />
+                    </span>
+                    <span className="theme-bubble__label">{t.label}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="game-home__desktop-center">
+                {orbitCenter()}
+              </div>
+            </div>
+
+            {parent && !customTheme.trim() && (
+              <fieldset className="subthemes">
+                <legend className="subthemes__title">
+                  Sous-thèmes — {parent.label}
+                </legend>
+                <div className="subthemes__grid" role="group">
+                  {subs.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      className={`subtheme-chip${subtheme === s ? ' is-selected' : ''}`}
+                      onClick={() => setSubtheme(s)}
+                      disabled={busy}
+                      aria-pressed={subtheme === s}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+                <p className="subthemes__chosen">
+                  Thème choisi : <strong>{activeLabel}</strong>
+                </p>
+              </fieldset>
+            )}
+
+            <label className="custom-theme">
+              <span className="custom-theme__label">
+                Ou écris ton propre thème
+              </span>
+              <input
+                value={customTheme}
+                onChange={(e) => {
+                  setCustomTheme(e.target.value)
+                  if (e.target.value.trim()) {
+                    setThemeId(null)
+                    setSubtheme('Général')
+                  }
+                }}
+                placeholder="Ex. Musique — K-pop…"
+                maxLength={80}
+                enterKeyHint="go"
+              />
+            </label>
+          </>
+        )}
 
         {error && (
           <p className="game-home__error" role="alert">

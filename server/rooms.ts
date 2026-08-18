@@ -40,6 +40,9 @@ export interface RoomQuestion {
   explanation?: string
   sourceType?: string
   imageUrl?: string
+  previewUrl?: string
+  coverUrl?: string
+  deezerTrackId?: string
 }
 
 /** Réponse d’un joueur sur une manche (null = pas répondu / faux auto) */
@@ -59,8 +62,8 @@ export interface RoomState {
   difficulty: 'easy' | 'medium' | 'hard'
   /** IA : auto ou provider forcé */
   aiProvider: 'auto' | 'groq' | 'gemini' | 'cerebras' | 'deepseek' | 'openrouter'
-  /** Toujours standard en multi (images désactivées) */
-  quizMode?: 'standard' | 'image'
+  /** standard = texte IA ; audio = quiz Deezer */
+  quizMode?: 'standard' | 'image' | 'audio'
   /** Message si status === 'error' */
   errorMessage?: string
   players: RoomPlayer[]
@@ -91,6 +94,8 @@ export interface RoomState {
   scoresFinalized?: boolean
   /** ETA génération (secondes) pendant status === generating */
   genEstimateSec?: number
+  /** L’hôte est sur l’écran choix de thème — les autres restent au lobby */
+  hostPickingTheme?: boolean
   createdAt: number
   updatedAt: number
 }
@@ -220,13 +225,11 @@ export async function getRoom(code: string): Promise<RoomState | null> {
         ? p.bonusApplique
         : 0,
   }))
-  room.quizMode = 'standard'
   return room
 }
 
 export async function saveRoom(room: RoomState): Promise<void> {
   room.updatedAt = Date.now()
-  room.quizMode = 'standard'
   if (redisConfigured()) {
     await redisCommand(
       'SET',
@@ -439,6 +442,8 @@ export function publicRoomView(
     explanation?: string
     sourceType?: string
     imageUrl?: string
+    previewUrl?: string
+    coverUrl?: string
   }>
   roundEndsAt: number
   /** Horloge serveur au moment de la réponse — pour corriger le skew client */
@@ -481,7 +486,7 @@ export function publicRoomView(
 
   return {
     ...room,
-    quizMode: 'standard',
+    quizMode: room.quizMode === 'audio' ? 'audio' : 'standard',
     timerStarted: Boolean(room.timerStarted),
     timerPaused: Boolean(room.timerPaused),
     roundDurationMs: duration,
@@ -495,6 +500,9 @@ export function publicRoomView(
         id: q.id,
         question: q.question,
         answers: q.answers,
+        // Audio / pochette toujours visibles (sinon le quiz musical est injouable)
+        previewUrl: q.previewUrl,
+        coverUrl: q.coverUrl,
         imageUrl: undefined,
         ...(show
           ? {

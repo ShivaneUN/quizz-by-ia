@@ -94,7 +94,9 @@ function localApiPlugin(): Plugin {
             const themeSlug =
               quizMode === 'image'
                 ? `${baseSlug}--${scope}--image`
-                : `${baseSlug}--${scope}`
+                : quizMode === 'audio'
+                  ? `${baseSlug}--${scope}--audio`
+                  : `${baseSlug}--${scope}`
             const started = Date.now()
             const result = await generateQuestions(
               theme.trim(),

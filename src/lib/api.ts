@@ -18,7 +18,7 @@ export interface GenerateResponse {
   theme: string
   themeSlug: string
   questions: Question[]
-  source: 'groq' | 'gemini' | 'mock' | 'bank'
+  source: 'groq' | 'gemini' | 'mock' | 'bank' | 'deezer'
   message?: string
   /** Durée réelle serveur (ms) */
   generationMs?: number
@@ -42,6 +42,7 @@ function isRetryableStatus(status: number): boolean {
 /** Appelle la fonction serverless (clés API jamais côté client) */
 export async function generateQuestions(
   body: GenerateRequest,
+  signal?: AbortSignal,
 ): Promise<GenerateResponse> {
   const clientStarted = performance.now()
 
@@ -50,6 +51,7 @@ export async function generateQuestions(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      signal,
     })
   }
 
@@ -58,10 +60,18 @@ export async function generateQuestions(
     res = await once()
     // 2 tentatives client, backoff 800ms → 1600ms
     for (let attempt = 0; attempt < 2 && isRetryableStatus(res.status); attempt++) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
       await new Promise((r) => setTimeout(r, 800 * (attempt + 1)))
       res = await once()
     }
-  } catch {
+  } catch (e) {
+    if (
+      signal?.aborted ||
+      (e instanceof DOMException && e.name === 'AbortError') ||
+      (e instanceof Error && e.name === 'AbortError')
+    ) {
+      throw new Error('Génération annulée')
+    }
     throw new Error(TIMEOUT_MSG)
   }
 

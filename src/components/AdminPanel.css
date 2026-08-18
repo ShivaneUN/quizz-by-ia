@@ -1,8 +1,8 @@
 .admin-gear {
   position: fixed;
-  top: max(0.75rem, env(safe-area-inset-top));
+  top: auto;
+  bottom: max(0.75rem, env(safe-area-inset-bottom));
   left: max(0.75rem, env(safe-area-inset-left));
-  bottom: auto;
   right: auto;
   z-index: 55;
   width: 2.4rem;

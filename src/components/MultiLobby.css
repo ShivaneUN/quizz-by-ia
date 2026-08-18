@@ -102,6 +102,12 @@
   color: var(--ink-muted);
 }
 
+.multi-lobby__actions {
+  width: 100%;
+  display: grid;
+  gap: 0.55rem;
+}
+
 .multi-lobby .btn {
   width: 100%;
   min-height: 3rem;

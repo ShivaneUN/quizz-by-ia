@@ -20,6 +20,9 @@ export interface MultiQuestion {
   explanation?: string
   sourceType?: string
   imageUrl?: string
+  previewUrl?: string
+  coverUrl?: string
+  deezerTrackId?: string
 }
 
 export interface MultiRoom {
@@ -37,6 +40,8 @@ export interface MultiRoom {
   errorMessage?: string
   /** ETA génération (secondes) pendant generating */
   genEstimateSec?: number
+  /** L’hôte choisit un thème — rester dans le lobby */
+  hostPickingTheme?: boolean
   players: MultiPlayer[]
   questions: MultiQuestion[]
   questionIndex: number
@@ -115,11 +120,15 @@ export function preferNewerRoom(
   return next
 }
 
-async function postRoom(body: Record<string, unknown>) {
+async function postRoom(
+  body: Record<string, unknown>,
+  signal?: AbortSignal,
+) {
   const res = await fetch('/api/room', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    signal,
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
@@ -156,9 +165,21 @@ export async function joinRoom(input: { code: string; playerName: string }) {
   return { room: data.room!, playerId: data.playerId, message: data.message }
 }
 
-export async function startRoom(input: { code: string; playerId: string }) {
-  const data = await postRoom({ action: 'start', ...input })
+export async function startRoom(
+  input: { code: string; playerId: string },
+  signal?: AbortSignal,
+) {
+  const data = await postRoom({ action: 'start', ...input }, signal)
   return { room: data.room!, playerId: data.playerId, message: data.message }
+}
+
+/** Lance la génération IA (après start). Peut être long — le poll suit le statut. */
+export async function runRoomGenerate(
+  input: { code: string; playerId: string },
+  signal?: AbortSignal,
+) {
+  const data = await postRoom({ action: 'runGenerate', ...input }, signal)
+  return { room: data.room!, message: data.message }
 }
 
 export async function beginRoomRound(input: {
@@ -202,6 +223,24 @@ export async function setRoomTheme(input: {
   quizMode?: QuizContentMode
 }) {
   const data = await postRoom({ action: 'setTheme', ...input })
+  return { room: data.room! }
+}
+
+export async function cancelRoomGenerate(input: {
+  code: string
+  playerId: string
+}) {
+  const data = await postRoom({ action: 'cancelGenerate', ...input })
+  return { room: data.room!, message: data.message }
+}
+
+export async function backRoomToLobby(input: {
+  code: string
+  playerId: string
+  /** true = hôte ouvre le choix de thème ; false/omit = retour salle */
+  pickingTheme?: boolean
+}) {
+  const data = await postRoom({ action: 'backToLobby', ...input })
   return { room: data.room! }
 }
 
