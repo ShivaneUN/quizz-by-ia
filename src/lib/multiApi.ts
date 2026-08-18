@@ -23,6 +23,7 @@ export interface MultiQuestion {
   previewUrl?: string
   coverUrl?: string
   deezerTrackId?: string
+  revealAnswer?: string
 }
 
 export interface MultiRoom {
@@ -40,6 +41,8 @@ export interface MultiRoom {
   errorMessage?: string
   /** ETA génération (secondes) pendant generating */
   genEstimateSec?: number
+  /** Début génération (watchdog anti-blocage) */
+  generatingStartedAt?: number
   /** L’hôte choisit un thème — rester dans le lobby */
   hostPickingTheme?: boolean
   players: MultiPlayer[]

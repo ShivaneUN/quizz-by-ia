@@ -585,6 +585,32 @@
   cursor: not-allowed;
 }
 
+.solo-lock {
+  width: 100%;
+  display: grid;
+  gap: 0.45rem;
+  justify-items: center;
+  margin-bottom: 0.35rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 12px;
+  border: 1.5px solid color-mix(in srgb, #ff7a45 45%, transparent);
+  background: color-mix(in srgb, #ff7a45 10%, #0a1835);
+}
+
+.solo-lock__msg {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #ffc4a8;
+  text-align: center;
+}
+
+.solo-lock__btn {
+  font-size: 0.78rem !important;
+  padding: 0.4rem 0.85rem !important;
+}
+
 .btn-jouer__icon {
   font-size: 0.85rem;
 }
@@ -764,6 +790,13 @@
 
 .deezer-panel .subthemes__chosen {
   margin-top: -0.15rem;
+}
+
+.deezer-panel__hint {
+  margin: 0;
+  font-size: 0.78rem;
+  opacity: 0.72;
+  line-height: 1.35;
 }
 
 @keyframes stage-in {

@@ -122,3 +122,20 @@
   cursor: pointer;
   text-decoration: underline;
 }
+
+.multi-lobby__leave-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  justify-content: center;
+  align-items: center;
+}
+
+.multi-lobby__leave--danger {
+  color: #e85d5d;
+}
+
+.multi-lobby__leave:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

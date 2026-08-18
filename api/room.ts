@@ -210,6 +210,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       // Marque « generating » tout de suite et rend la main (évite 504 client)
       room.status = 'generating'
+      room.generatingStartedAt = Date.now()
       delete room.hostPickingTheme
       // conserve quizMode (audio Deezer ou standard)
       if (room.quizMode !== 'audio') room.quizMode = 'standard'
@@ -282,6 +283,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         latest.status = 'error'
         latest.errorMessage = message
         delete latest.genEstimateSec
+        delete latest.generatingStartedAt
         await saveRoom(latest)
         return json(res, 422, {
           error: message,
@@ -303,6 +305,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         room.status = 'error'
         room.errorMessage = gen.error
         delete room.genEstimateSec
+        delete room.generatingStartedAt
         await saveRoom(room)
         return json(res, 422, {
           error: gen.error,
@@ -323,6 +326,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         previewUrl: q.previewUrl,
         coverUrl: q.coverUrl,
         deezerTrackId: q.deezerTrackId,
+        revealAnswer: q.revealAnswer,
       }))
 
       if (questions.length < MULTI_QUESTION_COUNT) {
@@ -330,6 +334,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         room.status = 'error'
         room.errorMessage = err
         delete room.genEstimateSec
+        delete room.generatingStartedAt
         await saveRoom(room)
         return json(res, 422, {
           error: err,
@@ -346,6 +351,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       room.status = 'playing'
       delete room.errorMessage
       delete room.genEstimateSec
+      delete room.generatingStartedAt
       room.questions = questions
       room.questionIndex = 0
       prepareRound(room, now)
@@ -418,6 +424,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       room.status = 'lobby'
       delete room.errorMessage
       delete room.genEstimateSec
+      delete room.generatingStartedAt
       room.questions = []
       room.questionIndex = 0
       room.currentAnswers = {}
@@ -442,12 +449,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (playerId !== room.hostId) {
         return json(res, 403, { error: 'Seul l’hôte peut revenir au lobby' })
       }
-      if (room.status === 'playing' || room.status === 'generating') {
-        return json(res, 400, { error: 'Impossible pendant une partie' })
+      // Pendant la génération : utiliser cancelGenerate
+      if (room.status === 'generating') {
+        return json(res, 400, { error: 'Annule d’abord la génération' })
       }
       room.status = 'lobby'
       delete room.errorMessage
       delete room.genEstimateSec
+      delete room.generatingStartedAt
       room.questions = []
       room.questionIndex = 0
       room.roundPhase = 'answering'
@@ -502,12 +511,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const wasHost = room.hostId === playerId
-      // L’hôte quitte → la salle est fermée pour tout le monde
-      if (wasHost) {
-        await deleteRoom(code)
-        return json(res, 200, { left: true, closed: true, code })
-      }
-
       room.players.splice(idx, 1)
       if (playerId in room.currentAnswers) {
         delete room.currentAnswers[playerId]
@@ -516,6 +519,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (room.players.length === 0) {
         await deleteRoom(code)
         return json(res, 200, { left: true, closed: true, code })
+      }
+
+      // L’hôte part seul → transfert d’hôte, les autres restent
+      if (wasHost) {
+        room.hostId = room.players[0]!.id
+        delete room.hostPickingTheme
+        if (room.status === 'generating') {
+          room.status = 'lobby'
+          delete room.genEstimateSec
+          delete room.generatingStartedAt
+          delete room.errorMessage
+        }
       }
 
       // Les autres continuent : si tout le monde restant a répondu → reveal
@@ -527,6 +542,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await saveRoom(room)
       return json(res, 200, {
         left: true,
+        closed: false,
+        hostTransferred: wasHost,
         room: publicRoomView(room),
       })
     }

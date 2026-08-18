@@ -7,8 +7,11 @@ import {
   type ThemeTile,
 } from '../lib/themes'
 import {
+  DEEZER_DECADE_OPTIONS,
+  DEEZER_GLOBAL_OPTION,
   DEEZER_STYLE_OPTIONS,
   formatDeezerTheme,
+  type DeezerPoolMode,
 } from '../lib/deezerStyles'
 import type { Difficulty, QuizContentMode, QuizScope } from '../types'
 import {
@@ -52,6 +55,10 @@ interface ThemeSelectProps {
   backLabel?: string
   busy?: boolean
   error?: string | null
+  /** Solo bloqué tant qu’une salle multi est ouverte */
+  soloLocked?: boolean
+  soloLockHint?: string
+  onReturnToRoom?: () => void
 }
 
 export function ThemeSelect({
@@ -62,6 +69,9 @@ export function ThemeSelect({
   backLabel,
   busy,
   error,
+  soloLocked = false,
+  soloLockHint,
+  onReturnToRoom,
 }: ThemeSelectProps) {
   const [themeId, setThemeId] = useState<string | null>(null)
   const [subtheme, setSubtheme] = useState('Général')
@@ -72,7 +82,9 @@ export function ThemeSelect({
   const [gameMode, setGameMode] = useState<GameModeOption>('free')
   const [aiProvider, setAiProvider] = useState<AiProvider>('auto')
   const [quizMode, setQuizMode] = useState<QuizContentMode>('standard')
+  const [deezerPoolMode, setDeezerPoolMode] = useState<DeezerPoolMode>('global')
   const [deezerStyleId, setDeezerStyleId] = useState<string>('pop')
+  const [deezerDecadeId, setDeezerDecadeId] = useState<string>('all')
   const [deezerQuery, setDeezerQuery] = useState('')
 
   const isMulti = variant === 'multi'
@@ -85,6 +97,15 @@ export function ThemeSelect({
     DEEZER_STYLE_OPTIONS.find((s) => s.id === deezerStyleId) ??
     DEEZER_STYLE_OPTIONS[0]
 
+  function deezerThemeLabel(): string {
+    return formatDeezerTheme({
+      mode: deezerPoolMode,
+      styleLabel: deezerStyle.label,
+      decadeId: deezerDecadeId,
+      custom: deezerQuery,
+    })
+  }
+
   function selectTheme(t: ThemeTile) {
     setThemeId(t.id)
     setSubtheme('Général')
@@ -93,11 +114,10 @@ export function ThemeSelect({
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    if (busy) return
+    if (busy || (variant === 'solo' && soloLocked)) return
 
     if (isDeezer) {
-      const custom = deezerQuery.trim()
-      const t = formatDeezerTheme(custom || deezerStyle.label)
+      const t = deezerThemeLabel()
       if (!t) return
       onStart(t, '', scope, {
         timerEnabled,
@@ -126,13 +146,15 @@ export function ThemeSelect({
   }
 
   const activeLabel = isDeezer
-    ? formatDeezerTheme(deezerQuery.trim() || deezerStyle.label)
+    ? deezerThemeLabel()
     : customTheme.trim()
       ? customTheme.trim()
       : parent
         ? formatThemeQuery(parent.label, subtheme)
         : ''
-  const canPlay = Boolean(activeLabel) && !busy
+  const canPlay =
+    Boolean(activeLabel) && !busy && !(variant === 'solo' && soloLocked)
+  const deezerUsingCustom = Boolean(deezerQuery.trim())
 
   const brandBlock = (
     <div className="brand-hero">
@@ -160,22 +182,43 @@ export function ThemeSelect({
   )
 
   const playButton = (
-    <button className="btn-jouer" type="submit" disabled={!canPlay}>
-      <span className="btn-jouer__icon" aria-hidden>
-        ▶
-      </span>
-      {busy
-        ? 'Préparation…'
-        : existingRoom
-          ? 'Valider le thème'
-          : isMulti
-            ? isDeezer
-              ? 'Créer la salle musicale'
-              : 'Créer la salle'
-            : isDeezer
-              ? 'Lancer le quiz musical'
-              : 'Jouer'}
-    </button>
+    <>
+      {variant === 'solo' && soloLocked && (
+        <div className="solo-lock" role="status">
+          <p className="solo-lock__msg">
+            {soloLockHint ??
+              'Tu es encore dans une salle multi. Quitte la salle pour jouer en solo.'}
+          </p>
+          {onReturnToRoom && (
+            <button
+              type="button"
+              className="btn btn--secondary solo-lock__btn"
+              onClick={onReturnToRoom}
+            >
+              Retour à la salle
+            </button>
+          )}
+        </div>
+      )}
+      <button className="btn-jouer" type="submit" disabled={!canPlay}>
+        <span className="btn-jouer__icon" aria-hidden>
+          ▶
+        </span>
+        {busy
+          ? 'Préparation…'
+          : existingRoom
+            ? 'Valider le thème'
+            : isMulti
+              ? isDeezer
+                ? 'Créer la salle musicale'
+                : 'Créer la salle'
+              : soloLocked
+                ? 'Solo indisponible'
+                : isDeezer
+                  ? 'Lancer le quiz musical'
+                  : 'Jouer'}
+      </button>
+    </>
   )
 
   const settingsFields = (
@@ -339,23 +382,79 @@ export function ThemeSelect({
 
             <div className="deezer-panel">
               <fieldset className="subthemes">
-                <legend className="subthemes__title">Styles musicaux</legend>
-                <div className="subthemes__grid" role="group">
-                  {DEEZER_STYLE_OPTIONS.map((s) => (
+                <legend className="subthemes__title">Tirage</legend>
+                <div className="subthemes__grid" role="group" aria-label="Tirage">
+                  <button
+                    type="button"
+                    className={`subtheme-chip${deezerPoolMode === 'global' && !deezerUsingCustom ? ' is-selected' : ''}`}
+                    onClick={() => {
+                      setDeezerPoolMode('global')
+                      setDeezerQuery('')
+                    }}
+                    disabled={busy}
+                    aria-pressed={deezerPoolMode === 'global' && !deezerUsingCustom}
+                  >
+                    {DEEZER_GLOBAL_OPTION.label}
+                  </button>
+                  <button
+                    type="button"
+                    className={`subtheme-chip${deezerPoolMode === 'style' && !deezerUsingCustom ? ' is-selected' : ''}`}
+                    onClick={() => {
+                      setDeezerPoolMode('style')
+                      setDeezerQuery('')
+                    }}
+                    disabled={busy}
+                    aria-pressed={deezerPoolMode === 'style' && !deezerUsingCustom}
+                  >
+                    Par style
+                  </button>
+                </div>
+              </fieldset>
+
+              {deezerPoolMode === 'style' && (
+                <fieldset className="subthemes">
+                  <legend className="subthemes__title">Styles musicaux</legend>
+                  <div className="subthemes__grid" role="group">
+                    {DEEZER_STYLE_OPTIONS.map((s) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        className={`subtheme-chip${deezerStyleId === s.id && !deezerUsingCustom ? ' is-selected' : ''}`}
+                        onClick={() => {
+                          setDeezerPoolMode('style')
+                          setDeezerStyleId(s.id)
+                          setDeezerQuery('')
+                        }}
+                        disabled={busy}
+                        aria-pressed={
+                          deezerStyleId === s.id && !deezerUsingCustom
+                        }
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                </fieldset>
+              )}
+
+              <fieldset className="subthemes">
+                <legend className="subthemes__title">Décennie</legend>
+                <div className="subthemes__grid" role="group" aria-label="Décennie">
+                  {DEEZER_DECADE_OPTIONS.map((d) => (
                     <button
-                      key={s.id}
+                      key={d.id}
                       type="button"
-                      className={`subtheme-chip${deezerStyleId === s.id && !deezerQuery.trim() ? ' is-selected' : ''}`}
+                      className={`subtheme-chip${deezerDecadeId === d.id && !deezerUsingCustom ? ' is-selected' : ''}`}
                       onClick={() => {
-                        setDeezerStyleId(s.id)
+                        setDeezerDecadeId(d.id)
                         setDeezerQuery('')
                       }}
                       disabled={busy}
                       aria-pressed={
-                        deezerStyleId === s.id && !deezerQuery.trim()
+                        deezerDecadeId === d.id && !deezerUsingCustom
                       }
                     >
-                      {s.label}
+                      {d.label}
                     </button>
                   ))}
                 </div>
@@ -363,12 +462,12 @@ export function ThemeSelect({
 
               <label className="custom-theme deezer-search">
                 <span className="custom-theme__label">
-                  Ou génère ton thème Deezer (artiste, genre, année…)
+                  Ou recherche libre (artiste, genre, année…)
                 </span>
                 <input
                   value={deezerQuery}
                   onChange={(e) => setDeezerQuery(e.target.value)}
-                  placeholder="Ex. Daft Punk, années 80, jazz manouche…"
+                  placeholder="Ex. Daft Punk, jazz manouche…"
                   maxLength={80}
                   enterKeyHint="go"
                   disabled={busy}
@@ -377,6 +476,9 @@ export function ThemeSelect({
 
               <p className="subthemes__chosen">
                 Thème musical : <strong>{activeLabel}</strong>
+              </p>
+              <p className="deezer-panel__hint">
+                Réponses = titres seuls · l’audit affiche titre + artiste
               </p>
             </div>
 

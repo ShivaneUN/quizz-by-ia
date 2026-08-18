@@ -17,9 +17,9 @@ interface MultiScoreboardProps {
   onReplay: () => void
   onContinueTier: () => void
   onRestartTiers: () => void
-  onChangeTheme: () => void
   onSetDifficulty: (difficulty: Difficulty) => void
-  onCloseRoom: () => void
+  /** Hôte : ramène tout le monde au lobby (changer de thème, etc.) */
+  onBackToLobby: () => void
   onLeave: () => void
   onKick: (targetPlayerId: string) => void
 }
@@ -32,9 +32,8 @@ export function MultiScoreboard({
   onReplay,
   onContinueTier,
   onRestartTiers,
-  onChangeTheme,
   onSetDifficulty,
-  onCloseRoom,
+  onBackToLobby,
   onLeave,
   onKick,
 }: MultiScoreboardProps) {
@@ -218,14 +217,6 @@ export function MultiScoreboard({
 
       {isHost ? (
         <div className="multi-dash__actions">
-          <button
-            type="button"
-            className="btn btn--secondary"
-            onClick={onChangeTheme}
-            disabled={busy}
-          >
-            Changer de thème
-          </button>
           {playMode === 'progression' ? (
             <>
               {allTiersDone ? (
@@ -261,7 +252,7 @@ export function MultiScoreboard({
             <>
               <div className="multi-dash__diffs">
                 <p className="multi-dash__diffs-label">
-                  Difficulté pour la suite
+                  Rejouer — choisis la difficulté
                 </p>
                 <div
                   className="multi-dash__diffs-btns"
@@ -294,11 +285,12 @@ export function MultiScoreboard({
           )}
           <button
             type="button"
-            className="btn btn--ghost"
-            onClick={onCloseRoom}
+            className="btn btn--secondary"
+            onClick={onBackToLobby}
             disabled={busy}
+            title="Ramène tout le monde au lobby pour changer de thème"
           >
-            Fermer la salle
+            Retour lobby (tous)
           </button>
           <button
             type="button"
@@ -306,7 +298,7 @@ export function MultiScoreboard({
             onClick={onLeave}
             disabled={busy}
           >
-            Quitter (les autres restent)
+            Quitter la salle
           </button>
         </div>
       ) : (

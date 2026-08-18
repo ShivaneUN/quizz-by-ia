@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Question } from '../types'
 import { ROUND_MS } from '../types'
 import { QuestionFeedback } from './QuestionFeedback'
+import { revealCorrectAnswer } from './AnswerAudit'
 import './QuizPlay.css'
 
 interface QuizPlayProps {
@@ -95,16 +96,6 @@ export function QuizPlay({
 
       {question.previewUrl && (
         <figure className="quiz-play__media quiz-play__media--audio">
-          {question.coverUrl && (
-            <img
-              className="quiz-play__cover"
-              src={question.coverUrl}
-              alt=""
-              loading="eager"
-              decoding="async"
-              referrerPolicy="no-referrer"
-            />
-          )}
           <audio
             key={question.id}
             className="quiz-play__audio"
@@ -184,10 +175,35 @@ export function QuizPlay({
                 ? '⏱ Temps écoulé'
                 : '✗ Mauvaise réponse'}
           </p>
+          {question.coverUrl && (
+            <img
+              className="quiz-play__feedback-cover"
+              src={question.coverUrl}
+              alt=""
+              loading="lazy"
+              decoding="async"
+              referrerPolicy="no-referrer"
+            />
+          )}
           {!isCorrect && (
             <p className="quiz-play__feedback-detail">
               La bonne réponse était :{' '}
-              <strong>{question.answers[question.correctIndex]}</strong>
+              <strong>
+                {revealCorrectAnswer(
+                  question.explanation,
+                  question.answers[question.correctIndex],
+                  question.revealAnswer,
+                )}
+              </strong>
+            </p>
+          )}
+          {isCorrect && question.previewUrl && (
+            <p className="quiz-play__feedback-detail">
+              {revealCorrectAnswer(
+                question.explanation,
+                question.answers[question.correctIndex],
+                question.revealAnswer,
+              )}
             </p>
           )}
           {question.explanation && (

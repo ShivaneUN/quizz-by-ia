@@ -2,9 +2,14 @@
   position: fixed;
   right: max(0.75rem, env(safe-area-inset-right));
   bottom: max(0.85rem, env(safe-area-inset-bottom));
-  z-index: 60;
+  z-index: 120;
   display: grid;
   justify-items: end;
+  pointer-events: none;
+}
+
+.multi-chat > * {
+  pointer-events: auto;
 }
 
 .multi-chat.is-open {

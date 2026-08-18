@@ -200,6 +200,16 @@
   font-size: 1.05rem;
 }
 
+.multi-play__feedback-cover {
+  display: block;
+  width: 5.5rem;
+  height: 5.5rem;
+  margin: 0.45rem auto 0;
+  border-radius: 10px;
+  object-fit: cover;
+  border: 1.5px solid color-mix(in srgb, #4db8ff 35%, transparent);
+}
+
 .multi-play__feedback-detail {
   margin: 0.4rem 0 0;
   font-size: 0.9rem;
@@ -294,6 +304,19 @@
   font-weight: 700;
   cursor: pointer;
   text-decoration: underline;
+}
+
+.multi-play__leave-row {
+  margin-top: 0.35rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  justify-content: center;
+  align-items: center;
+}
+
+.multi-play__leave--danger {
+  color: #e85d5d;
 }
 
 .multi-play__leave:disabled {

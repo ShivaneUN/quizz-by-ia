@@ -43,6 +43,7 @@ export interface RoomQuestion {
   previewUrl?: string
   coverUrl?: string
   deezerTrackId?: string
+  revealAnswer?: string
 }
 
 /** Réponse d’un joueur sur une manche (null = pas répondu / faux auto) */
@@ -94,6 +95,8 @@ export interface RoomState {
   scoresFinalized?: boolean
   /** ETA génération (secondes) pendant status === generating */
   genEstimateSec?: number
+  /** Horodatage début génération — watchdog anti-blocage */
+  generatingStartedAt?: number
   /** L’hôte est sur l’écran choix de thème — les autres restent au lobby */
   hostPickingTheme?: boolean
   createdAt: number
@@ -104,6 +107,8 @@ export const ROUND_MS = 10_000
 export const MULTI_QUESTION_COUNT = 10
 /** TTL Redis salle (inactivité) — rafraîchi à chaque save / poll */
 export const ROOM_TTL_SEC = 60 * 5
+/** Au-delà : génération orpheline (ex. kill Vercel) → status error */
+export const GENERATING_STALE_MS = 75_000
 
 const memory = new Map<string, RoomState>()
 
@@ -444,6 +449,7 @@ export function publicRoomView(
     imageUrl?: string
     previewUrl?: string
     coverUrl?: string
+    revealAnswer?: string
   }>
   roundEndsAt: number
   /** Horloge serveur au moment de la réponse — pour corriger le skew client */
@@ -509,6 +515,7 @@ export function publicRoomView(
               correctIndex: q.correctIndex,
               explanation: q.explanation,
               sourceType: q.sourceType,
+              revealAnswer: q.revealAnswer,
             }
           : {}),
       }
@@ -603,10 +610,28 @@ export function hostNextQuestion(room: RoomState, now = Date.now()): RoomState {
 
 /**
  * Ferme la manche si besoin, sans écraser un `next` concurrent.
+ * Guérit aussi les salles bloquées en `generating` (timeout plateforme).
  */
 export async function syncRoomRound(code: string): Promise<RoomState | null> {
   const room = await getRoom(code)
   if (!room) return null
+
+  if (room.status === 'generating') {
+    const started = room.generatingStartedAt ?? room.updatedAt
+    if (
+      typeof started === 'number' &&
+      started > 0 &&
+      Date.now() - started > GENERATING_STALE_MS
+    ) {
+      room.status = 'error'
+      room.errorMessage =
+        'La génération a expiré (délai serveur). Réessaie.'
+      delete room.genEstimateSec
+      delete room.generatingStartedAt
+      await saveRoom(room)
+      return room
+    }
+  }
 
   const idx = room.questionIndex
   const phase = room.roundPhase

@@ -4,6 +4,7 @@ import { HostPlayersPanel } from './HostPlayersPanel'
 import { PlayersStreakBar } from './PlayersStreakBar'
 import { QuestionFeedback } from './QuestionFeedback'
 import { StreakFlame } from './StreakFlame'
+import { revealCorrectAnswer } from './AnswerAudit'
 import './MultiPlay.css'
 
 interface MultiPlayProps {
@@ -15,6 +16,8 @@ interface MultiPlayProps {
   onResume: () => void
   onNext: () => void
   onLeave: () => void
+  /** Hôte uniquement : ramène tout le monde au lobby (salle ouverte) */
+  onBackToLobby?: () => void
   onKick: (targetPlayerId: string) => void
   busy?: boolean
   disabled?: boolean
@@ -36,6 +39,7 @@ export function MultiPlay({
   onResume,
   onNext,
   onLeave,
+  onBackToLobby,
   onKick,
   busy,
   disabled,
@@ -187,16 +191,6 @@ export function MultiPlay({
 
       {q.previewUrl && (
         <figure className="multi-play__media multi-play__media--audio">
-          {q.coverUrl && (
-            <img
-              className="multi-play__cover"
-              src={q.coverUrl}
-              alt=""
-              loading="eager"
-              decoding="async"
-              referrerPolicy="no-referrer"
-            />
-          )}
           <audio
             key={q.id}
             className="multi-play__audio"
@@ -309,10 +303,31 @@ export function MultiPlay({
                 ? '✓ Bonne réponse !'
                 : '✗ Mauvaise réponse'}
           </p>
+          {q.coverUrl && (
+            <img
+              className="multi-play__feedback-cover"
+              src={q.coverUrl}
+              alt=""
+              loading="lazy"
+              decoding="async"
+              referrerPolicy="no-referrer"
+            />
+          )}
           {typeof correctIndex === 'number' && !myCorrect && (
             <p className="multi-play__feedback-detail">
               La bonne réponse était :{' '}
-              <strong>{q.answers[correctIndex]}</strong>
+              <strong>
+                {revealCorrectAnswer(
+                  q.explanation,
+                  q.answers[correctIndex],
+                  q.revealAnswer,
+                )}
+              </strong>
+            </p>
+          )}
+          {typeof correctIndex === 'number' && myCorrect && q.previewUrl && (
+            <p className="multi-play__feedback-detail">
+              {revealCorrectAnswer(q.explanation, q.answers[correctIndex], q.revealAnswer)}
             </p>
           )}
           {q.explanation && (
@@ -407,9 +422,36 @@ export function MultiPlay({
         onKick={onKick}
       />
 
-      <button type="button" className="multi-play__leave" onClick={onLeave}>
-        Quitter
-      </button>
+      {isHost && onBackToLobby ? (
+        <div className="multi-play__leave-row">
+          <button
+            type="button"
+            className="multi-play__leave"
+            onClick={onLeave}
+            disabled={busy}
+          >
+            Quitter la salle
+          </button>
+          <button
+            type="button"
+            className="multi-play__leave multi-play__leave--danger"
+            onClick={onBackToLobby}
+            disabled={busy}
+            title="Arrête le quiz et ramène tout le monde au lobby"
+          >
+            Retour lobby (tous)
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="multi-play__leave"
+          onClick={onLeave}
+          disabled={busy}
+        >
+          Quitter la salle
+        </button>
+      )}
     </section>
   )
 }

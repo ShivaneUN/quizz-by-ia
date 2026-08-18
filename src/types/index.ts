@@ -31,6 +31,8 @@ export interface Question {
   previewUrl?: string
   coverUrl?: string
   deezerTrackId?: string
+  /** Affichage audit / feedback : « Titre — Artiste » (Deezer) */
+  revealAnswer?: string
 }
 
 /** Métadonnées d'une banque de thème */

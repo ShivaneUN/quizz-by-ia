@@ -63,6 +63,8 @@ export interface GeneratedQuestion {
   previewUrl?: string
   coverUrl?: string
   deezerTrackId?: string
+  /** Titre — Artiste pour l’audit (réponses QCM = titre seul) */
+  revealAnswer?: string
 }
 
 const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard']

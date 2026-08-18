@@ -13,6 +13,8 @@ interface MultiLobbyProps {
   statusMsg?: string | null
   onStart: () => void
   onLeave: () => void
+  /** Hôte uniquement : ferme la salle pour tout le monde */
+  onCloseRoom?: () => void
   onKick: (targetPlayerId: string) => void
   onChangeTheme?: () => void
   onCancelGenerate?: () => void
@@ -27,6 +29,7 @@ export function MultiLobby({
   statusMsg,
   onStart,
   onLeave,
+  onCloseRoom,
   onKick,
   onChangeTheme,
   onCancelGenerate,
@@ -151,14 +154,37 @@ export function MultiLobby({
         </p>
       )}
 
-      <button
-        type="button"
-        className="multi-lobby__leave"
-        onClick={onLeave}
-        disabled={room.status === 'generating'}
-      >
-        Quitter la salle
-      </button>
+      {isHost && onCloseRoom ? (
+        <div className="multi-lobby__leave-row">
+          <button
+            type="button"
+            className="multi-lobby__leave"
+            onClick={onLeave}
+            disabled={busy}
+            title="Tu quittes ; l’hôte passe à un autre joueur"
+          >
+            Quitter la salle
+          </button>
+          <button
+            type="button"
+            className="multi-lobby__leave multi-lobby__leave--danger"
+            onClick={onCloseRoom}
+            disabled={busy}
+            title="Ferme la salle pour tous les participants"
+          >
+            Fermer la salle (tous)
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="multi-lobby__leave"
+          onClick={onLeave}
+          disabled={busy}
+        >
+          Quitter la salle
+        </button>
+      )}
     </section>
   )
 }

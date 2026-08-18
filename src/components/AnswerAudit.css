@@ -117,6 +117,21 @@
   font-weight: 700;
 }
 
+.answer-audit__cover {
+  display: block;
+  width: 3.25rem;
+  height: 3.25rem;
+  margin-top: 0.35rem;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 1.5px solid color-mix(in srgb, #4db8ff 35%, transparent);
+}
+
+.answer-audit--compact .answer-audit__cover {
+  width: 2.5rem;
+  height: 2.5rem;
+}
+
 .answer-audit__explain {
   margin: 0.3rem 0 0;
   font-size: 0.72rem;

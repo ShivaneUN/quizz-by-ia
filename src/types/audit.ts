@@ -7,4 +7,8 @@ export interface AuditEntry {
   correct: boolean
   explanation?: string
   sourceType?: string
+  /** Titre — Artiste (Deezer) ou libellé complet pour l’audit */
+  revealAnswer?: string
+  /** Pochette Deezer — affichée seulement dans l’audit */
+  coverUrl?: string
 }

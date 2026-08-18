@@ -51,7 +51,7 @@ import {
   TypingScorePopup,
   type TypingScoreEntry,
 } from './components/TypingScorePopup'
-import { ModeSelect } from './components/ModeSelect'
+import { HomeSideNav } from './components/HomeSideNav'
 import { AdminPanel } from './components/AdminPanel'
 import { MultiChat } from './components/MultiChat'
 import { MultiGate } from './components/MultiGate'
@@ -95,6 +95,24 @@ function multiScreenForStatus(status: MultiRoom['status']): Screen {
   return 'multi-lobby'
 }
 
+/** Timeout client solo — évite un loading infini si le fetch ne revient jamais. */
+const SOLO_GEN_TIMEOUT_MS = 90_000
+
+function armSoloGenTimeout(ac: AbortController): {
+  clear: () => void
+  didTimeout: () => boolean
+} {
+  let timedOut = false
+  const id = window.setTimeout(() => {
+    timedOut = true
+    ac.abort()
+  }, SOLO_GEN_TIMEOUT_MS)
+  return {
+    clear: () => window.clearTimeout(id),
+    didTimeout: () => timedOut,
+  }
+}
+
 function roomFromError(e: unknown): MultiRoom | null {
   if (e && typeof e === 'object' && 'room' in e) {
     const room = (e as { room?: MultiRoom }).room
@@ -130,7 +148,7 @@ const initialSession = (): GameSession => ({
 })
 
 export default function App() {
-  const [screen, setScreen] = useState<Screen>('mode')
+  const [screen, setScreen] = useState<Screen>('home')
   const [session, setSession] = useState<GameSession>(initialSession)
   const [error, setError] = useState<string | null>(null)
   const [statusMsg, setStatusMsg] = useState<string | null>(null)
@@ -145,6 +163,11 @@ export default function App() {
   const multiThemeReturnRef = useRef<'lobby' | 'score'>('lobby')
   const screenRef = useRef(screen)
   screenRef.current = screen
+
+  // Ancien écran mode → accueil solo
+  useEffect(() => {
+    if (screen === 'mode') setScreen('home')
+  }, [screen])
 
   // —— Multijoueur ——
   const [multiName, setMultiName] = useState('')
@@ -187,6 +210,8 @@ export default function App() {
         correct,
         explanation: q.explanation,
         sourceType: q.sourceType,
+        revealAnswer: q.revealAnswer,
+        coverUrl: q.coverUrl,
       },
     ])
   }, [
@@ -449,11 +474,18 @@ export default function App() {
           setScreen('multi-gate')
           return
         }
-        setMultiRoom((prev) => preferNewerRoom(prev, room))
+        let merged = room
+        setMultiRoom((prev) => {
+          merged = preferNewerRoom(prev, room)
+          return merged
+        })
         // Pendant le choix de thème, ne pas forcer le lobby / score
         if (screenRef.current === 'multi-theme') return
-        // Navigation pilotée par le status serveur (relance = generating → playing)
-        const next = multiScreenForStatus(room.status)
+        // Navigation pilotée par le status fusionné (évite poll stale)
+        const next = multiScreenForStatus(merged.status)
+        if (merged.status === 'error') {
+          setStatusMsg(null)
+        }
         if (next !== screenRef.current) {
           // Efface une vieille erreur 504 de génération une fois la partie OK
           if (next === 'multi-play' || next === 'multi-score') {
@@ -472,7 +504,7 @@ export default function App() {
           setMultiRoom(null)
           setMultiBusy(false)
           setError('La salle a été fermée')
-          setScreen('mode')
+          setScreen('home')
         }
       }
     }
@@ -646,11 +678,21 @@ export default function App() {
     scope: QuizScope,
     options: ThemeStartOptions,
   ) {
+    // Solo uniquement hors salle multi
+    if (multiRoom && multiPlayerId) {
+      setError(
+        `Salle ${multiRoom.code} encore ouverte — quitte la salle pour jouer en solo.`,
+      )
+      setScreen('home')
+      return
+    }
+
     setError(null)
     setStatusMsg(null)
     soloGenAbortRef.current?.abort()
     const ac = new AbortController()
     soloGenAbortRef.current = ac
+    const genTimeout = armSoloGenTimeout(ac)
     setScreen('loading')
     soloTypingScoreRef.current = 0
 
@@ -706,7 +748,13 @@ export default function App() {
         quizMode,
         ac.signal,
       )
-      if (ac.signal.aborted) return
+      if (ac.signal.aborted) {
+        if (genTimeout.didTimeout()) {
+          setError('La génération a pris trop de temps. Réessaie.')
+          setScreen('home')
+        }
+        return
+      }
       if ('error' in result) {
         if (result.error === 'Génération annulée') return
         setError(result.error)
@@ -727,10 +775,17 @@ export default function App() {
       pushSoloTypingBoard(soloTypingScoreRef.current)
       setScreen('play')
     } catch (e) {
-      if (ac.signal.aborted) return
+      if (ac.signal.aborted) {
+        if (genTimeout.didTimeout()) {
+          setError('La génération a pris trop de temps. Réessaie.')
+          setScreen('home')
+        }
+        return
+      }
       setError(e instanceof Error ? e.message : 'Erreur au démarrage')
       setScreen('home')
     } finally {
+      genTimeout.clear()
       if (soloGenAbortRef.current === ac) soloGenAbortRef.current = null
     }
   }
@@ -757,6 +812,8 @@ export default function App() {
         correct,
         explanation: q.explanation,
         sourceType: q.sourceType,
+        revealAnswer: q.revealAnswer,
+        coverUrl: q.coverUrl,
       },
     ])
 
@@ -864,6 +921,7 @@ export default function App() {
     soloGenAbortRef.current?.abort()
     const ac = new AbortController()
     soloGenAbortRef.current = ac
+    const genTimeout = armSoloGenTimeout(ac)
     setScreen('loading')
     soloTypingScoreRef.current = 0
     setStatusMsg('Préparation de la manche…')
@@ -878,7 +936,13 @@ export default function App() {
         session.quizMode ?? 'standard',
         ac.signal,
       )
-      if (ac.signal.aborted) return
+      if (ac.signal.aborted) {
+        if (genTimeout.didTimeout()) {
+          setError('La génération a pris trop de temps. Réessaie.')
+          setScreen('tier-result')
+        }
+        return
+      }
       if ('error' in result) {
         if (result.error === 'Génération annulée') return
         setError(result.error)
@@ -911,10 +975,17 @@ export default function App() {
       pushSoloTypingBoard(soloTypingScoreRef.current)
       setScreen('play')
     } catch (e) {
-      if (ac.signal.aborted) return
+      if (ac.signal.aborted) {
+        if (genTimeout.didTimeout()) {
+          setError('La génération a pris trop de temps. Réessaie.')
+          setScreen('tier-result')
+        }
+        return
+      }
       setError(e instanceof Error ? e.message : 'Erreur')
       setScreen('tier-result')
     } finally {
+      genTimeout.clear()
       if (soloGenAbortRef.current === ac) soloGenAbortRef.current = null
     }
   }
@@ -950,6 +1021,7 @@ export default function App() {
     soloGenAbortRef.current?.abort()
     const ac = new AbortController()
     soloGenAbortRef.current = ac
+    const genTimeout = armSoloGenTimeout(ac)
 
     try {
       const result = await ensureHand(
@@ -961,7 +1033,13 @@ export default function App() {
         session.quizMode ?? 'standard',
         ac.signal,
       )
-      if (ac.signal.aborted) return
+      if (ac.signal.aborted) {
+        if (genTimeout.didTimeout()) {
+          setError('La génération a pris trop de temps. Réessaie.')
+          setScreen('tier-result')
+        }
+        return
+      }
       if ('error' in result) {
         if (result.error === 'Génération annulée') return
         setError(result.error)
@@ -993,10 +1071,17 @@ export default function App() {
       pushSoloTypingBoard(soloTypingScoreRef.current)
       setScreen('play')
     } catch (e) {
-      if (ac.signal.aborted) return
+      if (ac.signal.aborted) {
+        if (genTimeout.didTimeout()) {
+          setError('La génération a pris trop de temps. Réessaie.')
+          setScreen('tier-result')
+        }
+        return
+      }
       setError(e instanceof Error ? e.message : 'Erreur')
       setScreen('tier-result')
     } finally {
+      genTimeout.clear()
       if (soloGenAbortRef.current === ac) soloGenAbortRef.current = null
     }
   }
@@ -1019,10 +1104,43 @@ export default function App() {
     setMultiBusy(false)
     clearMultiSession()
     setTypingBoard(null)
-    setScreen('mode')
+    setScreen('home')
   }
 
-  /** Quitte la salle — si hôte, la salle est fermée pour tout le monde */
+  /** Accueil : reset solo uniquement — ne quitte JAMAIS la salle multi. */
+  function goHomeKeepRoom() {
+    soloGenAbortRef.current?.abort()
+    soloGenAbortRef.current = null
+    setSession(initialSession())
+    setTierSnapshot(null)
+    setAudit([])
+    setSelectedIndex(null)
+    setPendingScored(false)
+    setError(null)
+    setStatusMsg(null)
+    setTypingBoard(null)
+    setScreen('home')
+  }
+
+  function openMultiFromHome() {
+    setError(null)
+    if (multiRoom && multiPlayerId) {
+      setScreen(multiScreenForStatus(multiRoom.status))
+      return
+    }
+    setScreen('multi-gate')
+  }
+
+  function returnToActiveRoom() {
+    setError(null)
+    if (!multiRoom || !multiPlayerId) {
+      setScreen('home')
+      return
+    }
+    setScreen(multiScreenForStatus(multiRoom.status))
+  }
+
+  /** Quitte la salle seul — les autres restent (hôte : transfert d’hôte). */
   async function handleMultiLeave() {
     const code = multiRoom?.code
     const pid = multiPlayerId
@@ -1223,11 +1341,14 @@ export default function App() {
     setAudit([])
     multiAuditKeysRef.current = new Set()
     // Même flux que le lancement initial : tout le monde voit « generating » via le poll
+    const genStamp = Date.now()
     setMultiRoom((prev) =>
       prev
         ? {
             ...prev,
             status: 'generating',
+            generatingStartedAt: genStamp,
+            updatedAt: genStamp,
             questions: [],
             questionIndex: 0,
             currentAnswers: {},
@@ -1300,10 +1421,10 @@ export default function App() {
           setScreen('multi-lobby')
           return
         }
-        // Toujours generating : laisser le poll / bouton Réessayer — pas d’erreur sticky 504
+        // Toujours generating : le poll + watchdog serveur (~75s) débloquent
         setError(null)
         setStatusMsg(
-          'La génération prend plus de temps que prévu… elle continue en arrière-plan.',
+          'Génération longue… Si rien ne bouge, annule puis réessaie.',
         )
         setScreen('multi-lobby')
         return
@@ -1331,7 +1452,16 @@ export default function App() {
       setError(e instanceof Error ? e.message : 'Erreur')
       setScreen('multi-lobby')
     } finally {
-      if (multiGenAbortRef.current === ac) multiGenAbortRef.current = null
+      const stillMine = multiGenAbortRef.current === ac
+      if (stillMine) multiGenAbortRef.current = null
+      // Abort de *cette* gen seulement (pas une relance plus recente)
+      if (ac.signal.aborted && stillMine) {
+        try {
+          await cancelRoomGenerate({ code, playerId })
+        } catch {
+          /* ignore */
+        }
+      }
       setMultiBusy(false)
     }
   }
@@ -1390,10 +1520,10 @@ export default function App() {
     setError(null)
     setStatusMsg(null)
 
-    // Solo
+    // Solo / pas encore en salle
     if (!multiRoom || !multiPlayerId) {
       if (screen === 'multi-theme') setScreen('multi-gate')
-      else setScreen('mode')
+      else setScreen('home')
       return
     }
 
@@ -1511,6 +1641,27 @@ export default function App() {
       resetAll()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur')
+      setMultiBusy(false)
+    }
+  }
+
+  /** Hôte : arrête le quiz en cours et ramène tout le monde au lobby (salle ouverte). */
+  async function handleMultiBackToLobby() {
+    if (!multiRoom || !multiPlayerId) return
+    setMultiBusy(true)
+    setError(null)
+    try {
+      const res = await backRoomToLobby({
+        code: multiRoom.code,
+        playerId: multiPlayerId,
+        pickingTheme: false,
+      })
+      setMultiRoom(res.room)
+      setAudit([])
+      setScreen('multi-lobby')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erreur')
+    } finally {
       setMultiBusy(false)
     }
   }
@@ -1671,13 +1822,8 @@ export default function App() {
               type="button"
               className="btn-home"
               onClick={() => {
-                if (multiRoom && multiPlayerId) {
-                  void handleMultiLeave()
-                  return
-                }
-                // Solo (ex. pendant génération) : coupe la requête puis Accueil
-                soloGenAbortRef.current?.abort()
-                resetAll()
+                // Ne quitte JAMAIS la salle — solo reset + accueil
+                goHomeKeepRoom()
               }}
             >
               Accueil
@@ -1698,23 +1844,8 @@ export default function App() {
         ) : null}
 
         {screen === 'mode' && (
-          <>
-            <AdminPanel />
-            <ModeSelect
-              onSolo={() => {
-                setError(null)
-                setScreen('home')
-              }}
-              onMulti={() => {
-                setError(null)
-                setScreen('multi-gate')
-              }}
-              onMinigames={() => {
-                setError(null)
-                setScreen('minigames')
-              }}
-            />
-          </>
+          // Ancien écran Solo/Multi — redirigé vers l’accueil thèmes
+          <AdminPanel />
         )}
 
         {screen === 'minigames' && (
@@ -1724,23 +1855,39 @@ export default function App() {
         )}
 
         {screen === 'home' && (
-          <ThemeSelect
-            onStart={handleStart}
-            variant="solo"
-            onBack={() => {
-              setError(null)
-              setScreen('mode')
-            }}
-            busy={false}
-            error={error}
-          />
+          <>
+            <AdminPanel />
+            <HomeSideNav
+              onMulti={openMultiFromHome}
+              onMinigames={() => {
+                setError(null)
+                setScreen('minigames')
+              }}
+              inRoom={Boolean(multiRoom && multiPlayerId)}
+              roomCode={multiRoom?.code}
+              onReturnToRoom={returnToActiveRoom}
+            />
+            <ThemeSelect
+              onStart={handleStart}
+              variant="solo"
+              busy={false}
+              error={error}
+              soloLocked={Boolean(multiRoom && multiPlayerId)}
+              soloLockHint={
+                multiRoom
+                  ? `Salle ${multiRoom.code} ouverte — quitte la salle pour jouer en solo.`
+                  : undefined
+              }
+              onReturnToRoom={returnToActiveRoom}
+            />
+          </>
         )}
 
         {screen === 'multi-gate' && (
           <MultiGate
             onCreate={handleMultiCreateName}
             onJoin={handleMultiJoin}
-            onBack={() => setScreen('mode')}
+            onBack={() => setScreen('home')}
             busy={multiBusy}
             error={error}
           />
@@ -1851,6 +1998,7 @@ export default function App() {
             }
             onStart={handleMultiStart}
             onLeave={() => void handleMultiLeave()}
+            onCloseRoom={() => void handleMultiClose()}
             onKick={(id) => void handleMultiKick(id)}
             onChangeTheme={() => handleMultiChangeTheme('lobby')}
             onCancelGenerate={() => void handleMultiCancelGenerate()}
@@ -1879,6 +2027,7 @@ export default function App() {
               onResume={() => void handleMultiResume()}
               onNext={() => void handleMultiNext()}
               onLeave={() => void handleMultiLeave()}
+              onBackToLobby={() => void handleMultiBackToLobby()}
               onKick={(id) => void handleMultiKick(id)}
               busy={multiBusy}
             />
@@ -1902,9 +2051,8 @@ export default function App() {
               onReplay={handleMultiStart}
               onContinueTier={() => void handleMultiContinueTier()}
               onRestartTiers={() => void handleMultiRestartTiers()}
-              onChangeTheme={() => handleMultiChangeTheme('score')}
               onSetDifficulty={handleMultiSetDifficulty}
-              onCloseRoom={handleMultiClose}
+              onBackToLobby={() => void handleMultiBackToLobby()}
               onLeave={() => void handleMultiLeave()}
               onKick={(id) => void handleMultiKick(id)}
             />

@@ -5,6 +5,7 @@ import {
   type FormEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
+import { createPortal } from 'react-dom'
 import {
   listChat,
   pingPresence,
@@ -85,12 +86,12 @@ function loadLayout(): ChatLayout {
     const raw = localStorage.getItem(CHAT_LAYOUT_KEY)
     if (!raw) return { x: null, y: null, w: DEFAULT_W, h: DEFAULT_H }
     const p = JSON.parse(raw) as Partial<ChatLayout>
-    return {
+    return sanitizeLayout({
       x: typeof p.x === 'number' ? p.x : null,
       y: typeof p.y === 'number' ? p.y : null,
-      w: clamp(typeof p.w === 'number' ? p.w : DEFAULT_W, MIN_W, MAX_W),
-      h: clamp(typeof p.h === 'number' ? p.h : DEFAULT_H, MIN_H, MAX_H),
-    }
+      w: typeof p.w === 'number' ? p.w : DEFAULT_W,
+      h: typeof p.h === 'number' ? p.h : DEFAULT_H,
+    })
   } catch {
     return { x: null, y: null, w: DEFAULT_W, h: DEFAULT_H }
   }
@@ -106,6 +107,41 @@ function saveLayout(layout: ChatLayout) {
 
 function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n))
+}
+
+function defaultCornerPos(w: number, h: number): { x: number; y: number } {
+  return {
+    x: Math.max(8, window.innerWidth - w - 16),
+    y: Math.max(8, window.innerHeight - h - 24),
+  }
+}
+
+function clampPos(x: number, y: number, w: number, h: number) {
+  const maxX = Math.max(8, window.innerWidth - w - 8)
+  const maxY = Math.max(8, window.innerHeight - h - 8)
+  return {
+    x: clamp(x, 8, maxX),
+    y: clamp(y, 8, maxY),
+  }
+}
+
+/** Remet le panneau dans le viewport (évite chat « invisible » hors écran). */
+function sanitizeLayout(layout: ChatLayout): ChatLayout {
+  if (typeof window === 'undefined') {
+    return {
+      x: layout.x,
+      y: layout.y,
+      w: clamp(layout.w, MIN_W, MAX_W),
+      h: clamp(layout.h, MIN_H, MAX_H),
+    }
+  }
+  const w = clamp(layout.w, MIN_W, Math.min(MAX_W, window.innerWidth - 16))
+  const h = clamp(layout.h, MIN_H, Math.min(MAX_H, window.innerHeight - 16))
+  if (layout.x == null || layout.y == null) {
+    return { x: null, y: null, w, h }
+  }
+  const pos = clampPos(layout.x, layout.y, w, h)
+  return { ...pos, w, h }
 }
 
 /** Clear local uniquement — clé par canal (+ salle). */
@@ -276,18 +312,43 @@ export function MultiChat({
     if (el) el.scrollTop = el.scrollHeight
   }, [open, messages, channel])
 
+  useEffect(() => {
+    const onResize = () => {
+      setLayout((prev) => {
+        const next = sanitizeLayout(prev)
+        if (
+          next.x === prev.x &&
+          next.y === prev.y &&
+          next.w === prev.w &&
+          next.h === prev.h
+        ) {
+          return prev
+        }
+        saveLayout(next)
+        return next
+      })
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
   function updateLayout(next: ChatLayout) {
-    setLayout(next)
-    saveLayout(next)
+    const clean = sanitizeLayout(next)
+    setLayout(clean)
+    saveLayout(clean)
   }
 
-  function clampPos(x: number, y: number, w: number, h: number) {
-    const maxX = Math.max(8, window.innerWidth - w - 8)
-    const maxY = Math.max(8, window.innerHeight - h - 8)
-    return {
-      x: clamp(x, 8, maxX),
-      y: clamp(y, 8, maxY),
+  function openChat() {
+    const cur = sanitizeLayout(layoutRef.current)
+    // Toujours ancrer dans le viewport à l’ouverture (PC / resize)
+    if (cur.x == null || cur.y == null) {
+      const corner = defaultCornerPos(cur.w, cur.h)
+      updateLayout({ ...cur, ...corner })
+    } else {
+      updateLayout(cur)
     }
+    setUnread(0)
+    setOpen(true)
   }
 
   function onDragStart(e: ReactPointerEvent<HTMLElement>) {
@@ -299,8 +360,8 @@ export function MultiChat({
     const startY = e.clientY
     const rect = panelRef.current?.getBoundingClientRect()
     const cur = layoutRef.current
-    const originX = cur.x ?? rect?.left ?? window.innerWidth - cur.w - 16
-    const originY = cur.y ?? rect?.top ?? window.innerHeight - cur.h - 24
+    const originX = cur.x ?? rect?.left ?? defaultCornerPos(cur.w, cur.h).x
+    const originY = cur.y ?? rect?.top ?? defaultCornerPos(cur.w, cur.h).y
 
     const onMove = (ev: PointerEvent) => {
       const pos = clampPos(
@@ -402,12 +463,12 @@ export function MultiChat({
       ? {
           left: layout.x,
           top: layout.y,
-          right: 'auto',
-          bottom: 'auto',
+          right: 'auto' as const,
+          bottom: 'auto' as const,
         }
       : undefined
 
-  return (
+  const ui = (
     <div
       className={`multi-chat${open ? ' is-open' : ''}`}
       style={panelStyle}
@@ -416,7 +477,7 @@ export function MultiChat({
         <button
           type="button"
           className="multi-chat__fab"
-          onClick={() => setOpen(true)}
+          onClick={openChat}
           aria-label="Ouvrir le chat"
         >
           Chat
@@ -438,7 +499,14 @@ export function MultiChat({
           <header
             className="multi-chat__head"
             onPointerDown={onDragStart}
-            title="Glisser pour déplacer"
+            onDoubleClick={() => {
+              const cur = layoutRef.current
+              updateLayout({
+                ...cur,
+                ...defaultCornerPos(cur.w, cur.h),
+              })
+            }}
+            title="Glisser pour déplacer · double-clic pour réinitialiser"
           >
             <div className="multi-chat__tabs" role="tablist">
               <button
@@ -607,4 +675,7 @@ export function MultiChat({
       )}
     </div>
   )
+
+  if (typeof document === 'undefined') return ui
+  return createPortal(ui, document.body)
 }
