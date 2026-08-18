@@ -463,6 +463,49 @@ function splitThemeParts(theme: string): { theme: string; sousTheme: string } {
   return { theme: theme.trim(), sousTheme: 'Général' }
 }
 
+/** Calibrage STRICT — un seul module injecté selon la difficulté demandée. */
+function difficultyModule(difficulty: Difficulty, sousTheme: string): string {
+  if (difficulty === 'easy') {
+    return `NIVEAU FACILE — STRICT
+- Uniquement des faits "spectateur/grand public" (ce que perçoit un consommateur passif) — jamais de faits "coulisses/technique" (production, stats précises, dates exactes, pros non médiatisés).
+- INTERDIT en facile, quel que soit le thème : réalisateur, scénariste, producteur, compositeur, label, développeur, studio, architecte, inventeur/chef créateur — même si célèbre. Reclasse en moyen/difficile.
+- Le facile doit être NETTEMENT plus simple que le moyen, pas une variante légère. Priorise systématiquement le fait le PLUS connu du sujet.
+- Test de validation : une personne au hasard dans la rue, sans intérêt pour ${sousTheme}, devine/connaît-elle la réponse par simple exposition culturelle (télé, école, conversations) ? Si non → reclasse.
+- En cas de doute entre deux formulations, choisis toujours la plus simple.
+- Ancrage : côté SPECTATEUR du calibrage thème (faits connus / grand public), jamais le côté coulisses.`
+  }
+  if (difficulty === 'medium') {
+    return `NIVEAU MOYEN — STRICT
+- Cible : une personne qui suit le sujet occasionnellement (lit parfois des articles, regarde des documentaires, discute du sujet entre amis) — ni un novice total, ni un passionné pointu.
+- INTERDIT de retomber dans le facile "déguisé" : si le fait est devinable par quelqu'un sans aucun intérêt pour ${sousTheme} (test grand public), ce n'est pas moyen, remonte le niveau de détail.
+- INTERDIT de monter au niveau difficile : pas de statistiques ultra-précises, pas de dates exactes secondaires, pas de faits réservés aux spécialistes — reste dans une zone de "curiosité qui demande un peu de réflexion ou de recoupement", pas de mémorisation experte.
+- Les rôles de production (réalisateur, compositeur, développeur...) SONT autorisés ici, mais seulement s'ils sont notoires dans leur domaine — pas des noms obscurs réservés aux crédits de fin.
+- Test de validation : quelqu'un qui a un intérêt modéré et régulier pour ${sousTheme} (pas un expert) devrait pouvoir répondre en réfléchissant un peu ou en faisant un lien logique, sans certitude immédiate ni ignorance totale.
+- Ancrage : entre spectateur et coulisses — détails connus des curieux, pas trivia de passionné.`
+  }
+  return `NIVEAU DIFFICILE — STRICT
+- Cible : un passionné/connaisseur réel du sujet — pas un expert académique ou professionnel du domaine, sauf si le sous-thème l'exige clairement.
+- Les faits précis (statistiques, dates exactes, détails techniques, noms de professionnels peu médiatisés) sont autorisés ET attendus ici — mais TOUJOURS vérifiables dans des sources fiables, jamais des détails si obscurs qu'ils sont invérifiables ou quasi impossibles à documenter.
+- INTERDIT de générer une question à laquelle même un passionné aurait une chance quasi nulle de répondre (trivia extrême, anecdote ultra-confidentielle, détail non documenté publiquement) — le difficile doit rester "gagnable" par la bonne personne, pas être un piège impossible.
+- INTERDIT d'utiliser un fait dont l'exactitude est disputée entre sources ou repose sur une seule source peu fiable — la règle "vérifiable et non inventé" s'applique avec la même rigueur qu'en facile, seule la notoriété du fait change.
+- Test de validation : un connaisseur reconnu du sujet ${sousTheme} (pas un expert professionnel) répondrait-il correctement sans avoir besoin de rechercher l'information ? Si même ce profil ne saurait probablement pas, la question est trop obscure — remplace-la par un fait difficile mais accessible à ce niveau de passion.
+- Ancrage : côté COULISSES du calibrage thème (précis / technique / connaisseur), jamais du facile déguisé.`
+}
+
+function levelAutoCheck(difficulty: Difficulty): string {
+  if (difficulty === 'easy') {
+    return 'Facile = vraiment facile, pas de rôle production, pas de fait moyen déguisé.'
+  }
+  if (difficulty === 'medium') {
+    return 'Moyen = ni facile déguisé ni difficile déguisé, rôles de production autorisés seulement si notoires.'
+  }
+  return 'Difficile = gagnable par un vrai passionné, jamais une trivia invérifiable ou quasi impossible.'
+}
+
+/**
+ * Prompt composé : tronc commun (qualité) + 1 module difficulté + auto-vérif ciblée.
+ * Évite d’envoyer les 3 calibrages à chaque génération.
+ */
 export function buildPrompt(
   themeFull: string,
   difficulty: Difficulty,
@@ -484,6 +527,9 @@ export function buildPrompt(
           .slice(0, 60)
           .map((q, i) => `${i + 1}. ${q}`)
           .join('\n')
+
+  const niveau = difficultyModule(difficulty, sousTheme)
+  const checkNiveau = levelAutoCheck(difficulty)
 
   return `Tu es un générateur de quiz expert et rigoureux. Génère EXACTEMENT ${n} questions à choix multiples sur le thème "${theme}", sous-thème "${sousTheme}", niveau "${difficulte}", portée "${portee}".
 
@@ -556,44 +602,25 @@ DIVERSITÉ DES MAUVAISES RÉPONSES DANS LE LOT
 CONTRÔLE FINAL DE QUANTITÉ
 - Avant de livrer le JSON, compte exactement les questions du tableau : il doit y en avoir EXACTEMENT ${n}, ni plus ni moins. Si une question a été supprimée en cours de vérification, génères-en une nouvelle pour compenser plutôt que de livrer un lot incomplet.
 
-NIVEAU FACILE — STRICT
-- Uniquement des faits "spectateur/grand public" (ce que perçoit un consommateur passif) — jamais de faits "coulisses/technique" (production, stats précises, dates exactes, pros non médiatisés).
-- INTERDIT en facile, quel que soit le thème : réalisateur, scénariste, producteur, compositeur, label, développeur, studio, architecte, inventeur/chef créateur — même si célèbre. Reclasse en moyen/difficile.
-- Le facile doit être NETTEMENT plus simple que le moyen, pas une variante légère. Priorise systématiquement le fait le PLUS connu du sujet.
-- Test de validation : une personne au hasard dans la rue, sans intérêt pour ${sousTheme}, devine/connaît-elle la réponse par simple exposition culturelle (télé, école, conversations) ? Si non → reclasse.
-- En cas de doute entre deux formulations, choisis toujours la plus simple.
+${niveau}
 
-NIVEAU MOYEN — STRICT
-- Cible : une personne qui suit le sujet occasionnellement (lit parfois des articles, regarde des documentaires, discute du sujet entre amis) — ni un novice total, ni un passionné pointu.
-- INTERDIT de retomber dans le facile "déguisé" : si le fait est devinable par quelqu'un sans aucun intérêt pour ${sousTheme} (cf. test facile), ce n'est pas moyen, remonte le niveau de détail.
-- INTERDIT de monter au niveau difficile : pas de statistiques ultra-précises, pas de dates exactes secondaires, pas de faits réservés aux spécialistes — reste dans une zone de "curiosité qui demande un peu de réflexion ou de recoupement", pas de mémorisation experte.
-- Les rôles de production (réalisateur, compositeur, développeur...) SONT autorisés ici, mais seulement s'ils sont notoires dans leur domaine — pas des noms obscurs réservés aux crédits de fin.
-- Test de validation : quelqu'un qui a un intérêt modéré et régulier pour ${sousTheme} (pas un expert) devrait pouvoir répondre en réfléchissant un peu ou en faisant un lien logique, sans certitude immédiate ni ignorance totale.
-
-NIVEAU DIFFICILE — STRICT
-- Cible : un passionné/connaisseur réel du sujet — pas un expert académique ou professionnel du domaine, sauf si le sous-thème l'exige clairement.
-- Les faits précis (statistiques, dates exactes, détails techniques, noms de professionnels peu médiatisés) sont autorisés ET attendus ici — mais TOUJOURS vérifiables dans des sources fiables, jamais des détails si obscurs qu'ils sont invérifiables ou quasi impossibles à documenter.
-- INTERDIT de générer une question à laquelle même un passionné aurait une chance quasi nulle de répondre (trivia extrême, anecdote ultra-confidentielle, détail non documenté publiquement) — le difficile doit rester "gagnable" par la bonne personne, pas être un piège impossible.
-- INTERDIT d'utiliser un fait dont l'exactitude est disputée entre sources ou repose sur une seule source peu fiable — la règle "vérifiable et non inventé" s'applique avec la même rigueur qu'en facile, seule la notoriété du fait change.
-- Test de validation : un connaisseur reconnu du sujet ${sousTheme} (pas un expert professionnel) répondrait-il correctement sans avoir besoin de rechercher l'information ? Si même ce profil ne saurait probablement pas, la question est trop obscure — remplace-la par un fait difficile mais accessible à ce niveau de passion.
-
-ANCRAGE SPECTATEUR/COULISSES PAR THÈME (calibrage, non exhaustif)
+ANCRAGE SPECTATEUR/COULISSES PAR THÈME (calibrage, non exhaustif — applique le côté pertinent au niveau ${difficulte})
 Histoire: événements connus / dates-traités précis. Sport: champions connus / entraîneurs-stats. Musique: artiste-tube connu / compositeur-label. Cinéma: acteurs-répliques cultes / réalisateur-studio. Géographie: pays-monuments connus / relief-démographie. Sciences: faits scolaires / chercheur-process. Tech: marques connues / specs-dates précises. Nature: animaux connus / classification scientifique. Cuisine: plats-origine connus / technique-chef-date. Art: œuvres célèbres / mouvement-technique. Mythologie: dieux-héros connus / généalogies-variantes. Littérature: livres-auteurs connus / courants-dates précises. Animaux: animaux du quotidien / classification-comportements. Espace: astronomie scolaire / missions-données techniques. Jeux vidéo: jeux-persos populaires / studio-moteur-date. Actualité: tendances connues et datées / détails ponctuels précis — jamais de fait instable non daté.
 Thème libre : applique le même principe spectateur/coulisses de façon autonome.
 
 PORTÉE
-- "Français" : priorise faits France/francophonie sur thèmes pertinents (Histoire, Cinéma, Musique, Littérature, Actualité, Cuisine) ; thèmes universels restent internationaux avec ancrage français si possible ; facile = grand public français.
-- "International" : vivier mondial, sans priorité géographique ; facile = notoriété mondiale.
+- "Français" : priorise faits France/francophonie sur thèmes pertinents (Histoire, Cinéma, Musique, Littérature, Actualité, Cuisine) ; thèmes universels restent internationaux avec ancrage français si possible.
+- "International" : vivier mondial, sans priorité géographique.
 - Dans les deux cas, le principe spectateur/coulisses prime — la portée ajuste le périmètre, pas la difficulté.
 
 THÈME LIBRE (hors thèmes prédéfinis)
-- Identifie la famille de rattachement, applique strictement les règles facile/fiabilité/anti-doublon.
+- Identifie la famille de rattachement, applique strictement les règles du niveau ${difficulte}, fiabilité et anti-doublon.
 - Si trop pointu pour ${n} questions fiables et non redondantes, élargis le périmètre plutôt qu'inventer.
 - Si ambigu/mal orthographié, choisis l'interprétation la plus probable et grand public.
 - Si inapproprié ou insuffisamment documenté : ne génère rien, retourne {"erreur": "Thème non valide ou insuffisamment documenté pour générer un quiz fiable."}
 
 AUTO-VÉRIFICATION FINALE (avant de répondre, ne pas écrire ce raisonnement)
-Repasse sur les ${n} questions : niveau respecté ? Facile = vraiment facile, pas de rôle production, pas de fait moyen déguisé. Moyen = ni facile déguisé ni difficile déguisé, rôles de production autorisés seulement si notoires. Difficile = gagnable par un vrai passionné, jamais une trivia invérifiable ou quasi impossible. Faits vérifiables ? Explication/source présentes et crédibles ? Fait évolutif daté ? Zéro redondance (lot + niveaux + historique) ? Chaque bonne réponse/explication correspond-elle STRICTEMENT à sa propre question, sans mélange avec une autre question du lot ? Les bonnes réponses portent-elles bien sur des éléments différents, sans répétition du même contenu de réponse ? Aucune mauvaise réponse d'une question n'est-elle devenue la bonne réponse d'une autre ? Le tableau contient-il exactement ${n} questions ? Portée respectée ? Zéro prémisse fausse ? Réponses fausses indiscutablement fausses, sans mélange œuvre/adaptation ni homonyme ? Chiffres honnêtes ? Toute question qui échoue est remplacée.
+Repasse sur les ${n} questions : niveau "${difficulte}" respecté ? ${checkNiveau} Faits vérifiables ? Explication/source présentes et crédibles ? Fait évolutif daté ? Zéro redondance (lot + niveaux + historique) ? Chaque bonne réponse/explication correspond-elle STRICTEMENT à sa propre question, sans mélange avec une autre question du lot ? Les bonnes réponses portent-elles bien sur des éléments différents, sans répétition du même contenu de réponse ? Aucune mauvaise réponse d'une question n'est-elle devenue la bonne réponse d'une autre ? Le tableau contient-il exactement ${n} questions ? Portée respectée ? Zéro prémisse fausse ? Réponses fausses indiscutablement fausses, sans mélange œuvre/adaptation ni homonyme ? Chiffres honnêtes ? Toute question qui échoue est remplacée.
 
 FORMAT DE SORTIE — JSON strict uniquement, rien d'autre :
 [

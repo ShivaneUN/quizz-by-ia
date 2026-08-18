@@ -129,7 +129,8 @@ export interface GameSession {
   status: 'setup' | 'loading' | 'playing' | 'tier-result' | 'finished'
 }
 
-export const PASS_THRESHOLD = 10
+/** Score mini pour valider un palier (sur QUESTIONS_PER_TIER) */
+export const PASS_THRESHOLD = 8
 export const QUESTIONS_PER_TIER = 10
 /** Chrono par question (solo & multi) */
 export const ROUND_MS = 10_000

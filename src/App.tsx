@@ -1446,7 +1446,9 @@ export default function App() {
         (p) => baseOf(p.score, p.bonusApplique) >= PASS_THRESHOLD,
       )
     if (!allPassed) {
-      setError(`Il faut ${PASS_THRESHOLD}/10 pour chaque joueur pour avancer`)
+      setError(
+        `Il faut ${PASS_THRESHOLD}/${QUESTIONS_PER_TIER} pour chaque joueur pour avancer`,
+      )
       return
     }
     const cur =

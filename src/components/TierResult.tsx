@@ -100,7 +100,7 @@ export function TierResult({
       <p className="tier-result__msg">
         {passed
           ? hasNext
-            ? `10/10 ! Palier suivant débloqué.`
+            ? `${correct}/${answered} — palier suivant débloqué.`
             : 'Tous les paliers sont terminés. Bravo !'
           : `Il faut ${PASS_THRESHOLD}/${QUESTIONS_PER_TIER} bonnes réponses pour passer. Tu réessaies avec d'autres questions du même palier.`}
       </p>

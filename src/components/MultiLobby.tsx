@@ -1,6 +1,6 @@
 import type { MultiRoom } from '../lib/multiApi'
 import type { Difficulty } from '../types'
-import { DIFFICULTY_LABELS } from '../types'
+import { DIFFICULTY_LABELS, PASS_THRESHOLD, QUESTIONS_PER_TIER } from '../types'
 import { HostPlayersPanel } from './HostPlayersPanel'
 import { WaitMiniGames } from './WaitMiniGames'
 import './MultiLobby.css'
@@ -68,7 +68,8 @@ export function MultiLobby({
 
       {playMode === 'progression' && (
         <p className="multi-lobby__info">
-          Mode paliers : tout le monde doit faire 10/10 pour avancer
+          Mode paliers : tout le monde doit faire au moins{' '}
+          {PASS_THRESHOLD}/{QUESTIONS_PER_TIER} pour avancer
         </p>
       )}
 

@@ -143,7 +143,7 @@ export function MultiScoreboard({
             {allTiersDone
               ? 'Tous les paliers sont terminés. Bravo à toute l’équipe !'
               : allPassed && nextDifficulty
-                ? `10/10 pour tout le monde ! Palier ${DIFFICULTY_LABELS[nextDifficulty]} débloqué.`
+                ? `Au moins ${PASS_THRESHOLD}/${total} pour tout le monde — palier ${DIFFICULTY_LABELS[nextDifficulty]} débloqué.`
                 : `Il faut ${PASS_THRESHOLD}/${total} pour chaque joueur pour avancer.`}
           </p>
         </>

@@ -56,7 +56,7 @@ export interface RoomState {
   scope: 'fr' | 'international'
   /** Chrono par question (hôte) — si false, on avance seulement quand tout le monde a répondu */
   timerEnabled: boolean
-  /** Paliers (easy→hard, 10/10) ou difficulté libre */
+  /** Paliers (easy→hard, ≥8/10) ou difficulté libre */
   playMode: 'progression' | 'free'
   /** Difficulté des questions générées pour la manche */
   difficulty: 'easy' | 'medium' | 'hard'

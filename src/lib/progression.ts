@@ -11,7 +11,7 @@ export function createEmptyTierAttempts(): Record<Difficulty, TierAttempt> {
 
 /**
  * Après les 10 questions du palier :
- * - 10/10 → débloque le palier suivant (easy → medium → hard)
+ * - ≥ PASS_THRESHOLD / QUESTIONS_PER_TIER → débloque le palier suivant
  * - sinon → réessai sur le même palier
  */
 export function resolveTierOutcome(
