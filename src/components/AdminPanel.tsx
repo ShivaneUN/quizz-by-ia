@@ -53,6 +53,15 @@ type LogsPayload = {
   }
 }
 
+type AiCapacityRow = {
+  engine: string
+  keyCount: number
+  maxPerKey: number
+  capacity: number
+  inflight: number
+  freeSlots: number
+}
+
 function fmtTime(at: number) {
   try {
     return new Date(at).toLocaleString('fr-FR', {
@@ -85,7 +94,8 @@ export function AdminPanel() {
   const [clearMsg, setClearMsg] = useState<string | null>(null)
   const [clearing, setClearing] = useState(false)
   const [resetting, setResetting] = useState(false)
-  const [tab, setTab] = useState<'summary' | 'hands' | 'feedback'>('summary')
+  const [tab, setTab] = useState<'summary' | 'hands' | 'feedback' | 'ai'>('summary')
+  const [aiRows, setAiRows] = useState<AiCapacityRow[] | null>(null)
 
   async function loadLogs(secret: string) {
     setLoading(true)
@@ -106,6 +116,25 @@ export function AdminPanel() {
       setLoadError(e instanceof Error ? e.message : 'Chargement impossible')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function loadAiCapacity(secret: string) {
+    setLoadError(null)
+    try {
+      const res = await fetch(
+        `/api/ai-capacity?secret=${encodeURIComponent(secret)}`,
+      )
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(
+          typeof data.error === 'string' ? data.error : `Erreur ${res.status}`,
+        )
+      }
+      setAiRows(Array.isArray(data.rows) ? (data.rows as AiCapacityRow[]) : [])
+    } catch (e) {
+      setAiRows(null)
+      setLoadError(e instanceof Error ? e.message : 'Chargement IA impossible')
     }
   }
 
@@ -178,6 +207,7 @@ export function AdminPanel() {
   useEffect(() => {
     if (!open || !unlocked) return
     void loadLogs(ADMIN_PANEL_CODE)
+    void loadAiCapacity(ADMIN_PANEL_CODE)
   }, [open, unlocked])
 
   function handleUnlock(e: FormEvent) {
@@ -302,6 +332,11 @@ export function AdminPanel() {
                     <strong>Feedback</strong> — questions signalées par les
                     joueurs (bien / pas bien / à vérifier).
                   </p>
+                  <p>
+                    <strong>Capacité IA</strong> — état temps réel des slots
+                    disponibles par provider (clés détectées / inflight /
+                    slots libres).
+                  </p>
                 </div>
 
                 <div className="admin-panel__toolbar">
@@ -366,6 +401,7 @@ export function AdminPanel() {
                       ['summary', 'Résumé'],
                       ['hands', 'Manches'],
                       ['feedback', 'Feedback'],
+                      ['ai', 'Capacité IA'],
                     ] as const
                   ).map(([id, label]) => (
                     <button
@@ -479,6 +515,53 @@ export function AdminPanel() {
                     ))}
                     {(logs.feedback?.events ?? []).length === 0 && (
                       <p className="admin-panel__empty">Aucun feedback</p>
+                    )}
+                  </div>
+                )}
+
+                {tab === 'ai' && (
+                  <div className="admin-panel__section">
+                    <p className="admin-panel__tab-help">
+                      Tokens restants exacts non fournis par les APIs free :
+                      cette vue montre la capacité exploitable (clés, inflight,
+                      slots libres) par provider.
+                    </p>
+                    <div className="admin-panel__toolbar">
+                      <button
+                        type="button"
+                        className="btn btn--primary"
+                        onClick={() => void loadAiCapacity(ADMIN_PANEL_CODE)}
+                        title="Recharger la capacité IA"
+                      >
+                        Rafraîchir capacité IA
+                      </button>
+                    </div>
+                    <div className="admin-panel__ai-grid">
+                      {(aiRows ?? []).map((r) => (
+                        <article key={r.engine} className="admin-ai-card">
+                          {(() => {
+                            const pct =
+                              r.capacity > 0
+                                ? Math.round((100 * r.freeSlots) / r.capacity)
+                                : 0
+                            return (
+                              <>
+                          <header className="admin-ai-card__head">
+                            <strong>{r.engine.toUpperCase()}</strong>
+                          </header>
+                          <p>Clés: {r.keyCount}</p>
+                          <p>Slots max: {r.capacity}</p>
+                          <p>Inflight: {r.inflight}</p>
+                          <p>Slots libres: {r.freeSlots}</p>
+                          <p>Disponibilité: {pct}%</p>
+                              </>
+                            )
+                          })()}
+                        </article>
+                      ))}
+                    </div>
+                    {(aiRows ?? []).length === 0 && (
+                      <p className="admin-panel__empty">Aucune capacité IA détectée</p>
                     )}
                   </div>
                 )}

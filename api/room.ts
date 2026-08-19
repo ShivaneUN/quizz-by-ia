@@ -224,6 +224,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       room.roundPhase = 'answering'
       room.currentAnswers = {}
       room.roundStartedAt = 0
+      room.genQuestionsDone = 0
+      room.genQuestionsTotal = 10
       resetPlayersForNewGame(room)
       const eta = await getGenerationEstimateSec('multi')
       room.genEstimateSec = eta.estimateSec
@@ -262,6 +264,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       let gen: Awaited<ReturnType<typeof generateQuestions>>
       const genStarted = Date.now()
+      let lastProgDone = -1
       try {
         gen = await generateQuestions(
           room.theme,
@@ -272,6 +275,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           provider,
           contentMode,
           excludeQuestions,
+          async (done, total) => {
+            if (done === lastProgDone) return
+            lastProgDone = done
+            const latest = await getRoom(code)
+            if (!latest || latest.status !== 'generating') return
+            latest.genQuestionsDone = done
+            latest.genQuestionsTotal = total
+            await saveRoom(latest)
+          },
         )
       } catch (e) {
         const message =
@@ -283,6 +295,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         latest.status = 'error'
         latest.errorMessage = message
         delete latest.genEstimateSec
+        delete latest.genQuestionsDone
+        delete latest.genQuestionsTotal
         delete latest.generatingStartedAt
         await saveRoom(latest)
         return json(res, 422, {
@@ -305,6 +319,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         room.status = 'error'
         room.errorMessage = gen.error
         delete room.genEstimateSec
+        delete room.genQuestionsDone
+        delete room.genQuestionsTotal
         delete room.generatingStartedAt
         await saveRoom(room)
         return json(res, 422, {
@@ -334,6 +350,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         room.status = 'error'
         room.errorMessage = err
         delete room.genEstimateSec
+        delete room.genQuestionsDone
+        delete room.genQuestionsTotal
         delete room.generatingStartedAt
         await saveRoom(room)
         return json(res, 422, {
@@ -351,6 +369,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       room.status = 'playing'
       delete room.errorMessage
       delete room.genEstimateSec
+      delete room.genQuestionsDone
+      delete room.genQuestionsTotal
       delete room.generatingStartedAt
       room.questions = questions
       room.questionIndex = 0
@@ -424,6 +444,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       room.status = 'lobby'
       delete room.errorMessage
       delete room.genEstimateSec
+      delete room.genQuestionsDone
+      delete room.genQuestionsTotal
       delete room.generatingStartedAt
       room.questions = []
       room.questionIndex = 0
@@ -456,6 +478,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       room.status = 'lobby'
       delete room.errorMessage
       delete room.genEstimateSec
+      delete room.genQuestionsDone
+      delete room.genQuestionsTotal
       delete room.generatingStartedAt
       room.questions = []
       room.questionIndex = 0
@@ -528,6 +552,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (room.status === 'generating') {
           room.status = 'lobby'
           delete room.genEstimateSec
+          delete room.genQuestionsDone
+          delete room.genQuestionsTotal
           delete room.generatingStartedAt
           delete room.errorMessage
         }

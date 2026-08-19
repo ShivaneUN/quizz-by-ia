@@ -41,6 +41,9 @@ export interface MultiRoom {
   errorMessage?: string
   /** ETA génération (secondes) pendant generating */
   genEstimateSec?: number
+  /** Progression génération X/10 */
+  genQuestionsDone?: number
+  genQuestionsTotal?: number
   /** Début génération (watchdog anti-blocage) */
   generatingStartedAt?: number
   /** L’hôte choisit un thème — rester dans le lobby */

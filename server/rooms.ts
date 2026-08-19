@@ -95,6 +95,10 @@ export interface RoomState {
   scoresFinalized?: boolean
   /** ETA génération (secondes) pendant status === generating */
   genEstimateSec?: number
+  /** Questions déjà générées (progression X/10) */
+  genQuestionsDone?: number
+  /** Total cible (toujours 10) */
+  genQuestionsTotal?: number
   /** Horodatage début génération — watchdog anti-blocage */
   generatingStartedAt?: number
   /** L’hôte est sur l’écran choix de thème — les autres restent au lobby */
@@ -108,7 +112,7 @@ export const MULTI_QUESTION_COUNT = 10
 /** TTL Redis salle (inactivité) — rafraîchi à chaque save / poll */
 export const ROOM_TTL_SEC = 60 * 5
 /** Au-delà : génération orpheline (ex. kill Vercel) → status error */
-export const GENERATING_STALE_MS = 75_000
+export const GENERATING_STALE_MS = 65_000
 
 const memory = new Map<string, RoomState>()
 
@@ -132,6 +136,7 @@ async function redisCommand<T>(...args: (string | number)[]): Promise<T | null> 
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(args),
+    signal: AbortSignal.timeout(4_000),
   })
   if (!res.ok) {
     const t = await res.text()
@@ -627,6 +632,8 @@ export async function syncRoomRound(code: string): Promise<RoomState | null> {
       room.errorMessage =
         'La génération a expiré (délai serveur). Réessaie.'
       delete room.genEstimateSec
+      delete room.genQuestionsDone
+      delete room.genQuestionsTotal
       delete room.generatingStartedAt
       await saveRoom(room)
       return room

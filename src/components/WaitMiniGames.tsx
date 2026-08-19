@@ -20,6 +20,12 @@ interface WaitMiniGamesProps {
   freePlay?: boolean
   /** ETA serveur (multi room.genEstimateSec) */
   estimateSec?: number | null
+  /** Questions déjà générées (ex. 3) */
+  questionsDone?: number | null
+  /** Total cible (défaut 10) */
+  questionsTotal?: number
+  /** Nom de l'IA en cours (ex: "groq", "gemini", "openrouter") */
+  aiSource?: string | null
 }
 
 /**
@@ -32,6 +38,9 @@ export function WaitMiniGames({
   onScoreChange,
   freePlay = false,
   estimateSec = null,
+  questionsDone = null,
+  questionsTotal = 10,
+  aiSource = null,
 }: WaitMiniGamesProps) {
   const [game, setGame] = useState<WaitGameId | null>(null)
   const [records, setRecords] = useState<ArcadeScores>(() => loadArcadeScores())
@@ -40,6 +49,15 @@ export function WaitMiniGames({
   const sessionBestRef = useRef(0)
   const onScoreRef = useRef(onScoreChange)
   onScoreRef.current = onScoreChange
+
+  const showProgress =
+    !freePlay &&
+    questionsDone != null &&
+    Number.isFinite(questionsDone) &&
+    questionsTotal > 0
+  const progressDone = showProgress
+    ? Math.max(0, Math.min(questionsTotal, Math.round(questionsDone)))
+    : 0
 
   useEffect(() => {
     return () => {
@@ -77,6 +95,24 @@ export function WaitMiniGames({
         {freePlay ? 'Arcade' : statusLabel}
       </p>
       {!freePlay && <GenEtaLabel etaSec={etaSec} />}
+      {showProgress && (
+        <>
+          <p className="wait-minis__progress" aria-live="polite">
+            Questions générées par{' '}
+            <span className="wait-minis__ai-source">
+              {aiSource ?? '…'}
+            </span>{' '}
+            <span className="wait-minis__progress-num">
+              {progressDone}/{questionsTotal}
+            </span>
+          </p>
+          {progressDone === 0 && (
+            <p className="wait-minis__progress-hint" aria-live="polite">
+              IA en cours… génération du lot unique
+            </p>
+          )}
+        </>
+      )}
 
       {game === null ? (
         <>

@@ -333,3 +333,33 @@
   font-size: 0.8rem;
   padding: 1.5rem 0.5rem;
 }
+
+.admin-panel__ai-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0.5rem;
+}
+
+.admin-ai-card {
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  background: #041022;
+  border: 1px solid color-mix(in srgb, #4db8ff 20%, transparent);
+  text-align: left;
+}
+
+.admin-ai-card__head {
+  margin-bottom: 0.25rem;
+}
+
+.admin-ai-card strong {
+  color: #fff;
+  font-size: 0.78rem;
+}
+
+.admin-ai-card p {
+  margin: 0.15rem 0 0;
+  color: var(--ink-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}

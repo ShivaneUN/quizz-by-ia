@@ -16,6 +16,12 @@ import genEtaHandler from './api/gen-eta.ts'
 import calibStatsHandler from './api/calib-stats.ts'
 import questionFeedbackHandler from './api/question-feedback.ts'
 import chatHandler from './api/chat.ts'
+import aiCapacityHandler from './api/ai-capacity.ts'
+import {
+  getGenProgress,
+  isValidProgressId,
+  setGenProgress,
+} from './server/genProgress.ts'
 
 function readBody(req: Connect.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -49,6 +55,7 @@ function localApiPlugin(): Plugin {
               provider: rawProvider,
               quizMode: rawQuizMode,
               excludeQuestions: rawExclude,
+              progressId: rawProgressId,
             } = body
             const scope = rawScope === 'international' ? 'international' : 'fr'
             const provider = parseAiProvider(rawProvider)
@@ -98,6 +105,10 @@ function localApiPlugin(): Plugin {
                   ? `${baseSlug}--${scope}--audio`
                   : `${baseSlug}--${scope}`
             const started = Date.now()
+            const progressId = isValidProgressId(rawProgressId)
+              ? String(rawProgressId).trim()
+              : null
+            if (progressId) await setGenProgress(progressId, 0, 10, undefined, 'Préparation')
             const result = await generateQuestions(
               theme.trim(),
               themeSlug,
@@ -107,6 +118,11 @@ function localApiPlugin(): Plugin {
               provider,
               quizMode,
               excludeQuestions,
+              progressId
+                ? async (done, total, engine, stage) => {
+                    await setGenProgress(progressId, done, total, engine, stage)
+                  }
+                : undefined,
             )
             const generationMs = Date.now() - started
 
@@ -139,6 +155,42 @@ function localApiPlugin(): Plugin {
             res.statusCode = 500
             res.setHeader('Content-Type', 'application/json')
             res.end(JSON.stringify({ error: message }))
+          }
+        })()
+      })
+
+      server.middlewares.use('/api/gen-progress', (req, res) => {
+        void (async () => {
+          try {
+            const url = new URL(req.url || '/', 'http://local')
+            const id = String(url.searchParams.get('id') ?? '').trim()
+            if (!isValidProgressId(id)) {
+              res.statusCode = 400
+              res.setHeader('Content-Type', 'application/json')
+              res.setHeader('Cache-Control', 'no-store')
+              res.end(JSON.stringify({ error: 'id invalide' }))
+              return
+            }
+            const prog = await getGenProgress(id)
+            res.statusCode = 200
+            res.setHeader('Content-Type', 'application/json')
+            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
+            res.end(
+              JSON.stringify({
+                done: prog?.done ?? 0,
+                total: prog?.total ?? 10,
+                engine: prog?.engine ?? null,
+                stage: prog?.stage ?? null,
+              }),
+            )
+          } catch (e) {
+            res.statusCode = 500
+            res.setHeader('Content-Type', 'application/json')
+            res.end(
+              JSON.stringify({
+                error: e instanceof Error ? e.message : 'Erreur serveur',
+              }),
+            )
           }
         })()
       })
@@ -351,6 +403,53 @@ function localApiPlugin(): Plugin {
               },
             }
             await chatHandler(fakeReq as never, fakeRes as never)
+          } catch (e) {
+            const message = e instanceof Error ? e.message : 'Erreur serveur'
+            res.statusCode = 500
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ error: message }))
+          }
+        })()
+      })
+
+      server.middlewares.use('/api/ai-capacity', (req, res) => {
+        void (async () => {
+          try {
+            const url = new URL(req.url || '/', 'http://local')
+            const fakeReq = {
+              method: req.method,
+              body: {},
+              query: Object.fromEntries(url.searchParams.entries()),
+              headers: req.headers,
+            }
+            const fakeRes = {
+              statusCode: 200,
+              headers: {} as Record<string, string>,
+              setHeader(k: string, v: string) {
+                this.headers[k] = v
+              },
+              status(code: number) {
+                this.statusCode = code
+                return this
+              },
+              json(payload: unknown) {
+                res.statusCode = this.statusCode
+                for (const [k, v] of Object.entries(this.headers)) {
+                  res.setHeader(k, v)
+                }
+                if (!res.getHeader('Content-Type')) {
+                  res.setHeader('Content-Type', 'application/json')
+                }
+                res.end(JSON.stringify(payload))
+                return this
+              },
+              end() {
+                res.statusCode = this.statusCode
+                res.end()
+                return this
+              },
+            }
+            await aiCapacityHandler(fakeReq as never, fakeRes as never)
           } catch (e) {
             const message = e instanceof Error ? e.message : 'Erreur serveur'
             res.statusCode = 500

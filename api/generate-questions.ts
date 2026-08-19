@@ -7,6 +7,11 @@ import {
   type Difficulty,
 } from '../server/generate.js'
 import {
+  clearGenProgress,
+  isValidProgressId,
+  setGenProgress,
+} from '../server/genProgress.js'
+import {
   getGenerationEstimateSec,
   recordGenerationMs,
 } from '../server/genStats.js'
@@ -27,7 +32,7 @@ function isGatewayTimeoutMessage(msg: string): boolean {
 
 /**
  * POST /api/generate-questions
- * Body: { theme, mode, difficulty?, scope?, provider?, quizMode?, excludeQuestions? }
+ * Body: { theme, mode, difficulty?, scope?, provider?, quizMode?, excludeQuestions?, progressId? }
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -44,6 +49,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       provider: rawProvider,
       quizMode: rawQuizMode,
       excludeQuestions: rawExclude,
+      progressId: rawProgressId,
     } = req.body ?? {}
     const scope = parseScope(rawScope)
     const provider = parseAiProvider(rawProvider)
@@ -51,6 +57,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const excludeQuestions = Array.isArray(rawExclude)
       ? rawExclude.filter((x: unknown): x is string => typeof x === 'string')
       : []
+    const progressId = isValidProgressId(rawProgressId)
+      ? rawProgressId.trim()
+      : null
 
     if (!theme || typeof theme !== 'string' || !theme.trim()) {
       return res.status(400).json({ error: 'theme requis' })
@@ -84,6 +93,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           : `${baseSlug}--${scope}`
 
     const started = Date.now()
+    if (progressId) await setGenProgress(progressId, 0, 10, undefined, 'Préparation')
+
     const result = await generateQuestions(
       theme.trim(),
       themeSlug,
@@ -93,27 +104,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       provider,
       quizMode,
       excludeQuestions,
+      progressId
+        ? async (done, total, engine, stage) => {
+            await setGenProgress(progressId, done, total, engine, stage)
+          }
+        : undefined,
     )
     const generationMs = Date.now() - started
 
     if (result.error) {
+      if (progressId) await clearGenProgress(progressId)
       if (isGatewayTimeoutMessage(result.error)) {
         return res.status(504).json({
           error:
             'Le serveur a mis trop de temps à répondre, réessaie dans quelques secondes',
         })
       }
-      // Thème invalide / lot invalide → 422
       return res.status(422).json({ error: result.error })
     }
 
     if (!Array.isArray(result.questions) || result.questions.length !== 10) {
+      if (progressId) await clearGenProgress(progressId)
       return res.status(422).json({
         error:
           'JSON invalide : le lot ne contient pas exactement 10 questions. Réessaie.',
       })
     }
 
+    if (progressId) await setGenProgress(progressId, 10, 10, result.source, 'Terminé')
     await recordGenerationMs(generationMs)
     const { estimateSec } = await getGenerationEstimateSec('solo')
 

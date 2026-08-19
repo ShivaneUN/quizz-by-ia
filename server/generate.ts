@@ -5,6 +5,7 @@
 
 import { fetchCommonsImageUrl } from './wikimedia.js'
 import { buildDeezerQuiz } from './deezerQuiz.js'
+import { construirePrompt } from './quizPromptFragments.js'
 import {
   enginesWithKeys,
   fallbackEngines,
@@ -65,41 +66,42 @@ export interface GeneratedQuestion {
   deezerTrackId?: string
   /** Titre — Artiste pour l’audit (réponses QCM = titre seul) */
   revealAnswer?: string
+  /** Résumé court du fait testé (3-6 mots-clés), fourni par l'IA pour l'historique anti-doublon */
+  resumeFait?: string
+  /** true si la question provient du filet de sécurité statique */
+  estFallbackStatique?: boolean
 }
 
 const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard']
 
 type LlmEngine = Exclude<AiProvider, 'auto'>
 
+/** Modèles Groq actifs (août 2026). Pas de qwen3.6 (thinking → pas de JSON). */
 const GROQ_MODELS = [
-  'openai/gpt-oss-120b',
   'openai/gpt-oss-20b',
+  'openai/gpt-oss-120b',
 ] as const
 
-/** Flash uniquement — 2.5-flash retiré pour les nouveaux comptes */
+/** Fallback si le listing live échoue — jamais gemini-2.5-flash (404 new users). */
 const GEMINI_MODELS = [
-  'gemini-3.6-flash',
+  'gemini-flash-latest',
+  'gemini-flash-lite-latest',
   'gemini-3.5-flash',
-  'gemini-3.1-flash-lite',
 ] as const
 
 const CEREBRAS_MODELS = ['gemma-4-31b', 'gpt-oss-120b', 'zai-glm-4.7'] as const
 const DEEPSEEK_MODELS = ['deepseek-chat'] as const
-/** Uniquement modèles :free OpenRouter (après 10$ → ~1000 req/jour). */
+/** Uniquement modèles :free OpenRouter */
 const OPENROUTER_MODELS = [
   'openai/gpt-oss-20b:free',
   'google/gemma-4-31b-it:free',
-  'openrouter/free',
 ] as const
 
-const AI_SYSTEM = `Tu es un générateur de quiz expert et rigoureux. JSON uniquement.
-Succès: tableau de N questions OU {"questions":[...]}.
-Échec thème: {"erreur":"..."}.
-Chaque question: question, reponses (4), bonne_reponse_index, explication, source, date_reference, theme, sous_theme, difficulte, portee, justification_difficulte, fait_verifiable.
-1 seule bonne réponse. Faits vérifiables. Français naturel. Fidélité stricte au thème. Pas d’URL ni titre d’article inventé.`
+/** System prompt minimal — renforce l'interdiction d'inventer des faits. */
+const AI_SYSTEM_MINIMAL = `Tu es un générateur de quiz factuel. Réponds UNIQUEMENT en JSON valide. Pas de texte avant ni après. N'invente jamais de faits, noms, dates ou sources. Si tu n'es pas certain à 100%, n'inclus pas la question.`
 
-/** Auto = free only (Cerebras/DeepSeek payants exclus pour l’instant). */
-const AUTO_FREE_ENGINES: LlmEngine[] = ['groq', 'gemini', 'openrouter']
+/** Auto = Groq, OpenRouter, Gemini (modèle Flash listé live). */
+const AUTO_FREE_ENGINES: LlmEngine[] = ['groq', 'openrouter', 'gemini']
 
 export function parseAiProvider(raw: unknown): AiProvider {
   if (
@@ -157,7 +159,8 @@ function keysForEngine(engine: LlmEngine): string[] {
 }
 
 function modelsFor(engine: LlmEngine, contentMode: QuizContentMode): string[] {
-  const cap = contentMode === 'image' ? 2 : 99
+  void contentMode
+  const cap = 4
   switch (engine) {
     case 'groq':
       return GROQ_MODELS.slice(0, cap)
@@ -170,6 +173,71 @@ function modelsFor(engine: LlmEngine, contentMode: QuizContentMode): string[] {
     case 'openrouter':
       return OPENROUTER_MODELS.slice(0, cap)
   }
+}
+
+let geminiLiveCache: { at: number; ids: string[] } | null = null
+
+function rankGeminiModel(id: string): number {
+  const n = id.toLowerCase()
+  if (n === 'gemini-flash-latest') return 0
+  if (n === 'gemini-flash-lite-latest') return 1
+  if (/gemini-3\.5-flash$/.test(n)) return 2
+  if (/gemini-3\.1-flash-lite/.test(n)) return 3
+  if (/gemini-3-flash/.test(n)) return 4
+  if (/flash/.test(n) && !/2\.5|2\.0|1\.5/.test(n)) return 5
+  if (/flash/.test(n)) return 12
+  return 30
+}
+
+/** Modèles generateContent réellement autorisés pour cette clé (cache 10 min). */
+async function geminiModelsForKey(apiKey: string): Promise<string[]> {
+  if (
+    geminiLiveCache &&
+    Date.now() - geminiLiveCache.at < 10 * 60 * 1000 &&
+    geminiLiveCache.ids.length > 0
+  ) {
+    return geminiLiveCache.ids
+  }
+  try {
+    const res = await fetchWithTimeout(
+      'https://generativelanguage.googleapis.com/v1beta/models',
+      {
+        method: 'GET',
+        headers: { 'x-goog-api-key': apiKey.trim() },
+      },
+      4_000,
+    )
+    if (!res.ok) throw new Error(`list ${res.status}`)
+    const data = (await res.json()) as {
+      models?: Array<{
+        name?: string
+        supportedGenerationMethods?: string[]
+      }>
+    }
+    const ids = (data.models ?? [])
+      .filter((m) => m.supportedGenerationMethods?.includes('generateContent'))
+      .map((m) => String(m.name ?? '').replace(/^models\//, ''))
+      .filter(
+        (id) =>
+          Boolean(id) &&
+          !/embedding|imagen|image|tts|robotics|computer-use|native-audio/i.test(
+            id,
+          ),
+      )
+    ids.sort((a, b) => rankGeminiModel(a) - rankGeminiModel(b) || a.localeCompare(b))
+    const picked = ids.slice(0, 3)
+    if (picked.length > 0) {
+      geminiLiveCache = { at: Date.now(), ids: picked }
+      console.info('[gemini] modèles live:', picked.join(', '))
+      return picked
+    }
+  } catch (e) {
+    console.warn(
+      '[gemini] listing modèles impossible:',
+      e instanceof Error ? e.message : e,
+    )
+  }
+  return [...GEMINI_MODELS]
 }
 
 export function parseQuizContentMode(raw: unknown): QuizContentMode {
@@ -250,6 +318,8 @@ interface RawQuestion {
   type_image?: string
   imageSubject?: string
   imageKind?: string
+  resume_fait?: string
+  fait_verifiable?: boolean | string
 }
 
 function parseImageKind(raw: unknown): ImageKind | undefined {
@@ -465,48 +535,10 @@ function splitThemeParts(theme: string): { theme: string; sousTheme: string } {
   return { theme: theme.trim(), sousTheme: 'Général' }
 }
 
-/** Calibrage STRICT — un seul module injecté selon la difficulté demandée. */
-function difficultyModule(difficulty: Difficulty, sousTheme: string): string {
-  if (difficulty === 'easy') {
-    return `NIVEAU FACILE — STRICT
-- Uniquement des faits "spectateur/grand public" (ce que perçoit un consommateur passif) — jamais de faits "coulisses/technique" (production, stats précises, dates exactes, pros non médiatisés).
-- INTERDIT en facile, quel que soit le thème : réalisateur, scénariste, producteur, compositeur, label, développeur, studio, architecte, inventeur/chef créateur — même si célèbre. Reclasse en moyen/difficile.
-- Le facile doit être NETTEMENT plus simple que le moyen, pas une variante légère. Priorise systématiquement le fait le PLUS connu du sujet.
-- Test de validation : une personne au hasard dans la rue, sans intérêt pour ${sousTheme}, devine/connaît-elle la réponse par simple exposition culturelle (télé, école, conversations) ? Si non → reclasse.
-- En cas de doute entre deux formulations, choisis toujours la plus simple.
-- Ancrage : côté SPECTATEUR du calibrage thème (faits connus / grand public), jamais le côté coulisses.`
-  }
-  if (difficulty === 'medium') {
-    return `NIVEAU MOYEN — STRICT
-- Cible : une personne qui suit le sujet occasionnellement (lit parfois des articles, regarde des documentaires, discute du sujet entre amis) — ni un novice total, ni un passionné pointu.
-- INTERDIT de retomber dans le facile "déguisé" : si le fait est devinable par quelqu'un sans aucun intérêt pour ${sousTheme} (test grand public), ce n'est pas moyen, remonte le niveau de détail.
-- INTERDIT de monter au niveau difficile : pas de statistiques ultra-précises, pas de dates exactes secondaires, pas de faits réservés aux spécialistes — reste dans une zone de "curiosité qui demande un peu de réflexion ou de recoupement", pas de mémorisation experte.
-- Les rôles de production (réalisateur, compositeur, développeur...) SONT autorisés ici, mais seulement s'ils sont notoires dans leur domaine — pas des noms obscurs réservés aux crédits de fin.
-- Test de validation : quelqu'un qui a un intérêt modéré et régulier pour ${sousTheme} (pas un expert) devrait pouvoir répondre en réfléchissant un peu ou en faisant un lien logique, sans certitude immédiate ni ignorance totale.
-- Ancrage : entre spectateur et coulisses — détails connus des curieux, pas trivia de passionné.`
-  }
-  return `NIVEAU DIFFICILE — STRICT
-- Cible : un passionné/connaisseur réel du sujet — pas un expert académique ou professionnel du domaine, sauf si le sous-thème l'exige clairement.
-- Les faits précis (statistiques, dates exactes, détails techniques, noms de professionnels peu médiatisés) sont autorisés ET attendus ici — mais TOUJOURS vérifiables dans des sources fiables, jamais des détails si obscurs qu'ils sont invérifiables ou quasi impossibles à documenter.
-- INTERDIT de générer une question à laquelle même un passionné aurait une chance quasi nulle de répondre (trivia extrême, anecdote ultra-confidentielle, détail non documenté publiquement) — le difficile doit rester "gagnable" par la bonne personne, pas être un piège impossible.
-- INTERDIT d'utiliser un fait dont l'exactitude est disputée entre sources ou repose sur une seule source peu fiable — la règle "vérifiable et non inventé" s'applique avec la même rigueur qu'en facile, seule la notoriété du fait change.
-- Test de validation : un connaisseur reconnu du sujet ${sousTheme} (pas un expert professionnel) répondrait-il correctement sans avoir besoin de rechercher l'information ? Si même ce profil ne saurait probablement pas, la question est trop obscure — remplace-la par un fait difficile mais accessible à ce niveau de passion.
-- Ancrage : côté COULISSES du calibrage thème (précis / technique / connaisseur), jamais du facile déguisé.`
-}
-
-function levelAutoCheck(difficulty: Difficulty): string {
-  if (difficulty === 'easy') {
-    return 'Facile = vraiment facile, pas de rôle production, pas de fait moyen déguisé.'
-  }
-  if (difficulty === 'medium') {
-    return 'Moyen = ni facile déguisé ni difficile déguisé, rôles de production autorisés seulement si notoires.'
-  }
-  return 'Difficile = gagnable par un vrai passionné, jamais une trivia invérifiable ou quasi impossible.'
-}
 
 /**
- * Prompt composé : tronc commun (qualité) + 1 module difficulté + auto-vérif ciblée.
- * Évite d’envoyer les 3 calibrages à chaque génération.
+ * Construit le prompt via l'architecture modulaire vérifiée (quizPromptFragments).
+ * Un seul bloc de difficulté par appel. excludeQuestions = resume_fait (3-6 mots) ou texte.
  */
 export function buildPrompt(
   themeFull: string,
@@ -515,134 +547,20 @@ export function buildPrompt(
   _contentMode: QuizContentMode,
   excludeQuestions: string[] = [],
   questionCount = 10,
+  mode: 'full' | 'topup' = 'full',
 ): string {
   const { theme, sousTheme } = splitThemeParts(themeFull)
   const difficulte = DIFFICULTY_FR[difficulty]
   const portee = SCOPE_FR[scope]
-  const n = Math.max(1, Math.min(10, questionCount))
-  const historique =
-    excludeQuestions.length === 0
-      ? '(aucune — première génération)'
-      : excludeQuestions
-          .map((q) => q.trim())
-          .filter(Boolean)
-          .slice(0, 60)
-          .map((q, i) => `${i + 1}. ${q}`)
-          .join('\n')
-
-  const niveau = difficultyModule(difficulty, sousTheme)
-  const checkNiveau = levelAutoCheck(difficulty)
-
-  return `Tu es un générateur de quiz expert et rigoureux. Génère EXACTEMENT ${n} questions à choix multiples sur le thème "${theme}", sous-thème "${sousTheme}", niveau "${difficulte}", portée "${portee}".
-
-Historique à ne jamais répéter (questions déjà posées, tous niveaux) :
-${historique}
-
-FIABILITÉ
-- Faits réels, vérifiables, jamais inventés. Si incertain à 100%, remplace la question.
-- 1 seule bonne réponse par question. Les 3 fausses sont plausibles mais indiscutablement fausses dans TOUT contexte — teste chacune mentalement avant validation.
-- Si une reformulation ne garantit pas une réponse unique, abandonne la question.
-
-LANGUE / PÉRIMÈTRE
-- Français naturel et fluide, comme rédigé directement par un francophone natif — jamais de traduction littérale de l'anglais, jamais de tournure calquée ou de syntaxe étrangère.
-- Relis chaque question et réponse en te demandant : "Est-ce que je dirais ça naturellement à l'oral en français ?" Si la formulation sonne traduite ou artificielle, réécris-la entièrement plutôt que de l'ajuster.
-- Vocabulaire adapté au contexte francophone (unités, expressions, noms d'usage courants en France/francophonie), pas des termes traduits mot à mot qui n'existent pas dans l'usage courant.
-- Reste strictement dans ${theme} > ${sousTheme}.
-
-MODÉRATION
-- Sujets sensibles (histoire, religion, politique, conflits, tragédies) : factuel et neutre, zéro opinion.
-- Jamais de contenu violent, choquant, discriminatoire, sexuel — reformule ou remplace si risque de perception blessante malgré l'exactitude.
-
-EXPLICATION + SOURCE (chaque question)
-- "explication" : 1-3 phrases sur le POURQUOI, compréhensible sans connaître la réponse.
-- "source" : nomme la source de référence la PLUS PRÉCISE et RÉELLE possible, sans inventer de détail vérifiable (jamais de titre d'article précis, de date de publication, de nom de journaliste/auteur — ces détails précis sont les plus à risque d'hallucination).
-  Formats acceptés, du plus générique au plus précis, choisis le plus précis que tu peux garantir avec certitude :
-  - Nom d'un organisme/institution officiel réel (ex: "Site officiel de la NASA", "INSEE", "Ministère de la Culture", "FIFA", "Larousse")
-  - Nom d'une encyclopédie ou référence reconnue (ex: "Wikipédia", "Encyclopædia Universalis", "Larousse")
-  - Type de document officiel sans détail inventé (ex: "biographie officielle de l'artiste", "fiche technique constructeur", "registre des records du monde")
-  - Si aucun organisme précis ne peut être cité avec certitude : reste sur une catégorie générale ("fait historique largement documenté", "culture générale/notoriété publique", "fait scientifique établi dans la littérature académique")
-- Ne cite JAMAIS : un titre d'article spécifique, une date de publication précise, un nom d'auteur/journaliste, une URL — ce sont les détails que tu ne peux pas garantir exacts et qui risquent d'être inventés.
-- Toujours fournis, affichés côté app même si le joueur se trompe.
-- Si impossible à sourcer crédiblement même en restant générique → remplace la question.
-
-DATATION DES FAITS ÉVOLUTIFS
-- Tout fait qui peut changer (record, poste occupé, nombre cumulatif, actualité) doit préciser sa date/période de référence dans la question elle-même.
-- "date_reference" renseigné dans le JSON (année/période, ou null si fait permanent).
-- Actualité : date obligatoire (mois + année) sur chaque question, sans exception.
-- Ne jamais inventer une date approximative — si incertain, choisis un fait non daté.
-
-ANTI-PRÉMISSE FAUSSE
-- La formulation elle-même ne doit jamais présupposer une catégorie/statut/rôle/relation erronés (ex: "quel groupe" pour un artiste solo, "réalisateur" pour un scénariste).
-- Relis chaque terme catégoriel de la question ; en cas de doute, formule de façon neutre.
-
-ANTI-CONFUSION
-- Ne mélange jamais œuvre originale et adaptation (livre/film, jeu/série) — reste sur une seule version, précise-la si besoin.
-- Vérifie l'absence d'homonymes ambigus (personne, lieu, œuvre) ; précise un identifiant si nécessaire.
-- Chiffres approximatifs → toujours "environ", jamais présentés comme exacts.
-
-ANTI-DOUBLON
-- Aucune question ni fait redondant dans le lot de ${n}.
-- Aucun doublon avec un autre niveau de difficulté du même sous-thème (même reformulé — compare le FAIT testé, pas le texte).
-- Aucun doublon avec l'historique ci-dessus. Si le sous-thème est trop pointu pour ${n} questions inédites, élargis légèrement le périmètre plutôt que répéter.
-
-COHÉRENCE INTERNE QUESTION-RÉPONSE (anti-mélange entre questions du lot)
-- Chaque question doit être strictement autonome : sa "bonne_reponse_index", ses "reponses", son "explication" et sa "source" doivent porter EXCLUSIVEMENT sur le sujet de CETTE question précise — jamais sur un fait ou une réponse appartenant à une autre question du même lot.
-- Erreur typique à éviter : générer des questions sur des sujets proches et laisser un fait ou une réponse "glisser" d'une question à l'autre par confusion entre sujets similaires.
-- AVANT de finaliser le lot, relis chaque question isolément (sans regarder les autres) et vérifie que sa bonne réponse et son explication correspondent bien à SON propre énoncé, pas à celui d'une question voisine du même lot.
-- Si le sous-thème comporte plusieurs sujets très proches ou similaires, sois particulièrement vigilant : reformule chaque question de façon suffisamment distincte pour ne pas risquer d'attribuer un fait au mauvais sujet.
-
-DIVERSITÉ DES BONNES RÉPONSES DANS LE LOT
-- La BONNE RÉPONSE (le contenu, pas la position A/B/C/D) ne doit jamais se répéter d'une question à l'autre dans le même lot — chaque question doit avoir un sujet/élément de réponse correcte différent des autres.
-- Erreur typique à éviter : plusieurs questions différentes qui ont toutes la même bonne réponse (ex: "Paris" comme bonne réponse à 3 questions différentes), même si chaque question en elle-même est valide.
-- AVANT de finaliser, liste mentalement les bonnes réponses du lot : si un même élément apparaît comme bonne réponse à plusieurs questions, remplace l'une des questions concernées par un sujet différent au sein du même sous-thème.
-- Cette règle ne concerne que le CONTENU de la bonne réponse, pas sa position — la position (A/B/C/D) est gérée par le mélange aléatoire côté code.
-
-DIVERSITÉ DES MAUVAISES RÉPONSES DANS LE LOT
-- Limite la réutilisation d'un même élément comme mauvaise réponse à travers le lot — évite qu'un même nom/lieu/date revienne comme option incorrecte dans trop de questions différentes.
-- INTERDICTION ABSOLUE : un élément qui a servi de MAUVAISE réponse à une question ne doit jamais devenir la BONNE réponse d'une autre question du même lot (et inversement).
-
-CONTRÔLE FINAL DE QUANTITÉ
-- Avant de livrer le JSON, compte exactement les questions du tableau : il doit y en avoir EXACTEMENT ${n}, ni plus ni moins. Si une question a été supprimée en cours de vérification, génères-en une nouvelle pour compenser plutôt que de livrer un lot incomplet.
-
-${niveau}
-
-ANCRAGE SPECTATEUR/COULISSES PAR THÈME (calibrage, non exhaustif — applique le côté pertinent au niveau ${difficulte})
-Histoire: événements connus / dates-traités précis. Sport: champions connus / entraîneurs-stats. Musique: artiste-tube connu / compositeur-label. Cinéma: acteurs-répliques cultes / réalisateur-studio. Géographie: pays-monuments connus / relief-démographie. Sciences: faits scolaires / chercheur-process. Tech: marques connues / specs-dates précises. Nature: animaux connus / classification scientifique. Cuisine: plats-origine connus / technique-chef-date. Art: œuvres célèbres / mouvement-technique. Mythologie: dieux-héros connus / généalogies-variantes. Littérature: livres-auteurs connus / courants-dates précises. Animaux: animaux du quotidien / classification-comportements. Espace: astronomie scolaire / missions-données techniques. Jeux vidéo: jeux-persos populaires / studio-moteur-date. Actualité: tendances connues et datées / détails ponctuels précis — jamais de fait instable non daté.
-Thème libre : applique le même principe spectateur/coulisses de façon autonome.
-
-PORTÉE
-- "Français" : priorise faits France/francophonie sur thèmes pertinents (Histoire, Cinéma, Musique, Littérature, Actualité, Cuisine) ; thèmes universels restent internationaux avec ancrage français si possible.
-- "International" : vivier mondial, sans priorité géographique.
-- Dans les deux cas, le principe spectateur/coulisses prime — la portée ajuste le périmètre, pas la difficulté.
-
-THÈME LIBRE (hors thèmes prédéfinis)
-- Identifie la famille de rattachement, applique strictement les règles du niveau ${difficulte}, fiabilité et anti-doublon.
-- Si trop pointu pour ${n} questions fiables et non redondantes, élargis le périmètre plutôt qu'inventer.
-- Si ambigu/mal orthographié, choisis l'interprétation la plus probable et grand public.
-- Si inapproprié ou insuffisamment documenté : ne génère rien, retourne {"erreur": "Thème non valide ou insuffisamment documenté pour générer un quiz fiable."}
-
-AUTO-VÉRIFICATION FINALE (avant de répondre, ne pas écrire ce raisonnement)
-Repasse sur les ${n} questions : niveau "${difficulte}" respecté ? ${checkNiveau} Faits vérifiables ? Explication/source présentes et crédibles ? Fait évolutif daté ? Zéro redondance (lot + niveaux + historique) ? Chaque bonne réponse/explication correspond-elle STRICTEMENT à sa propre question, sans mélange avec une autre question du lot ? Les bonnes réponses portent-elles bien sur des éléments différents, sans répétition du même contenu de réponse ? Aucune mauvaise réponse d'une question n'est-elle devenue la bonne réponse d'une autre ? Le tableau contient-il exactement ${n} questions ? Portée respectée ? Zéro prémisse fausse ? Réponses fausses indiscutablement fausses, sans mélange œuvre/adaptation ni homonyme ? Chiffres honnêtes ? Toute question qui échoue est remplacée.
-
-FORMAT DE SORTIE — JSON strict uniquement, rien d'autre :
-[
-  {
-    "question": "...",
-    "reponses": ["...", "...", "...", "..."],
-    "bonne_reponse_index": 0,
-    "explication": "...",
-    "source": "...",
-    "date_reference": "... ou null",
-    "theme": "${theme}",
-    "sous_theme": "${sousTheme}",
-    "difficulte": "${difficulte}",
-    "portee": "${portee}",
-    "justification_difficulte": "...",
-    "fait_verifiable": true
-  }
-]
-
-Génère maintenant les ${n} questions sur "${theme}" > "${sousTheme}", niveau "${difficulte}", portée "${portee}".`
+  return construirePrompt({
+    theme,
+    sousTheme,
+    difficulte,
+    portee,
+    historiqueQuestions: excludeQuestions.slice(0, 50),
+    questionCount,
+    mode,
+  })
 }
 
 function normalizeRawAnswers(raw: RawQuestion): string[] | null {
@@ -667,9 +585,41 @@ function normalizeSourceType(raw: string): string | undefined {
   if (!t) return undefined
   // Jamais d’URL (hallucination / inventé)
   if (/^https?:/i.test(t) || /\bwww\./i.test(t)) return undefined
-  // Sources libres (organisme, encyclopédie, catégorie) — plafonnées
-  if (t.length < 3) return undefined
+  if (t.length < 4) return undefined
+  if (isVagueSource(t)) return undefined
   return t.length <= 120 ? t : t.slice(0, 120)
+}
+
+/** Sources génériques que l'IA invente souvent — rejetées côté code. */
+function isVagueSource(source: string): boolean {
+  const s = source
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+  return (
+    /\bculture generale\b/.test(s) ||
+    /\bnotoriete publique\b/.test(s) ||
+    /\bfait historique\b/.test(s) ||
+    /\bfait scientifique\b/.test(s) ||
+    /\bconnaissance commune\b/.test(s) ||
+    /\bsource generale\b/.test(s) ||
+    /\bdocumentation generale\b/.test(s) ||
+    /\bcommunement connu\b/.test(s) ||
+    /\bsavoir general\b/.test(s) ||
+    /\bconnaissances generales\b/.test(s) ||
+    /^generique\b/.test(s) ||
+    /^source\b$/.test(s)
+  )
+}
+
+function isFactVerifiable(raw: RawQuestion, sourceType?: string): boolean {
+  const v = raw.fait_verifiable
+  if (v === false) return false
+  if (typeof v === 'string' && v.trim().toLowerCase() === 'false') return false
+  if (v === true) return true
+  if (typeof v === 'string' && v.trim().toLowerCase() === 'true') return true
+  // Champ absent : accepter seulement si la source nominative est concrète
+  return Boolean(sourceType && !isVagueSource(sourceType))
 }
 
 function parseAndCap(
@@ -714,12 +664,17 @@ function parseAndCap(
     const explanation = String(
       raw.explication ?? raw.explanation ?? '',
     ).trim()
+    if (explanation.length < 12) continue
+    if (explanationSuggestsMultipleCorrect(explanation)) continue
+
     const sourceType = normalizeSourceType(
       String(raw.source ?? raw.type_source ?? raw.sourceType ?? ''),
     )
-    // Explication + source obligatoires (affichées après la réponse)
-    if (explanation.length < 20 || !sourceType) continue
-    if (explanationSuggestsMultipleCorrect(explanation)) continue
+    // Source nominative obligatoire — pas de fallback générique
+    if (!sourceType) continue
+
+    // Anti-hallucination : rejeter si le modèle nie le fait ou source trop vague
+    if (!isFactVerifiable(raw, sourceType)) continue
 
     const rawDate = raw.date_reference ?? raw.dateReference
     const dateReference =
@@ -750,6 +705,7 @@ function parseAndCap(
         dateReference,
         imageSubject,
         imageKind,
+        resumeFait: typeof raw.resume_fait === 'string' ? raw.resume_fait.trim() || undefined : undefined,
       }),
     )
   }
@@ -824,6 +780,10 @@ async function generateOneTier(
   contentMode: QuizContentMode,
   excludeQuestions: string[] = [],
   questionCount = 5,
+  budgetLimitMs = 14_000,
+  onEngineSelected?: (engine: string) => void,
+  prePickedSlot?: import('./aiRotate.js').PickedAi,
+  promptMode: 'full' | 'topup' = 'full',
 ): Promise<
   | { questions: GeneratedQuestion[]; source: LlmEngine; model: string }
   | { error: string; themeInvalid?: boolean }
@@ -835,6 +795,7 @@ async function generateOneTier(
     contentMode,
     excludeQuestions,
     questionCount,
+    promptMode,
   )
   const errors: string[] = []
 
@@ -842,19 +803,36 @@ async function generateOneTier(
   let engineOrder: LlmEngine[] = enginesForProvider(provider)
 
   if (provider === 'auto') {
-    const picked = await pickAiForGeneration()
+    // Utiliser le slot pré-réservé par generateQuestionsInner si disponible
+    const picked = prePickedSlot ?? await pickAiForGeneration()
     if (picked) {
       pickedSlot = picked.slot
       engineOrder = fallbackEngines(
         picked.engine,
         enginesWithKeys() as RotateEngine[],
-      ) as LlmEngine[]
+      ).slice(0, 2) as LlmEngine[]
     }
   }
+  const budgetMsClamped = Math.max(
+    3_000,
+    Math.min(
+      budgetLimitMs,
+      questionCount <= 2 ? 12_000 : questionCount <= 3 ? 14_000 : questionCount <= 5 ? 18_000 : 24_000,
+    ),
+  )
+  engineOrder =
+    provider === 'auto'
+      ? engineOrder.slice(0, 2)
+      : engineOrder.slice(0, 1)
+  const tierDeadline = Date.now() + budgetMsClamped
+  // Toujours plusieurs modèles : free tier = 429 fréquents
+  const modelsCap = 3
+  // 2 clés Gemini/Groq : si la 1re est saturée (503/429), on bascule
+  const keysCap = 2
 
   try {
     for (const engine of engineOrder) {
-      // Auto : clé claimée d’abord, puis les autres clés du même provider, puis autre IA
+      if (Date.now() >= tierDeadline) break
       const allKeys = keysForEngine(engine)
       const keys =
         provider === 'auto' && pickedSlot?.startsWith(`${engine}#`)
@@ -873,18 +851,28 @@ async function generateOneTier(
         continue
       }
 
-      for (const apiKey of keys) {
-        for (const model of modelsFor(engine, contentMode)) {
+      // Signaler le provider dès qu'on a des clés — avant le premier appel IA
+      onEngineSelected?.(engine)
+
+      for (const apiKey of keys.slice(0, keysCap)) {
+        const modelList =
+          engine === 'gemini'
+            ? await geminiModelsForKey(apiKey)
+            : modelsFor(engine, contentMode).slice(0, modelsCap)
+        for (const model of modelList) {
+          if (Date.now() >= tierDeadline - 500) break
+          const leftMs = Math.max(2_000, tierDeadline - Date.now())
           try {
-            // 429 → withAiRetry relance ; on enchaîne clé suivante puis autre IA
             const text = await withAiRetry(() =>
               engine === 'gemini'
-                ? callGemini(apiKey, model, prompt)
+                ? callGemini(apiKey, model, prompt, questionCount, leftMs)
                 : callOpenAiCompatible(
                     engine as Exclude<LlmEngine, 'gemini'>,
                     apiKey,
                     model,
                     prompt,
+                    questionCount,
+                    leftMs,
                   ),
             )
             const parsed = parseAndCap(
@@ -912,14 +900,28 @@ async function generateOneTier(
             if (parsed.kind === 'theme_error') {
               return { error: parsed.message, themeInvalid: true }
             }
-            errors.push(`${engine}/${model}: JSON invalide`)
+            errors.push(
+              `${engine}/${model}: JSON invalide · ${text
+                .slice(0, 140)
+                .replace(/\s+/g, ' ')}`,
+            )
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e)
             errors.push(msg)
             console.warn(`[${engine}] ${model}:`, msg.slice(0, 200))
-            // Rate limit → autre clé du même provider, puis autre IA
-            if (isRateLimitError(msg)) {
-              break
+            if (isRateLimitError(msg) || /high demand|resource.exhausted|\b503\b/i.test(msg)) {
+              continue
+            }
+            // Modèle retiré / 404 → modèle suivant immédiatement
+            if (/\b404\b|no longer available|does not exist/i.test(msg)) {
+              continue
+            }
+            // JSON forcé refusé → essayer le modèle suivant
+            if (/failed to validate json/i.test(msg)) {
+              continue
+            }
+            if (isTimeoutLikeError(msg)) {
+              continue
             }
           }
         }
@@ -929,7 +931,9 @@ async function generateOneTier(
     await releaseAiSlot(pickedSlot)
   }
 
-  return { error: errors[0] ?? 'Aucun provider IA disponible' }
+  return {
+    error: errors.length > 0 ? errors[errors.length - 1]! : 'Aucun provider IA disponible',
+  }
 }
 
 function isRateLimitError(msg: string): boolean {
@@ -944,23 +948,9 @@ function isTimeoutLikeError(msg: string): boolean {
   )
 }
 
-/** Retry uniquement timeouts / gateway — pas les 429 (bascule IA). */
+/** Pas de re-essai timeout (brûle le budget Vercel) — on bascule d’IA. */
 async function withAiRetry<T>(fn: () => Promise<T>): Promise<T> {
-  let lastErr: unknown
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      return await fn()
-    } catch (e) {
-      lastErr = e
-      const msg = e instanceof Error ? e.message : String(e)
-      if (isRateLimitError(msg)) throw e
-      const retryable =
-        isTimeoutLikeError(msg) || /\b(503|504|502)\b/.test(msg)
-      if (!retryable || attempt === 1) throw e
-      await new Promise((r) => setTimeout(r, 800 * (attempt + 1)))
-    }
-  }
-  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
+  return fn()
 }
 
 /** Schéma minimal d’une question prête pour le front */
@@ -971,8 +961,9 @@ function isStrictQuestion(q: GeneratedQuestion): boolean {
   if (q.correctIndex !== 0 && q.correctIndex !== 1 && q.correctIndex !== 2 && q.correctIndex !== 3) {
     return false
   }
-  if (!q.explanation || q.explanation.trim().length < 20) return false
-  if (!q.sourceType || q.sourceType.trim().length < 3) return false
+  if (!q.explanation || q.explanation.trim().length < 12) return false
+  if (!q.sourceType || q.sourceType.trim().length < 4) return false
+  if (isVagueSource(q.sourceType)) return false
   return true
 }
 
@@ -985,9 +976,16 @@ function assertExactBatch(
   return valid.slice(0, expected)
 }
 
+export type GenProgressCb = (
+  done: number,
+  total: number,
+  engine?: string,
+  stage?: string,
+) => void | Promise<void>
+
 /**
  * Un seul palier par appel. provider: auto | groq | gemini | cerebras | deepseek | openrouter.
- * Stratégie : 10 d’un coup ; si échec type 504/timeout → fallback 2×5.
+ * Lots de 3 + garde-fou 50s (sous le kill Vercel 60s).
  */
 export async function generateQuestions(
   theme: string,
@@ -998,6 +996,64 @@ export async function generateQuestions(
   provider: AiProvider = 'auto',
   contentMode: QuizContentMode = 'standard',
   excludeQuestions: string[] = [],
+  onProgress?: GenProgressCb,
+): Promise<{
+  questions: GeneratedQuestion[]
+  source: GenerateSource
+  message?: string
+  error?: string
+}> {
+  const HARD_MS = 54_000
+  try {
+    return await Promise.race([
+      generateQuestionsInner(
+        theme,
+        themeSlug,
+        mode,
+        difficulty,
+        scope,
+        provider,
+        contentMode,
+        excludeQuestions,
+        onProgress,
+        HARD_MS,
+      ),
+      new Promise<{
+        questions: GeneratedQuestion[]
+        source: GenerateSource
+        message?: string
+        error?: string
+      }>((resolve) => {
+        setTimeout(() => {
+          resolve({
+            questions: [],
+            source: 'mock',
+            error:
+              'Génération trop longue (limite serveur). Réessaie dans quelques secondes.',
+          })
+        }, HARD_MS)
+      }),
+    ])
+  } catch (e) {
+    return {
+      questions: [],
+      source: 'mock',
+      error: e instanceof Error ? e.message : 'Erreur de génération',
+    }
+  }
+}
+
+async function generateQuestionsInner(
+  theme: string,
+  themeSlug: string,
+  mode: 'initial' | 'complementary',
+  difficulty: Difficulty | undefined,
+  scope: 'fr' | 'international',
+  provider: AiProvider,
+  contentMode: QuizContentMode,
+  excludeQuestions: string[],
+  onProgress: GenProgressCb | undefined,
+  hardMs: number,
 ): Promise<{
   questions: GeneratedQuestion[]
   source: GenerateSource
@@ -1009,6 +1065,25 @@ export async function generateQuestions(
   const now = new Date().toISOString()
   const tier: Difficulty =
     difficulty === 'medium' || difficulty === 'hard' ? difficulty : 'easy'
+  const TARGET = 10
+  const startedAt = Date.now()
+
+  let reportedEngine: string | undefined
+
+  async function report(
+    done: number,
+    engine?: string,
+    stage?: string,
+  ): Promise<void> {
+    try {
+      const eng = engine ?? reportedEngine
+      await onProgress?.(Math.min(TARGET, Math.max(0, done)), TARGET, eng, stage)
+    } catch {
+      /* UI only */
+    }
+  }
+
+  // report initial envoyé plus bas avec engine
 
   // Quiz musical Deezer — pas d’IA, API publique
   if (contentMode === 'audio') {
@@ -1023,6 +1098,7 @@ export async function generateQuestions(
     if ('error' in deezer) {
       return { questions: [], source: 'deezer', error: deezer.error }
     }
+    await report(TARGET)
     return {
       questions: deezer.questions,
       source: 'deezer',
@@ -1032,17 +1108,34 @@ export async function generateQuestions(
 
   const hasKey = AUTO_FREE_ENGINES.some((e) => keysForEngine(e).length > 0)
 
+  // Pré-réserver le slot IA et signaler le provider IMMÉDIATEMENT (avant tout appel IA)
+  let prePickedSlot: import('./aiRotate.js').PickedAi | undefined
+  if (hasKey && provider === 'auto') {
+    const picked = await pickAiForGeneration()
+    if (picked) {
+      prePickedSlot = picked
+      reportedEngine = picked.engine
+      await report(0, picked.engine, 'Connexion IA')
+    }
+  } else if (hasKey && provider !== 'auto') {
+    reportedEngine = provider
+    await report(0, provider, 'Connexion IA')
+  }
+
   if (!hasKey) {
+    const mock = buildMockQuestions(theme, themeSlug, 'complementary', tier)
+    await report(TARGET)
     return {
-      questions: buildMockQuestions(theme, themeSlug, 'complementary', tier),
+      questions: mock,
       source: 'mock',
       message:
         'Aucune clé API free — questions mock. Ajoute GROQ_API_KEY, GEMINI_API_KEY ou OPENROUTER_API_KEY.',
     }
   }
 
-  const TARGET = 10
-  const deadline = Date.now() + 55_000
+  // Garde une marge raisonnable avant le timeout global (54s) pour finir proprement
+  // avec un fallback jouable au lieu d'un échec "Génération trop longue".
+  const deadline = startedAt + hardMs - 4_000
   const collected: GeneratedQuestion[] = []
   const seen = new Set<string>()
   const excluded = new Set(
@@ -1052,11 +1145,8 @@ export async function generateQuestions(
   let lastSource: LlmEngine | null = null
   let lastModel = ''
   let lastError: string | undefined
-  let usedFallback2x5 = false
 
-  function ingest(
-    qs: GeneratedQuestion[],
-  ): void {
+  function ingest(qs: GeneratedQuestion[]): void {
     for (const q of qs) {
       if (q.difficulty !== tier) continue
       if (contentMode === 'image' && !q.imageUrl && !q.imageSubject) continue
@@ -1070,14 +1160,15 @@ export async function generateQuestions(
     }
   }
 
-  async function runBatch(count: number): Promise<{
-    ok: boolean
-    themeInvalid?: boolean
-    timeoutLike?: boolean
-  }> {
-    if (Date.now() >= deadline) {
-      return { ok: false, timeoutLike: true }
-    }
+  async function runBatch(
+    count: number,
+    maxBudgetMs: number,
+    slotOverride?: import('./aiRotate.js').PickedAi,
+    mode: 'full' | 'topup' = 'full',
+  ): Promise<{ ok: boolean; themeInvalid?: boolean }> {
+    const left = deadline - Date.now()
+    if (left < 2_000) return { ok: false }
+    const ask = Math.max(1, Math.min(TARGET, count))
     const result = await generateOneTier(
       theme,
       themeSlug,
@@ -1088,82 +1179,49 @@ export async function generateQuestions(
       provider,
       contentMode,
       excludeLive,
-      count,
+      ask,
+      Math.min(left, maxBudgetMs),
+      undefined,
+      slotOverride,
+      mode,
     )
     if ('error' in result) {
       lastError = result.error
       if (result.themeInvalid) return { ok: false, themeInvalid: true }
-      return {
-        ok: false,
-        timeoutLike: isTimeoutLikeError(result.error),
-      }
+      return { ok: false }
     }
     lastSource = result.source
     lastModel = result.model
+    // Mémoriser le premier engine connu pour tous les reports suivants
+    if (!reportedEngine) reportedEngine = result.source
     ingest(result.questions)
+    await report(collected.length, result.source)
     return { ok: collected.length > 0 }
   }
 
-  // Difficile : 2×5 d’emblée (moins de JSON tronqué / 504)
-  // Autres paliers : 10 d’un coup, puis fallback 2×5 si timeout / vide
-  if (tier === 'hard') {
-    usedFallback2x5 = true
-    for (let i = 0; i < 2 && collected.length < TARGET; i++) {
-      const need = Math.min(5, TARGET - collected.length)
-      const part = await runBatch(need)
-      if (part.themeInvalid && lastError) {
-        return { questions: [], source: 'mock', error: lastError }
-      }
-      if (!part.ok && part.timeoutLike) continue
-    }
-  } else {
-    const first = await runBatch(TARGET)
-    if (first.themeInvalid && lastError) {
-      return { questions: [], source: 'mock', error: lastError }
-    }
-
-    if (
-      collected.length < TARGET &&
-      (first.timeoutLike || collected.length === 0)
-    ) {
-      usedFallback2x5 = true
-      collected.length = 0
-      seen.clear()
-      excluded.clear()
-      for (const q of excludeQuestions) {
-        const fp = q.trim().toLowerCase().replace(/\s+/g, ' ')
-        if (fp) excluded.add(fp)
-      }
-      excludeLive = [...excludeQuestions]
-
-      for (let i = 0; i < 2 && collected.length < TARGET; i++) {
-        const need = Math.min(5, TARGET - collected.length)
-        const part = await runBatch(need)
-        if (part.themeInvalid && lastError) {
-          return { questions: [], source: 'mock', error: lastError }
-        }
-        if (!part.ok && part.timeoutLike) continue
-      }
-    } else if (collected.length < TARGET) {
-      while (collected.length < TARGET && Date.now() < deadline) {
-        const need = Math.min(5, TARGET - collected.length)
-        const part = await runBatch(need)
-        if (part.themeInvalid && lastError) {
-          return { questions: [], source: 'mock', error: lastError }
-        }
-        if (!part.ok) break
-      }
-    }
+  // Appel principal: un lot de 10.
+  const left = Math.max(3_000, deadline - Date.now())
+  await report(0, reportedEngine, 'Génération en cours')
+  const single = await runBatch(TARGET, Math.min(30_000, left), prePickedSlot)
+  if (single.themeInvalid && lastError) {
+    return { questions: [], source: 'mock', error: lastError }
   }
 
-  // Complément si encore incomplet (tous paliers)
-  while (collected.length < TARGET && Date.now() < deadline) {
-    const need = Math.min(5, TARGET - collected.length)
-    const part = await runBatch(need)
-    if (part.themeInvalid && lastError) {
-      return { questions: [], source: 'mock', error: lastError }
+  await report(collected.length, reportedEngine, 'Validation des questions')
+
+  // Rattrapage unique: si le lot principal est incomplet, faire un seul appel
+  // complémentaire pour demander exactement le nombre manquant.
+  if (collected.length < TARGET) {
+    const missing = TARGET - collected.length
+    const leftAfterMain = Math.max(0, deadline - Date.now())
+    if (missing > 0 && leftAfterMain >= 3_000) {
+      await report(collected.length, reportedEngine, `Rattrapage IA (${missing} manquantes)`)
+      const topUp = await runBatch(missing, Math.min(14_000, leftAfterMain), undefined, 'topup')
+      if (topUp.themeInvalid && lastError) {
+        return { questions: [], source: 'mock', error: lastError }
+      }
+      await report(collected.length, reportedEngine, 'Validation finale')
     }
-    if (!part.ok) break
   }
 
   if (collected.length < TARGET) {
@@ -1186,11 +1244,11 @@ export async function generateQuestions(
     }
   }
 
-  const modeLabel = usedFallback2x5 ? ' · fallback 2×5' : ''
+  await report(TARGET, reportedEngine, 'Finalisation')
   return {
     questions: strict,
     source: lastSource ?? 'mock',
-    message: `Généré avec ${lastSource} (${lastModel}) — ${tier}${modeLabel}`,
+    message: `Généré avec ${lastSource} (${lastModel}) — ${tier}`,
   }
 }
 
@@ -1218,6 +1276,8 @@ async function callOpenAiCompatible(
   apiKey: string,
   model: string,
   prompt: string,
+  questionCount = 10,
+  timeoutBudgetMs = 11_000,
 ): Promise<string> {
   const endpoints: Record<Exclude<LlmEngine, 'gemini'>, string> = {
     groq: 'https://api.groq.com/openai/v1/chat/completions',
@@ -1234,45 +1294,104 @@ async function callOpenAiCompatible(
     headers['X-Title'] = 'Quizz By IA'
   }
 
-  const res = await fetchWithTimeout(
-    endpoints[engine],
-    {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        model,
-        temperature: 0.35,
-        max_tokens: 3200,
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: AI_SYSTEM },
-          { role: 'user', content: prompt },
-        ],
-      }),
-    },
-    22_000,
+  const maxTokens = /gpt-oss/i.test(model)
+    ? questionCount <= 2
+      ? 2500
+      : questionCount <= 3
+        ? 2500
+        : 3500
+    : questionCount <= 2
+      ? 1400
+      : questionCount <= 3
+        ? 1400
+        : questionCount <= 5
+          ? 2000
+          : 2800
+  const timeoutMs = Math.max(
+    2_500,
+    Math.min(questionCount <= 2 ? 12_000 : questionCount <= 5 ? 14_000 : 18_000, timeoutBudgetMs),
   )
 
-  if (!res.ok) {
-    const detail = await res.text()
-    throw new Error(
-      `${engine} ${res.status} (${model}): ${detail.slice(0, 400)}`,
+  // Groq gpt-oss + json_object → 400 "Failed to validate JSON"
+  // Groq en général : on parse nous-mêmes (plus fiable sur free tier)
+  const useJsonObject =
+    engine !== 'groq' && !/gpt-oss/i.test(model)
+
+  async function once(withJsonObject: boolean): Promise<string> {
+    const payload: Record<string, unknown> = {
+      model,
+      temperature: 0.15,
+      max_tokens: maxTokens,
+      messages: [
+        { role: 'system', content: AI_SYSTEM_MINIMAL },
+        { role: 'user', content: prompt },
+      ],
+    }
+    if (withJsonObject) {
+      payload.response_format = { type: 'json_object' }
+    }
+    if (/gpt-oss/i.test(model)) {
+      payload.reasoning_effort = 'medium'
+    }
+
+    const res = await fetchWithTimeout(
+      endpoints[engine],
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+      },
+      timeoutMs,
     )
+
+    if (!res.ok) {
+      const detail = await res.text()
+      throw new Error(
+        `${engine} ${res.status} (${model}): ${detail.slice(0, 400)}`,
+      )
+    }
+
+    const data = (await res.json()) as {
+      choices?: Array<{
+        message?: { content?: string; reasoning?: string }
+      }>
+    }
+    const msg = data.choices?.[0]?.message
+    const content = String(msg?.content ?? '').trim()
+    const reasoning = String(msg?.reasoning ?? '').trim()
+    const jsonish =
+      [content, reasoning].find((t) => t.includes('{') && t.includes('questions')) ??
+      [content, reasoning].find((t) => t.includes('{')) ??
+      content
+    if (jsonish) return jsonish
+    throw new Error(`${engine}/${model}: réponse vide`)
   }
 
-  const data = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>
+  try {
+    return await once(useJsonObject)
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    // Si json_object a échoué → 1 retry sans format forcé
+    if (useJsonObject && /failed to validate json|400/i.test(msg)) {
+      return await once(false)
+    }
+    throw e
   }
-  return data.choices?.[0]?.message?.content ?? ''
 }
 
 async function callGemini(
   apiKey: string,
   model: string,
   prompt: string,
+  questionCount = 10,
+  timeoutBudgetMs = 11_000,
 ): Promise<string> {
   const key = apiKey.trim()
-  // Les clés Auth (AQ.) exigent le header x-goog-api-key (pas ?key= ni Bearer)
+  const maxTokens = questionCount <= 2 ? 1400 : questionCount <= 3 ? 1400 : questionCount <= 5 ? 2000 : 2800
+  const timeoutMs = Math.max(
+    2_000,
+    Math.min(11_000, timeoutBudgetMs),
+  )
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
   const res = await fetchWithTimeout(
     url,
@@ -1283,16 +1402,16 @@ async function callGemini(
         'x-goog-api-key': key,
       },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: AI_SYSTEM }] },
+        systemInstruction: { parts: [{ text: AI_SYSTEM_MINIMAL }] },
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         generationConfig: {
-          temperature: 0.35,
-          maxOutputTokens: 3200,
+          temperature: 0.15,
+          maxOutputTokens: maxTokens,
           responseMimeType: 'application/json',
         },
       }),
     },
-    22_000,
+    timeoutMs,
   )
 
   if (!res.ok) {

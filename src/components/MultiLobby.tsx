@@ -94,6 +94,8 @@ export function MultiLobby({
           statusLabel="Génération des questions… Tout le monde reste synchronisé."
           onScoreChange={onTypingScore}
           estimateSec={room.genEstimateSec ?? null}
+          questionsDone={room.genQuestionsDone ?? 0}
+          questionsTotal={room.genQuestionsTotal ?? 10}
         />
       )}
 

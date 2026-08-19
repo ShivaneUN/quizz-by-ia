@@ -1,19 +1,20 @@
 /**
- * Rotation IA : 1 génération → 1 provider.
- * File invisible courte (max ~4s) puis IA libre / multi-slots.
- * Les 429 sont gérés côté generate (bascule immédiate autre IA).
+ * Rotation IA : 1 génération → 1 provider (Groq / Gemini / OpenRouter).
+ * Si plusieurs gens en même temps : RR + slots (clés) pour répartir la charge.
+ * File invisible courte (~1,5s) puis slot le moins chargé.
+ * Les 429/timeout basculent vers une autre IA (pas d’autre modèle du même provider).
  */
 
 import { redisCommand, redisConfigured } from './rooms.js'
 
 export type RotateEngine = 'groq' | 'gemini' | 'openrouter'
 
-const AUTO_ORDER: RotateEngine[] = ['groq', 'gemini', 'openrouter']
+const AUTO_ORDER: RotateEngine[] = ['groq', 'openrouter', 'gemini']
 const RR_KEY = 'quizz:ai:rr'
 const INFLIGHT_PREFIX = 'quizz:ai:inflight:'
 /** Attente invisible max pour un slot libre */
-const QUEUE_WAIT_MS = 4_000
-const QUEUE_POLL_MS = 280
+const QUEUE_WAIT_MS = 1_500
+const QUEUE_POLL_MS = 200
 
 /** Concurrence max par clé (TPM free serré). Multi-clés = multi slots. */
 const MAX_PER_KEY: Record<RotateEngine, number> = {
@@ -206,8 +207,8 @@ async function claimLeastLoaded(): Promise<PickedAi | null> {
 }
 
 /**
- * Choisit 1 IA. Attend invisiblement jusqu’à ~4s un slot libre ;
- * sinon prend le moins chargé.
+ * Choisit 1 IA. Attend invisiblement jusqu’à ~1,5s un slot libre ;
+ * sinon prend le moins chargé (plusieurs joueurs en parallèle).
  */
 export async function pickAiForGeneration(): Promise<PickedAi | null> {
   if (enginesWithKeys().length === 0) return null
@@ -236,4 +237,38 @@ export function fallbackEngines(
   available: RotateEngine[],
 ): RotateEngine[] {
   return [primary, ...available.filter((e) => e !== primary)]
+}
+
+export type AiCapacityRow = {
+  engine: RotateEngine
+  keyCount: number
+  maxPerKey: number
+  capacity: number
+  inflight: number
+  freeSlots: number
+}
+
+/** Snapshot admin : capacité dispo par provider (sans exposer les clés). */
+export async function getAiCapacitySnapshot(): Promise<AiCapacityRow[]> {
+  const rows: AiCapacityRow[] = []
+  for (const engine of AUTO_ORDER) {
+    const keys = listApiKeys(engine)
+    const keyCount = keys.length
+    const maxPerKey = MAX_PER_KEY[engine]
+    const cap = keyCount * maxPerKey
+    let inflight = 0
+    for (let i = 0; i < keyCount; i++) {
+      const slot = slotId(engine, i)
+      inflight += await getInflight(slot)
+    }
+    rows.push({
+      engine,
+      keyCount,
+      maxPerKey,
+      capacity: cap,
+      inflight,
+      freeSlots: Math.max(0, cap - inflight),
+    })
+  }
+  return rows
 }

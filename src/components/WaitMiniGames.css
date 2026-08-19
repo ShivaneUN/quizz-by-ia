@@ -40,6 +40,39 @@
   animation: wait-minis-pulse 1.1s ease-in-out infinite;
 }
 
+.wait-minis__progress {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+
+.wait-minis__progress-num {
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #f0c14b;
+  margin-left: 0.15rem;
+}
+
+.wait-minis__ai-source {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #f0c14b;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.wait-minis__progress-hint {
+  margin: 0.1rem 0 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.65);
+  letter-spacing: 0.02em;
+}
+
 .wait-minis__title {
   margin: 0;
   font-family: var(--font-display);
