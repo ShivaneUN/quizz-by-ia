@@ -26,6 +26,10 @@ interface WaitMiniGamesProps {
   questionsTotal?: number
   /** Nom de l'IA en cours (ex: "groq", "gemini", "openrouter") */
   aiSource?: string | null
+  /** Thème en cours de génération */
+  theme?: string | null
+  /** Libellé difficulté (ex: "Facile") */
+  difficultyLabel?: string | null
 }
 
 /**
@@ -41,6 +45,8 @@ export function WaitMiniGames({
   questionsDone = null,
   questionsTotal = 10,
   aiSource = null,
+  theme = null,
+  difficultyLabel = null,
 }: WaitMiniGamesProps) {
   const [game, setGame] = useState<WaitGameId | null>(null)
   const [records, setRecords] = useState<ArcadeScores>(() => loadArcadeScores())
@@ -94,6 +100,13 @@ export function WaitMiniGames({
       <p className="wait-minis__eyebrow">
         {freePlay ? 'Arcade' : statusLabel}
       </p>
+      {!freePlay && (theme || difficultyLabel) && (
+        <p className="wait-minis__gen-meta" aria-live="polite">
+          {theme}
+          {theme && difficultyLabel ? ' · ' : ''}
+          {difficultyLabel}
+        </p>
+      )}
       {!freePlay && <GenEtaLabel etaSec={etaSec} />}
       {showProgress && (
         <>
@@ -106,11 +119,6 @@ export function WaitMiniGames({
               {progressDone}/{questionsTotal}
             </span>
           </p>
-          {progressDone === 0 && (
-            <p className="wait-minis__progress-hint" aria-live="polite">
-              IA en cours… génération du lot unique
-            </p>
-          )}
         </>
       )}
 

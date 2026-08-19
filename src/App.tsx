@@ -742,6 +742,7 @@ export default function App() {
       tierAttempts: attempts,
       status: 'loading',
     }
+    setSession(base)
 
     try {
       setStatusMsg(
@@ -946,6 +947,11 @@ export default function App() {
     setScreen('loading')
     soloTypingScoreRef.current = 0
     setStatusMsg('Préparation de la manche…')
+    setSession((s) => ({
+      ...s,
+      currentDifficulty: nextDiff,
+      status: 'loading',
+    }))
 
     try {
       const result = await ensureHand(
@@ -1044,6 +1050,11 @@ export default function App() {
         ? `Génération du palier ${DIFFICULTY_LABELS[outcome.nextDifficulty]}…`
         : `Nouvelle manche ${DIFFICULTY_LABELS[nextDiff]}…`,
     )
+    setSession((s) => ({
+      ...s,
+      currentDifficulty: nextDiff,
+      status: 'loading',
+    }))
 
     soloCancelRef.current = false
     soloGenAbortRef.current?.abort()
@@ -1946,6 +1957,12 @@ export default function App() {
             <WaitMiniGames
               mode="solo"
               statusLabel={statusMsg ?? 'Génération du quiz…'}
+              theme={session.theme || null}
+              difficultyLabel={
+                session.currentDifficulty
+                  ? DIFFICULTY_LABELS[session.currentDifficulty]
+                  : null
+              }
               onScoreChange={handleSoloTypingScore}
               questionsDone={genQuestionsDone}
               questionsTotal={10}

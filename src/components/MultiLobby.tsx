@@ -92,6 +92,8 @@ export function MultiLobby({
         <WaitMiniGames
           mode="multi"
           statusLabel="Génération des questions… Tout le monde reste synchronisé."
+          theme={room.theme || null}
+          difficultyLabel={DIFFICULTY_LABELS[difficulty]}
           onScoreChange={onTypingScore}
           estimateSec={room.genEstimateSec ?? null}
           questionsDone={room.genQuestionsDone ?? 0}

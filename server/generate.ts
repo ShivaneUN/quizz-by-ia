@@ -8,11 +8,9 @@ import { buildDeezerQuiz } from './deezerQuiz.js'
 import { construirePrompt } from './quizPromptFragments.js'
 import {
   enginesWithKeys,
-  fallbackEngines,
   listApiKeys,
   pickAiForGeneration,
   releaseAiSlot,
-  type RotateEngine,
 } from './aiRotate.js'
 
 export function normalizeThemeSlug(theme: string): string {
@@ -100,8 +98,105 @@ const OPENROUTER_MODELS = [
 /** System prompt minimal — renforce l'interdiction d'inventer des faits. */
 const AI_SYSTEM_MINIMAL = `Tu es un générateur de quiz factuel. Réponds UNIQUEMENT en JSON valide. Pas de texte avant ni après. N'invente jamais de faits, noms, dates ou sources. Si tu n'es pas certain à 100%, n'inclus pas la question.`
 
-/** Auto = Groq, OpenRouter, Gemini (modèle Flash listé live). */
-const AUTO_FREE_ENGINES: LlmEngine[] = ['groq', 'openrouter', 'gemini']
+/** Auto = Gemini, Groq, OpenRouter (priorité gemini — plus fiable free tier). */
+const AUTO_FREE_ENGINES: LlmEngine[] = ['gemini', 'groq', 'openrouter']
+
+/** Priorité globale modèle/provider — fail-fast vers le suivant si échec. */
+const ROUTE_PRIORITY: Array<{ engine: LlmEngine; model: string }> = [
+  { engine: 'gemini', model: 'gemini-flash-latest' },
+  { engine: 'gemini', model: 'gemini-flash-lite-latest' },
+  { engine: 'gemini', model: 'gemini-3.5-flash' },
+  { engine: 'groq', model: 'openai/gpt-oss-20b' },
+  { engine: 'openrouter', model: 'openai/gpt-oss-20b:free' },
+  { engine: 'groq', model: 'openai/gpt-oss-120b' },
+  { engine: 'openrouter', model: 'google/gemma-4-31b-it:free' },
+]
+
+interface GenerationRoute {
+  engine: LlmEngine
+  apiKey: string
+  keyIndex: number
+  model: string
+}
+
+/** Dernier couple provider/modèle qui a réussi (mémoire courte, 30 min). */
+let lastWorkingRoute: { engine: LlmEngine; model: string; at: number } | null =
+  null
+const ROUTE_MEMORY_MS = 30 * 60 * 1000
+
+function rememberWorkingRoute(engine: LlmEngine, model: string): void {
+  lastWorkingRoute = { engine, model, at: Date.now() }
+}
+
+function getPreferredRoute(): { engine: LlmEngine; model: string } | null {
+  if (!lastWorkingRoute) return null
+  if (Date.now() - lastWorkingRoute.at > ROUTE_MEMORY_MS) return null
+  return lastWorkingRoute
+}
+
+function routeSortKey(route: GenerationRoute): number {
+  const pref = getPreferredRoute()
+  if (pref && pref.engine === route.engine && pref.model === route.model) {
+    return -1
+  }
+  const idx = ROUTE_PRIORITY.findIndex(
+    (p) => p.engine === route.engine && p.model === route.model,
+  )
+  if (idx >= 0) return idx
+  const engineIdx = AUTO_FREE_ENGINES.indexOf(route.engine)
+  return 100 + (engineIdx >= 0 ? engineIdx : 50) + route.keyIndex * 0.1
+}
+
+async function buildGenerationRoutes(
+  provider: AiProvider,
+  contentMode: QuizContentMode,
+  pickedSlot?: string,
+): Promise<GenerationRoute[]> {
+  const engines: LlmEngine[] =
+    provider === 'auto'
+      ? ((enginesWithKeys().length > 0
+          ? enginesWithKeys()
+          : AUTO_FREE_ENGINES) as LlmEngine[])
+      : enginesForProvider(provider)
+
+  const routes: GenerationRoute[] = []
+  const slot = pickedSlot
+
+  for (const engine of engines) {
+    const allKeys = keysForEngine(engine)
+    if (allKeys.length === 0) continue
+
+    let keys = allKeys
+    if (provider === 'auto' && slot?.startsWith(`${engine}#`)) {
+      const idx = Number(slot.split('#')[1]) || 0
+      const primary = allKeys[idx]
+      const rest = allKeys.filter((_, i) => i !== idx)
+      keys = [primary, ...rest].filter(Boolean) as string[]
+    }
+
+    for (let keyIndex = 0; keyIndex < Math.min(keys.length, 2); keyIndex++) {
+      const apiKey = keys[keyIndex]
+      if (!apiKey) continue
+      const models =
+        engine === 'gemini'
+          ? await geminiModelsForKey(apiKey)
+          : modelsFor(engine, contentMode).slice(0, 3)
+      for (const model of models) {
+        routes.push({ engine, apiKey, keyIndex, model })
+      }
+    }
+  }
+
+  const seen = new Set<string>()
+  return routes
+    .filter((r) => {
+      const k = `${r.engine}:${r.model}:${r.keyIndex}`
+      if (seen.has(k)) return false
+      seen.add(k)
+      return true
+    })
+    .sort((a, b) => routeSortKey(a) - routeSortKey(b))
+}
 
 export function parseAiProvider(raw: unknown): AiProvider {
   if (
@@ -800,19 +895,15 @@ async function generateOneTier(
   const errors: string[] = []
 
   let pickedSlot: string | undefined
-  let engineOrder: LlmEngine[] = enginesForProvider(provider)
-
   if (provider === 'auto') {
-    // Utiliser le slot pré-réservé par generateQuestionsInner si disponible
-    const picked = prePickedSlot ?? await pickAiForGeneration()
-    if (picked) {
-      pickedSlot = picked.slot
-      engineOrder = fallbackEngines(
-        picked.engine,
-        enginesWithKeys() as RotateEngine[],
-      ).slice(0, 2) as LlmEngine[]
+    if (prePickedSlot) {
+      pickedSlot = prePickedSlot.slot
+    } else {
+      const picked = await pickAiForGeneration()
+      if (picked) pickedSlot = picked.slot
     }
   }
+
   const budgetMsClamped = Math.max(
     3_000,
     Math.min(
@@ -820,110 +911,91 @@ async function generateOneTier(
       questionCount <= 2 ? 12_000 : questionCount <= 3 ? 14_000 : questionCount <= 5 ? 18_000 : 24_000,
     ),
   )
-  engineOrder =
-    provider === 'auto'
-      ? engineOrder.slice(0, 2)
-      : engineOrder.slice(0, 1)
   const tierDeadline = Date.now() + budgetMsClamped
-  // Toujours plusieurs modèles : free tier = 429 fréquents
-  const modelsCap = 3
-  // 2 clés Gemini/Groq : si la 1re est saturée (503/429), on bascule
-  const keysCap = 2
+  const routes = await buildGenerationRoutes(provider, contentMode, pickedSlot)
+  const saturatedEngines = new Set<LlmEngine>()
+  let lastEngine: LlmEngine | undefined
+
+  if (routes.length === 0) {
+    return { error: 'Aucun provider IA disponible (clés API manquantes).' }
+  }
 
   try {
-    for (const engine of engineOrder) {
+    for (const route of routes) {
       if (Date.now() >= tierDeadline) break
-      const allKeys = keysForEngine(engine)
-      const keys =
-        provider === 'auto' && pickedSlot?.startsWith(`${engine}#`)
-          ? (() => {
-              const idx = Number(pickedSlot.split('#')[1]) || 0
-              const primary = allKeys[idx]
-              const rest = allKeys.filter((_, i) => i !== idx)
-              return [primary, ...rest].filter(Boolean) as string[]
-            })()
-          : allKeys
+      if (saturatedEngines.has(route.engine)) continue
 
-      if (keys.length === 0) {
-        if (engine !== 'cerebras') {
-          errors.push(`${engine.toUpperCase()}_API_KEY manquante`)
-        }
-        continue
+      if (route.engine !== lastEngine) {
+        onEngineSelected?.(route.engine)
+        lastEngine = route.engine
       }
 
-      // Signaler le provider dès qu'on a des clés — avant le premier appel IA
-      onEngineSelected?.(engine)
+      const leftMs = Math.max(2_000, tierDeadline - Date.now())
+      if (leftMs < 500) break
 
-      for (const apiKey of keys.slice(0, keysCap)) {
-        const modelList =
-          engine === 'gemini'
-            ? await geminiModelsForKey(apiKey)
-            : modelsFor(engine, contentMode).slice(0, modelsCap)
-        for (const model of modelList) {
-          if (Date.now() >= tierDeadline - 500) break
-          const leftMs = Math.max(2_000, tierDeadline - Date.now())
-          try {
-            const text = await withAiRetry(() =>
-              engine === 'gemini'
-                ? callGemini(apiKey, model, prompt, questionCount, leftMs)
-                : callOpenAiCompatible(
-                    engine as Exclude<LlmEngine, 'gemini'>,
-                    apiKey,
-                    model,
-                    prompt,
-                    questionCount,
-                    leftMs,
-                  ),
-            )
-            const parsed = parseAndCap(
-              text,
-              themeSlug,
-              difficulty,
-              batchId,
-              now,
-              contentMode,
-              questionCount,
-            )
-            if (parsed.kind === 'ok') {
-              const questions =
-                contentMode === 'image'
-                  ? await enrichWithCommonsImages(parsed.questions)
-                  : parsed.questions
-              if (questions.length === 0) {
-                errors.push(
-                  `${engine}/${model}: aucune question valide (filtrées)`,
-                )
-                continue
-              }
-              return { questions, source: engine, model }
-            }
-            if (parsed.kind === 'theme_error') {
-              return { error: parsed.message, themeInvalid: true }
-            }
+      try {
+        const text = await withAiRetry(() =>
+          route.engine === 'gemini'
+            ? callGemini(route.apiKey, route.model, prompt, questionCount, leftMs)
+            : callOpenAiCompatible(
+                route.engine as Exclude<LlmEngine, 'gemini'>,
+                route.apiKey,
+                route.model,
+                prompt,
+                questionCount,
+                leftMs,
+              ),
+        )
+        const parsed = parseAndCap(
+          text,
+          themeSlug,
+          difficulty,
+          batchId,
+          now,
+          contentMode,
+          questionCount,
+        )
+        if (parsed.kind === 'ok') {
+          const questions =
+            contentMode === 'image'
+              ? await enrichWithCommonsImages(parsed.questions)
+              : parsed.questions
+          if (questions.length === 0) {
             errors.push(
-              `${engine}/${model}: JSON invalide · ${text
-                .slice(0, 140)
-                .replace(/\s+/g, ' ')}`,
+              `${route.engine}/${route.model}: aucune question valide (filtrées)`,
             )
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e)
-            errors.push(msg)
-            console.warn(`[${engine}] ${model}:`, msg.slice(0, 200))
-            if (isRateLimitError(msg) || /high demand|resource.exhausted|\b503\b/i.test(msg)) {
-              continue
-            }
-            // Modèle retiré / 404 → modèle suivant immédiatement
-            if (/\b404\b|no longer available|does not exist/i.test(msg)) {
-              continue
-            }
-            // JSON forcé refusé → essayer le modèle suivant
-            if (/failed to validate json/i.test(msg)) {
-              continue
-            }
-            if (isTimeoutLikeError(msg)) {
-              continue
-            }
+            continue
           }
+          rememberWorkingRoute(route.engine, route.model)
+          return { questions, source: route.engine, model: route.model }
+        }
+        if (parsed.kind === 'theme_error') {
+          return { error: parsed.message, themeInvalid: true }
+        }
+        errors.push(
+          `${route.engine}/${route.model}: JSON invalide · ${text
+            .slice(0, 140)
+            .replace(/\s+/g, ' ')}`,
+        )
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        errors.push(msg)
+        console.warn(`[${route.engine}] ${route.model}:`, msg.slice(0, 200))
+        if (
+          isRateLimitError(msg) ||
+          /high demand|resource.exhausted|\b503\b/i.test(msg)
+        ) {
+          saturatedEngines.add(route.engine)
+          continue
+        }
+        if (/\b404\b|no longer available|does not exist/i.test(msg)) {
+          continue
+        }
+        if (/failed to validate json/i.test(msg)) {
+          continue
+        }
+        if (isTimeoutLikeError(msg)) {
+          continue
         }
       }
     }
@@ -932,8 +1004,16 @@ async function generateOneTier(
   }
 
   return {
-    error: errors.length > 0 ? errors[errors.length - 1]! : 'Aucun provider IA disponible',
+    error: pickBestGenerationError(errors),
   }
+}
+
+/** Message utilisateur : préfère une erreur non-429 si plusieurs providers ont échoué. */
+function pickBestGenerationError(errors: string[]): string {
+  if (errors.length === 0) return 'Aucun provider IA disponible'
+  const nonRate = errors.filter((e) => !isRateLimitError(e))
+  if (nonRate.length > 0) return nonRate[nonRate.length - 1]!
+  return 'Toutes les IA free sont saturées (429). Réessaie dans 30 secondes.'
 }
 
 function isRateLimitError(msg: string): boolean {
@@ -1181,7 +1261,10 @@ async function generateQuestionsInner(
       excludeLive,
       ask,
       Math.min(left, maxBudgetMs),
-      undefined,
+      (engine) => {
+        reportedEngine = engine
+        void report(collected.length, engine)
+      },
       slotOverride,
       mode,
     )

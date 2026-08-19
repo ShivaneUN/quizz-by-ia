@@ -172,12 +172,12 @@ assert(
   generateContent.includes('return construirePrompt({'),
 );
 assert(
-  'generate.ts a un mode topup pour le rattrapage',
-  generateContent.includes("'topup'"),
+  'generate.ts construit une liste de routes IA priorisées',
+  generateContent.includes('buildGenerationRoutes'),
 );
 assert(
-  'temperature abaissée (0.15)',
-  generateContent.includes('temperature: 0.15'),
+  'generate.ts mémorise le dernier modèle fonctionnel',
+  generateContent.includes('rememberWorkingRoute'),
 );
 
 // ── Résumé ──
