@@ -9,7 +9,7 @@ import { redisCommand, redisConfigured } from './rooms.js'
 
 export type RotateEngine = 'groq' | 'gemini' | 'openrouter'
 
-const AUTO_ORDER: RotateEngine[] = ['gemini', 'groq', 'openrouter']
+const AUTO_ORDER: RotateEngine[] = ['gemini', 'groq']
 const RR_KEY = 'quizz:ai:rr'
 const INFLIGHT_PREFIX = 'quizz:ai:inflight:'
 /** Attente invisible max pour un slot libre */

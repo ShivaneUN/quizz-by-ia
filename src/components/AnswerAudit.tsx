@@ -100,8 +100,9 @@ export function AnswerAudit({
                   <p className="answer-audit__source">Source : {e.sourceType}</p>
                 )}
 
-                {!compact && e.correctIndex >= 0 && e.correctIndex <= 3 && (
+                {e.correctIndex >= 0 && e.correctIndex <= 3 && (
                   <QuestionFeedback
+                    compact={compact}
                     questionId={e.questionId}
                     question={e.question}
                     answers={e.answers}

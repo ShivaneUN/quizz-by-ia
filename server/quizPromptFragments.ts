@@ -28,19 +28,20 @@ MODÉRATION
 
 EXPLICATION + SOURCE (chaque question)
 - "explication" : 1-3 phrases sur le pourquoi, compréhensible sans connaître la réponse.
-- "source" : la plus précise et réelle garantie — organisme/institution (ex: NASA, INSEE, FIFA), encyclopédie (ex: Wikipédia, Larousse), ou type de document (ex: biographie officielle, fiche technique constructeur). Sinon catégorie générale ("fait historique documenté", "culture générale", "fait scientifique établi").
+- "source" : nominative et réelle (organisme, institution, encyclopédie, site/ouvrage officiel — ex: NASA, FIFA, Larousse, encyclopédie du jeu). Pas de catégorie vague.
 - Jamais : titre d'article, date de publication, nom d'auteur/journaliste, URL — trop risqués d'être inventés.
-- Toujours fournis, quelle que soit la réponse du joueur. Si non sourçable même génériquement → remplace la question.
+- Toujours fournis. Si non sourçable de façon nominative → remplace la question.
 
 DATATION DES FAITS ÉVOLUTIFS
 - Tout fait qui peut changer (record, poste occupé, nombre cumulatif, actualité) doit préciser sa date/période de référence dans la question elle-même.
 - "date_reference" renseigné dans le JSON (année/période, ou null si fait permanent).
 - Actualité : date obligatoire (mois + année) sur chaque question, sans exception.
 - Ne jamais inventer une date approximative — si incertain, choisis un fait non daté.
+- Consoles, sorties jeux, extensions : année exacte obligatoire (ex: portable Nintendo 2017 = Switch, pas 3DS).
 
 ANTI-PRÉMISSE FAUSSE
-- La formulation elle-même ne doit jamais présupposer une catégorie/statut/rôle/relation erronés (ex: "quel groupe" pour un artiste solo, "réalisateur" pour un scénariste).
-- Relis chaque terme catégoriel de la question ; en cas de doute, formule de façon neutre.
+- La formulation ne doit jamais présupposer une catégorie/statut/rôle erronés (ex: "quel groupe" pour un artiste solo ; "chanteuse" pour un homme).
+- Relis chaque terme catégoriel ; en cas de doute, formule de façon neutre.
 
 ANTI-CONFUSION
 - Ne mélange jamais œuvre originale et adaptation (livre/film, jeu/série) — reste sur une seule version, précise-la si besoin.
@@ -64,6 +65,13 @@ DIVERSITÉ DES BONNES RÉPONSES DANS LE LOT
 DIVERSITÉ DES MAUVAISES RÉPONSES DANS LE LOT
 - Limite la réutilisation d'un même élément comme mauvaise réponse à travers le lot de 10 (pas plus de 2-3 fois).
 - INTERDICTION ABSOLUE : un élément qui a servi de MAUVAISE réponse à une question ne doit jamais devenir la BONNE réponse d'une autre question du même lot (et inversement).
+
+PIÈGES FRÉQUENTS (logs joueurs — abandonne la question si risque)
+- Pas de tautologie : bonne réponse ≠ nom du thème / de la classe / du titre de l'œuvre testée.
+- Pas de "premier / a inventé / a popularisé" sans fait historique consensuel solide.
+- Pas de "le plus célèbre / le meilleur" subjectif.
+- Fiction/jeux (Dofus, manga…) : aucun lieu, extension, monnaie ou lore inventé ; Wiki seul insuffisant → source officielle/encyclopédie du jeu, sinon abandon.
+- Co-création média : ne réduis pas à un seul nom si plusieurs créateurs.
 
 CONTRÔLE FINAL DE QUANTITÉ
 - Avant de livrer le JSON, compte exactement les questions du tableau : il doit y en avoir EXACTEMENT 10, ni plus ni moins.
@@ -92,6 +100,7 @@ INTERDICTION ABSOLUE D'INVENTION
 - "fait_verifiable" = true UNIQUEMENT si tu es certain à 100% — sinon NE PAS inclure la question.
 - "source" OBLIGATOIRE et NOMINATIVE : organisme, institution, encyclopédie ou ouvrage de référence identifiable (ex: NASA, FIFA, Wikipédia, Larousse, INSEE, BBC, Michelin).
 - INTERDIT comme source : "culture générale", "notoriété publique", "fait historique documenté", "fait scientifique établi", "connaissance commune", "source générale", ou toute catégorie vague sans référent nommé.
+- Lore fiction/jeux : n'invente aucun lieu, extension, monnaie, personnage secondaire ; si seul Wikipédia te vient et que tu n'es pas certain → abandonne.
 - Si tu ne peux pas citer une source nominative fiable → NE PAS inclure la question.
 - Mieux vaut retourner MOINS de questions que d'en fabriquer pour atteindre le quota.
 - En cas de doute sur un fait, une date, un nom ou une attribution → abandonne la question et passe à un autre fait sûr.

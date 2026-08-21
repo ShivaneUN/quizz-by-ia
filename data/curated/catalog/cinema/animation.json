@@ -1,0 +1,119 @@
+{
+  "placementKind": "catalog",
+  "themeId": "cinema",
+  "theme": "Cinéma",
+  "subTheme": "Animation",
+  "groupKey": "catalog/cinema/animation",
+  "questions": [
+    {
+      "id": "cur-mt1w3ne2-yw3jk0",
+      "at": 1787252682026,
+      "difficulty": "easy",
+      "question": "Quel petit robot solitaire passe ses journées à nettoyer une Terre abandonnée et recouverte de déchets dans un film Pixar ?",
+      "answers": [
+        "WALL-E",
+        "R2-D2",
+        "Terminator",
+        "Optimus Prime"
+      ],
+      "correctIndex": 0,
+      "correctAnswer": "WALL-E",
+      "explanation": "WALL-E est un petit robot compacteur de déchets qui tombe amoureux d'une autre sonde nommée EVE dans ce film d'animation de science-fiction.",
+      "sourceType": "Wikipédia",
+      "liked": true,
+      "verifiedOk": true,
+      "sourcesConfirmed": 2,
+      "verdict": "ok",
+      "rawTheme": "Cinéma — Animation",
+      "mode": "solo"
+    },
+    {
+      "id": "cur-mt1w3n54-b7360s",
+      "at": 1787252681704,
+      "difficulty": "easy",
+      "question": "Quel petit extraterrestre bleu à quatre pattes s'attache à une petite fille hawaïenne prénommée Lilo ?",
+      "answers": [
+        "Stitch",
+        "Minion",
+        "Wall-E",
+        "Baymax"
+      ],
+      "correctIndex": 0,
+      "correctAnswer": "Stitch",
+      "explanation": "Stitch (ou Expérience 626) est un extraterrestre conçu pour la destruction qui découvre la valeur de la famille (l'ohana) à Hawaï.",
+      "sourceType": "Wikipédia",
+      "liked": true,
+      "verifiedOk": true,
+      "sourcesConfirmed": 2,
+      "verdict": "ok",
+      "rawTheme": "Cinéma — Animation",
+      "mode": "solo"
+    },
+    {
+      "id": "cur-mt1w3mw2-tdvp8s",
+      "at": 1787252681378,
+      "difficulty": "easy",
+      "question": "Quel courageux cow-boy en peluche est le jouet préféré d'un petit garçon nommé Andy dans Toy Story ?",
+      "answers": [
+        "Woody",
+        "Peter Pan",
+        "Aladdin",
+        "Pinocchio"
+      ],
+      "correctIndex": 0,
+      "correctAnswer": "Woody",
+      "explanation": "Shérif Woody est le personnage principal de Toy Story, le premier long-métrage entièrement en images de synthèse de Pixar.",
+      "sourceType": "Wikipédia",
+      "liked": true,
+      "verifiedOk": true,
+      "sourcesConfirmed": 2,
+      "verdict": "ok",
+      "rawTheme": "Cinéma — Animation",
+      "mode": "solo"
+    },
+    {
+      "id": "cur-mt1w3mn0-jjjkwi",
+      "at": 1787252681052,
+      "difficulty": "easy",
+      "question": "Dans le film d'animation de Disney inspiré du conte de Hans Christian Andersen, quel animal est le compagnon fidèle de la petite sirène Ariel ?",
+      "answers": [
+        "Une mouette",
+        "Un dauphin",
+        "Un crabe rouge",
+        "Un poisson jaune"
+      ],
+      "correctIndex": 2,
+      "correctAnswer": "Un crabe rouge",
+      "explanation": "Sébastien est le crabe rouge et compositeur royal qui veille constamment sur la princesse Ariel dans le grand classique de l'animation.",
+      "sourceType": "Wikipédia",
+      "liked": true,
+      "verifiedOk": true,
+      "sourcesConfirmed": 2,
+      "verdict": "ok",
+      "rawTheme": "Cinéma — Animation",
+      "mode": "solo"
+    },
+    {
+      "id": "cur-mt1w3mdx-u6unhm",
+      "at": 1787252680725,
+      "difficulty": "easy",
+      "question": "Quel ogre vert grincheux mais attachant partage ses aventures avec un âne loquace dans une célèbre franchise de films d'animation ? Remplacement pour respecter l'exigence de non-doublon et de questions valides.",
+      "answers": [
+        "Wreck-It Ralph",
+        "Grug",
+        "Sully",
+        "Shrek"
+      ],
+      "correctIndex": 3,
+      "correctAnswer": "Shrek",
+      "explanation": "Shrek est le célèbre ogre des studios DreamWorks qui vit dans un marais et dont les aventures ont marqué l'histoire du cinéma d'animation.",
+      "sourceType": "Wikipédia",
+      "liked": true,
+      "verifiedOk": true,
+      "sourcesConfirmed": 2,
+      "verdict": "ok",
+      "rawTheme": "Cinéma — Animation",
+      "mode": "solo"
+    }
+  ]
+}

@@ -18,6 +18,7 @@ type FeedbackSummary = {
   up: number
   down: number
   verify: number
+  review?: number
   total: number
 }
 
@@ -40,6 +41,23 @@ type FeedbackEvent = {
   theme?: string
   difficulty?: string
   mode?: string
+  sourceType?: string
+  verdict?: string
+  answerVerdict?: string
+  sourceVerdict?: string
+  verifyTitle?: string
+  verifyNote?: string
+  verifyProvider?: string
+}
+
+type ErrorEvent = {
+  at: number
+  scope: string
+  message: string
+  status?: number
+  theme?: string
+  detail?: string
+  path?: string
 }
 
 type LogsPayload = {
@@ -50,6 +68,24 @@ type LogsPayload = {
     count: number
     summary: FeedbackSummary
     events: FeedbackEvent[]
+  }
+  errors?: {
+    count: number
+    summary: { total: number; byScope: Record<string, number> }
+    events: ErrorEvent[]
+  }
+  curated?: {
+    ingestEnabled: boolean
+    count: number
+    summary: {
+      total: number
+      byDifficulty: Record<string, number>
+      themeCount: number
+      groupCount?: number
+      catalogCount?: number
+      customCount?: number
+      ingestEnabled: boolean
+    }
   }
 }
 
@@ -83,7 +119,7 @@ function barWidth(pct: number | null) {
 /**
  * Engrenage accueil — code Quizzyosh → logs calib/feedback + clear chat global.
  */
-export function AdminPanel() {
+export function AdminPanel({ hideGear = false }: { hideGear?: boolean }) {
   const [open, setOpen] = useState(false)
   const [unlocked, setUnlocked] = useState(false)
   const [code, setCode] = useState('')
@@ -94,7 +130,9 @@ export function AdminPanel() {
   const [clearMsg, setClearMsg] = useState<string | null>(null)
   const [clearing, setClearing] = useState(false)
   const [resetting, setResetting] = useState(false)
-  const [tab, setTab] = useState<'summary' | 'hands' | 'feedback' | 'ai'>('summary')
+  const [tab, setTab] = useState<
+    'summary' | 'hands' | 'feedback' | 'errors' | 'curated' | 'ai'
+  >('summary')
   const [aiRows, setAiRows] = useState<AiCapacityRow[] | null>(null)
 
   async function loadLogs(secret: string) {
@@ -164,9 +202,74 @@ export function AdminPanel() {
     }
   }
 
+  async function downloadCurated(format: 'csv' | 'json') {
+    setLoadError(null)
+    try {
+      const q = format === 'csv' ? '&format=csv' : ''
+      const res = await fetch(
+        `/api/curated-bank?secret=${encodeURIComponent(ADMIN_PANEL_CODE)}&limit=5000${q}`,
+      )
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(
+          typeof data.error === 'string' ? data.error : `Erreur ${res.status}`,
+        )
+      }
+      if (format === 'csv') {
+        const blob = await res.blob()
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `quizz-curated-${new Date().toISOString().slice(0, 10)}.csv`
+        a.click()
+        URL.revokeObjectURL(url)
+      } else {
+        const data = await res.json()
+        const blob = new Blob([JSON.stringify(data, null, 2)], {
+          type: 'application/json',
+        })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `quizz-curated-${new Date().toISOString().slice(0, 10)}.json`
+        a.click()
+        URL.revokeObjectURL(url)
+      }
+      setClearMsg(`Banque curatée ${format.toUpperCase()} téléchargée.`)
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : 'Téléchargement impossible')
+    }
+  }
+
+  async function downloadErrors(format: 'errors-csv' | 'errors-json') {
+    setLoadError(null)
+    try {
+      const res = await fetch(
+        `/api/calib-stats?secret=${encodeURIComponent(ADMIN_PANEL_CODE)}&limit=5000&format=${format}`,
+      )
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(
+          typeof data.error === 'string' ? data.error : `Erreur ${res.status}`,
+        )
+      }
+      const blob = await res.blob()
+      const ext = format === 'errors-csv' ? 'csv' : 'json'
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `quizz-errors-${new Date().toISOString().slice(0, 10)}.${ext}`
+      a.click()
+      URL.revokeObjectURL(url)
+      setClearMsg(`Erreurs ${ext.toUpperCase()} téléchargées.`)
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : 'Téléchargement impossible')
+    }
+  }
+
   async function handleResetLogs() {
     const ok = window.confirm(
-      'Reset TOUS les logs (manches + feedback) sur le serveur ?\nIrréversible.',
+      'Reset TOUS les logs (manches + feedback + erreurs + banque curatée) sur le serveur ?\nIrréversible.',
     )
     if (!ok) return
     setResetting(true)
@@ -192,8 +295,23 @@ export function AdminPanel() {
         events: [],
         feedback: {
           count: 0,
-          summary: { up: 0, down: 0, verify: 0, total: 0 },
+          summary: { up: 0, down: 0, verify: 0, review: 0, total: 0 },
           events: [],
+        },
+        errors: {
+          count: 0,
+          summary: { total: 0, byScope: {} },
+          events: [],
+        },
+        curated: {
+          ingestEnabled: false,
+          count: 0,
+          summary: {
+            total: 0,
+            byDifficulty: { easy: 0, medium: 0, hard: 0 },
+            themeCount: 0,
+            ingestEnabled: false,
+          },
         },
       })
       setClearMsg('Logs réinitialisés.')
@@ -209,6 +327,14 @@ export function AdminPanel() {
     void loadLogs(ADMIN_PANEL_CODE)
     void loadAiCapacity(ADMIN_PANEL_CODE)
   }, [open, unlocked])
+
+  useEffect(() => {
+    function onOpen() {
+      setOpen(true)
+    }
+    window.addEventListener('quizz:open-admin', onOpen)
+    return () => window.removeEventListener('quizz:open-admin', onOpen)
+  }, [])
 
   function handleUnlock(e: FormEvent) {
     e.preventDefault()
@@ -247,18 +373,21 @@ export function AdminPanel() {
   }
 
   const fb = logs?.feedback?.summary
+  const errCount = logs?.errors?.count ?? 0
 
   const ui = (
     <>
-      <button
-        type="button"
-        className="admin-gear"
-        onClick={() => setOpen(true)}
-        aria-label="Administration"
-        title="Admin"
-      >
-        ⚙
-      </button>
+      {!hideGear && (
+        <button
+          type="button"
+          className="admin-gear"
+          onClick={() => setOpen(true)}
+          aria-label="Administration"
+          title="Admin"
+        >
+          ⚙
+        </button>
+      )}
 
       {open && (
         <div className="admin-panel" role="dialog" aria-modal aria-label="Admin">
@@ -312,8 +441,8 @@ export function AdminPanel() {
                     (manches + feedback) sur ton PC.
                   </p>
                   <p>
-                    <strong>Reset logs</strong> — efface toutes les manches et
-                    feedbacks stockés sur le serveur.
+                    <strong>Reset logs</strong> — efface manches, feedbacks et
+                    erreurs stockés sur le serveur.
                   </p>
                   <p>
                     <strong>Clear chat (tous)</strong> — efface le chat Général
@@ -401,6 +530,8 @@ export function AdminPanel() {
                       ['summary', 'Résumé'],
                       ['hands', 'Manches'],
                       ['feedback', 'Feedback'],
+                      ['errors', 'Erreurs'],
+                      ['curated', 'Banque'],
                       ['ai', 'Capacité IA'],
                     ] as const
                   ).map(([id, label]) => (
@@ -425,6 +556,7 @@ export function AdminPanel() {
                     </p>
                     <p className="admin-panel__meta">
                       {logs.count} manches · {logs.feedback?.count ?? 0} feedback
+                      · {errCount} erreurs
                     </p>
                     <div className="admin-panel__bars">
                       {(logs.summary ?? []).map((row) => (
@@ -452,6 +584,8 @@ export function AdminPanel() {
                         <span>👍 {fb.up}</span>
                         <span>👎 {fb.down}</span>
                         <span>🔍 {fb.verify}</span>
+                        <span>⚠️ {fb.review ?? 0}</span>
+                        <span>⛔ {errCount}</span>
                       </div>
                     )}
                   </div>
@@ -493,8 +627,8 @@ export function AdminPanel() {
                 {tab === 'feedback' && logs && (
                   <div className="admin-panel__log">
                     <p className="admin-panel__tab-help">
-                      👍 question OK · 👎 mauvaise / floue · 🔍 à revoir (avec
-                      le texte complet pour corriger le prompt plus tard).
+                      👍 OK · 👎 mauvaise · 🔍 vérif lancée · ⚠️ à revoir (vérif
+                      douteuse / fausse / non confirmée — dédup 7 j).
                     </p>
                     {(logs.feedback?.events ?? []).slice(0, 80).map((e, i) => (
                       <article key={`${e.at}-${i}`} className="admin-log-row">
@@ -504,17 +638,156 @@ export function AdminPanel() {
                               ? '👍'
                               : e.kind === 'down'
                                 ? '👎'
-                                : '🔍'}{' '}
+                                : e.kind === 'review'
+                                  ? '⚠️'
+                                  : '🔍'}{' '}
                             {e.theme ?? '—'}
+                            {e.kind === 'review' && e.verdict
+                              ? ` · ${e.verdict}`
+                              : ''}
                           </strong>
                           <time>{fmtTime(e.at)}</time>
                         </header>
                         <p>{e.question}</p>
-                        <p className="admin-log-row__ans">→ {e.correctAnswer}</p>
+                        <p className="admin-log-row__ans">
+                          → {e.correctAnswer}
+                          {e.sourceType ? ` · ${e.sourceType}` : ''}
+                        </p>
+                        {e.kind === 'review' && (e.verifyNote || e.verifyTitle) && (
+                          <p className="admin-log-row__ans">
+                            {e.answerVerdict
+                              ? `Réponse: ${e.answerVerdict}`
+                              : ''}
+                            {e.sourceVerdict
+                              ? ` · Source: ${e.sourceVerdict}`
+                              : ''}
+                            {e.verifyProvider ? ` · ${e.verifyProvider}` : ''}
+                            {e.verifyTitle ? ` · « ${e.verifyTitle} »` : ''}
+                            {e.verifyNote ? ` — ${e.verifyNote}` : ''}
+                          </p>
+                        )}
                       </article>
                     ))}
                     {(logs.feedback?.events ?? []).length === 0 && (
                       <p className="admin-panel__empty">Aucun feedback</p>
+                    )}
+                  </div>
+                )}
+
+                {tab === 'errors' && logs && (
+                  <div className="admin-panel__log">
+                    <p className="admin-panel__tab-help">
+                      Toutes les erreurs serveur : génération, vérif, salles
+                      multi (timeout, 429, JSON invalide…).
+                    </p>
+                    <div className="admin-panel__toolbar">
+                      <button
+                        type="button"
+                        className="btn btn--primary"
+                        onClick={() => void downloadErrors('errors-csv')}
+                        title="Télécharger uniquement les erreurs en CSV"
+                      >
+                        CSV erreurs
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--primary"
+                        onClick={() => void downloadErrors('errors-json')}
+                        title="Télécharger uniquement les erreurs en JSON"
+                      >
+                        JSON erreurs
+                      </button>
+                    </div>
+                    {logs.errors?.summary?.byScope &&
+                      Object.keys(logs.errors.summary.byScope).length > 0 && (
+                        <div className="admin-panel__fb-stats">
+                          {Object.entries(logs.errors.summary.byScope).map(
+                            ([scope, n]) => (
+                              <span key={scope}>
+                                {scope}: {n}
+                              </span>
+                            ),
+                          )}
+                        </div>
+                      )}
+                    {(logs.errors?.events ?? []).slice(0, 100).map((e, i) => (
+                      <article key={`${e.at}-${i}`} className="admin-log-row">
+                        <header>
+                          <strong>
+                            {e.scope}
+                            {e.status != null ? ` · ${e.status}` : ''}
+                            {e.theme ? ` · ${e.theme}` : ''}
+                          </strong>
+                          <time>{fmtTime(e.at)}</time>
+                        </header>
+                        <p>{e.message}</p>
+                        {(e.detail || e.path) && (
+                          <p className="admin-log-row__ans">
+                            {e.path ? `${e.path}` : ''}
+                            {e.path && e.detail ? ' · ' : ''}
+                            {e.detail ?? ''}
+                          </p>
+                        )}
+                      </article>
+                    ))}
+                    {(logs.errors?.events ?? []).length === 0 && (
+                      <p className="admin-panel__empty">Aucune erreur loggée</p>
+                    )}
+                  </div>
+                )}
+
+                {tab === 'curated' && logs && (
+                  <div className="admin-panel__section">
+                    <p className="admin-panel__tab-help">
+                      Banque éditable dans <code>data/curated/</code> :
+                      catalog/&lt;thème&gt;/&lt;sous-thème&gt;.json et
+                      custom/&lt;nom&gt;.json — tu peux modifier / ajouter des
+                      questions à la main. Placement catalogue uniquement pour
+                      les thèmes déjà définis ; sinon fichier custom. Ingestion
+                      joueur et secours IA encore OFF.
+                    </p>
+                    <p className="admin-panel__meta">
+                      Statut :{' '}
+                      {logs.curated?.ingestEnabled
+                        ? 'ingestion ON'
+                        : 'ingestion OFF'}{' '}
+                      · {logs.curated?.count ?? 0} questions ·{' '}
+                      {logs.curated?.summary?.catalogCount ?? 0} catalogue ·{' '}
+                      {logs.curated?.summary?.customCount ?? 0} custom ·{' '}
+                      {logs.curated?.summary?.groupCount ?? 0} groupes
+                    </p>
+                    <div className="admin-panel__fb-stats">
+                      <span>
+                        easy: {logs.curated?.summary?.byDifficulty?.easy ?? 0}
+                      </span>
+                      <span>
+                        medium:{' '}
+                        {logs.curated?.summary?.byDifficulty?.medium ?? 0}
+                      </span>
+                      <span>
+                        hard: {logs.curated?.summary?.byDifficulty?.hard ?? 0}
+                      </span>
+                    </div>
+                    <div className="admin-panel__toolbar">
+                      <button
+                        type="button"
+                        className="btn btn--primary"
+                        onClick={() => void downloadCurated('csv')}
+                      >
+                        CSV banque
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--primary"
+                        onClick={() => void downloadCurated('json')}
+                      >
+                        JSON banque
+                      </button>
+                    </div>
+                    {(logs.curated?.count ?? 0) === 0 && (
+                      <p className="admin-panel__empty">
+                        Banque vide — normal tant que l’ingestion est off.
+                      </p>
                     )}
                   </div>
                 )}

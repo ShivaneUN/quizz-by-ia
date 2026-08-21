@@ -1,0 +1,53 @@
+{
+  "placementKind": "catalog",
+  "themeId": "sport",
+  "theme": "Sport",
+  "subTheme": "Football",
+  "groupKey": "catalog/sport/football",
+  "questions": [
+    {
+      "id": "cur-mt1w3p40-piap67",
+      "at": 1787252684256,
+      "difficulty": "easy",
+      "question": "Quel est le nom du trophée remis au vainqueur de la Coupe du monde de football ?",
+      "answers": [
+        "Trophée Jules Rimet",
+        "Trophée de l'UEFA",
+        "Trophée de la Coupe du monde",
+        "Trophée de la FIFA"
+      ],
+      "correctIndex": 0,
+      "correctAnswer": "Trophée Jules Rimet",
+      "explanation": "Le trophée Jules Rimet est le trophée remis au vainqueur de la Coupe du monde de football, nommé en l'honneur du fondateur de la compétition.",
+      "sourceType": "FIFA",
+      "liked": true,
+      "verifiedOk": true,
+      "sourcesConfirmed": 2,
+      "verdict": "ok",
+      "rawTheme": "Sport — Football",
+      "mode": "solo"
+    },
+    {
+      "id": "cur-mt1w3ovb-5vpmyj",
+      "at": 1787252683943,
+      "difficulty": "medium",
+      "question": "Quel club européen a remporté le plus grand nombre de titres en Ligue des champions de l'UEFA au terme de la saison 2023-2024 ?",
+      "answers": [
+        "AC Milan",
+        "Real Madrid",
+        "Liverpool FC",
+        "Bayern Munich"
+      ],
+      "correctIndex": 1,
+      "correctAnswer": "Real Madrid",
+      "explanation": "Le Real Madrid détient le record historique de victoires dans cette compétition européenne majeure, consolidant son avance avec son titre obtenu en 2024.",
+      "sourceType": "Site officiel de l'UEFA",
+      "liked": true,
+      "verifiedOk": true,
+      "sourcesConfirmed": 2,
+      "verdict": "ok",
+      "rawTheme": "Sport — Football",
+      "mode": "solo"
+    }
+  ]
+}

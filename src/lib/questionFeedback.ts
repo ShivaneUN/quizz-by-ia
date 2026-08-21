@@ -1,6 +1,8 @@
-/** Feedback question → serveur (👍 / 👎 / à vérifier) */
+/** Feedback question → serveur (👍 / 👎 / vérif / à revoir) */
 
-export type FeedbackKind = 'up' | 'down' | 'verify'
+export type FeedbackKind = 'up' | 'down' | 'verify' | 'review'
+
+export type FactVerdict = 'ok' | 'douteux' | 'faux' | 'inconnu'
 
 export interface QuestionFeedbackPayload {
   kind: FeedbackKind
@@ -15,6 +17,14 @@ export interface QuestionFeedbackPayload {
   mode?: 'solo' | 'multi'
   playerCorrect?: boolean
   selectedIndex?: number
+  verdict?: FactVerdict
+  answerVerdict?: FactVerdict
+  sourceVerdict?: FactVerdict
+  verifyProvider?: string
+  verifyTitle?: string
+  verifyNote?: string
+  sourcesConfirmed?: number
+  confirmingSources?: string
 }
 
 export function reportQuestionFeedback(payload: QuestionFeedbackPayload): void {
@@ -35,4 +45,22 @@ export function reportQuestionFeedback(payload: QuestionFeedbackPayload): void {
   } catch {
     /* ignore */
   }
+}
+
+/** Vérif non plausible → log « à revoir » (admin). */
+export function isVerifyImplausible(input: {
+  verdict?: FactVerdict | null
+  answerVerdict?: FactVerdict | null
+  sourceVerdict?: FactVerdict | null
+  sourcesConfirmed?: number | null
+}): boolean {
+  const a = input.answerVerdict ?? input.verdict ?? 'inconnu'
+  const s = input.sourceVerdict
+  const v = input.verdict ?? a
+  const n = input.sourcesConfirmed ?? 0
+  if (a === 'ok' && n < 2) return true
+  if (a !== 'ok') return true
+  if (v === 'faux' || v === 'douteux') return true
+  if (s === 'faux' || s === 'douteux') return true
+  return false
 }

@@ -29,6 +29,7 @@ import {
   getGenerationEstimateSec,
   recordGenerationMs,
 } from '../server/genStats.js'
+import { logError } from '../server/errorLog.js'
 
 export const config = {
   maxDuration: 60,
@@ -299,6 +300,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         delete latest.genQuestionsTotal
         delete latest.generatingStartedAt
         await saveRoom(latest)
+        logError({
+          scope: 'room',
+          message,
+          status: 422,
+          theme: latest.theme,
+          detail: `salle ${code}`,
+          path: '/api/room',
+        })
         return json(res, 422, {
           error: message,
           room: publicRoomView(latest),
@@ -323,6 +332,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         delete room.genQuestionsTotal
         delete room.generatingStartedAt
         await saveRoom(room)
+        logError({
+          scope: 'room',
+          message: gen.error,
+          status: 422,
+          theme: room.theme,
+          detail: `salle ${code}`,
+          path: '/api/room',
+        })
         return json(res, 422, {
           error: gen.error,
           room: publicRoomView(room),
@@ -354,6 +371,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         delete room.genQuestionsTotal
         delete room.generatingStartedAt
         await saveRoom(room)
+        logError({
+          scope: 'room',
+          message: err,
+          status: 422,
+          theme: room.theme,
+          detail: `salle ${code}`,
+          path: '/api/room',
+        })
         return json(res, 422, {
           error: err,
           room: publicRoomView(room),

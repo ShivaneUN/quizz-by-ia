@@ -1,0 +1,8 @@
+{
+  "placementKind": "catalog",
+  "themeId": "cuisine",
+  "theme": "Cuisine",
+  "subTheme": "Ingrédients",
+  "groupKey": "catalog/cuisine/ingredients",
+  "questions": []
+}

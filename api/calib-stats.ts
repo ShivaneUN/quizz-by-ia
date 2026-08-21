@@ -12,6 +12,17 @@ import {
   listQuestionFeedback,
   summarizeFeedback,
 } from '../server/questionFeedback.js'
+import {
+  clearErrorLog,
+  listErrorLog,
+  summarizeErrorLog,
+} from '../server/errorLog.js'
+import {
+  clearCuratedBank,
+  CURATED_BANK_INGEST_ENABLED,
+  listCuratedQuestions,
+  summarizeCuratedBank,
+} from '../server/curatedBank.js'
 
 export const config = {
   maxDuration: 30,
@@ -54,6 +65,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         await clearCalibHands()
         await clearQuestionFeedback()
+        await clearErrorLog()
+        await clearCuratedBank()
         return json(res, 200, { ok: true })
       }
 
@@ -70,6 +83,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const events = await listCalibHands(limit)
       const summary = summarizeCalibHands(events)
       const feedbackEvents = await listQuestionFeedback(limit)
+      const errorEvents = await listErrorLog(Math.min(limit, 1000))
+      const errorSummary = summarizeErrorLog(errorEvents)
+      const curatedEvents = await listCuratedQuestions(Math.min(limit, 5000))
+      const curatedSummary = summarizeCuratedBank(curatedEvents)
       const format = String(req.query.format ?? 'json')
       if (format === 'csv') {
         const summaryLines = [
@@ -107,7 +124,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }),
           '',
           '# feedback',
-          'at,kind,theme,difficulty,mode,question,correctAnswer',
+          'at,kind,theme,difficulty,mode,question,correctAnswer,sourceType,verdict,answerVerdict,sourceVerdict,sourcesConfirmed,confirmingSources,verifyProvider,verifyTitle,verifyNote',
           ...feedbackEvents.map((e) =>
             [
               e.at,
@@ -117,6 +134,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               e.mode ?? '',
               JSON.stringify(e.question),
               JSON.stringify(e.correctAnswer),
+              JSON.stringify(e.sourceType ?? ''),
+              e.verdict ?? '',
+              e.answerVerdict ?? '',
+              e.sourceVerdict ?? '',
+              e.sourcesConfirmed ?? '',
+              JSON.stringify(e.confirmingSources ?? ''),
+              JSON.stringify(e.verifyProvider ?? ''),
+              JSON.stringify(e.verifyTitle ?? ''),
+              JSON.stringify(e.verifyNote ?? ''),
+            ].join(','),
+          ),
+          '',
+          '# errors',
+          'at,scope,status,theme,message,detail,path',
+          ...errorEvents.map((e) =>
+            [
+              e.at,
+              e.scope,
+              e.status ?? '',
+              JSON.stringify(e.theme ?? ''),
+              JSON.stringify(e.message),
+              JSON.stringify(e.detail ?? ''),
+              JSON.stringify(e.path ?? ''),
+            ].join(','),
+          ),
+          '',
+          '# curated_bank',
+          'at,placementKind,themeId,theme,subTheme,groupKey,difficulty,question,correctAnswer,liked,verifiedOk,sourcesConfirmed',
+          ...curatedEvents.map((e) =>
+            [
+              e.at,
+              e.placementKind,
+              e.themeId ?? '',
+              JSON.stringify(e.theme),
+              JSON.stringify(e.subTheme ?? ''),
+              JSON.stringify(e.groupKey),
+              e.difficulty,
+              JSON.stringify(e.question),
+              JSON.stringify(e.correctAnswer),
+              e.liked ? 1 : 0,
+              e.verifiedOk ? 1 : 0,
+              e.sourcesConfirmed ?? '',
             ].join(','),
           ),
         ]
@@ -128,6 +187,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         )
         return res.send(summaryLines.join('\n'))
       }
+      if (format === 'errors-csv') {
+        const lines = [
+          'at,scope,status,theme,message,detail,path',
+          ...errorEvents.map((e) =>
+            [
+              e.at,
+              e.scope,
+              e.status ?? '',
+              JSON.stringify(e.theme ?? ''),
+              JSON.stringify(e.message),
+              JSON.stringify(e.detail ?? ''),
+              JSON.stringify(e.path ?? ''),
+            ].join(','),
+          ),
+        ]
+        res.statusCode = 200
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+        res.setHeader(
+          'Content-Disposition',
+          'attachment; filename="quizz-errors.csv"',
+        )
+        return res.send(lines.join('\n'))
+      }
+      if (format === 'errors-json') {
+        const payload = {
+          exportedAt: new Date().toISOString(),
+          count: errorEvents.length,
+          summary: errorSummary,
+          events: errorEvents,
+        }
+        res.statusCode = 200
+        res.setHeader('Content-Type', 'application/json; charset=utf-8')
+        res.setHeader(
+          'Content-Disposition',
+          'attachment; filename="quizz-errors.json"',
+        )
+        return res.send(JSON.stringify(payload, null, 2))
+      }
       if (format === 'download') {
         const payload = {
           exportedAt: new Date().toISOString(),
@@ -138,6 +235,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             count: feedbackEvents.length,
             summary: summarizeFeedback(feedbackEvents),
             events: feedbackEvents,
+          },
+          errors: {
+            count: errorEvents.length,
+            summary: errorSummary,
+            events: errorEvents,
+          },
+          curated: {
+            ingestEnabled: CURATED_BANK_INGEST_ENABLED,
+            count: curatedEvents.length,
+            summary: curatedSummary,
+            events: curatedEvents,
           },
         }
         res.statusCode = 200
@@ -156,6 +264,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           count: feedbackEvents.length,
           summary: summarizeFeedback(feedbackEvents),
           events: feedbackEvents,
+        },
+        errors: {
+          count: errorEvents.length,
+          summary: errorSummary,
+          events: errorEvents,
+        },
+        curated: {
+          ingestEnabled: CURATED_BANK_INGEST_ENABLED,
+          count: curatedEvents.length,
+          summary: curatedSummary,
+          events: curatedEvents,
         },
       })
     }

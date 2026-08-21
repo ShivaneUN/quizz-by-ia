@@ -179,6 +179,8 @@ interface MultiChatProps {
   preferredName?: string
   roomCode?: string | null
   roomChatEnabled?: boolean
+  /** Masquer le bouton flottant (ex. barre dock accueil) */
+  hideFab?: boolean
 }
 
 /**
@@ -189,6 +191,7 @@ export function MultiChat({
   preferredName = '',
   roomCode = null,
   roomChatEnabled = false,
+  hideFab = false,
 }: MultiChatProps) {
   const [open, setOpen] = useState(false)
   const [channel, setChannel] = useState<ChatChannel>('global')
@@ -351,6 +354,14 @@ export function MultiChat({
     setOpen(true)
   }
 
+  useEffect(() => {
+    function onOpen() {
+      openChat()
+    }
+    window.addEventListener('quizz:open-chat', onOpen)
+    return () => window.removeEventListener('quizz:open-chat', onOpen)
+  }, [])
+
   function onDragStart(e: ReactPointerEvent<HTMLElement>) {
     if (e.button !== 0) return
     const target = e.target as HTMLElement
@@ -473,7 +484,7 @@ export function MultiChat({
       className={`multi-chat${open ? ' is-open' : ''}`}
       style={panelStyle}
     >
-      {!open && (
+      {!open && !hideFab && (
         <button
           type="button"
           className="multi-chat__fab"

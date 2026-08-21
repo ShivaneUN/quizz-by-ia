@@ -82,34 +82,34 @@ const GROQ_MODELS = [
 
 /** Fallback si le listing live échoue — jamais gemini-2.5-flash (404 new users). */
 const GEMINI_MODELS = [
-  'gemini-flash-latest',
   'gemini-flash-lite-latest',
+  'gemini-flash-latest',
   'gemini-3.5-flash',
 ] as const
 
 const CEREBRAS_MODELS = ['gemma-4-31b', 'gpt-oss-120b', 'zai-glm-4.7'] as const
 const DEEPSEEK_MODELS = ['deepseek-chat'] as const
-/** Uniquement modèles :free OpenRouter */
+/** OpenRouter free — priorité aux modèles légers/rapides (août 2026). */
 const OPENROUTER_MODELS = [
-  'openai/gpt-oss-20b:free',
-  'google/gemma-4-31b-it:free',
+  'nvidia/nemotron-3.5-lightning:free',
+  'nvidia/nemotron-nano-9b-v2:free',
+  'liquid/lfm-2.5-2.6b:free',
+  'google/gemma-4-26b-a4b-it:free',
 ] as const
 
 /** System prompt minimal — renforce l'interdiction d'inventer des faits. */
 const AI_SYSTEM_MINIMAL = `Tu es un générateur de quiz factuel. Réponds UNIQUEMENT en JSON valide. Pas de texte avant ni après. N'invente jamais de faits, noms, dates ou sources. Si tu n'es pas certain à 100%, n'inclus pas la question.`
 
-/** Auto = Gemini, Groq, OpenRouter (priorité gemini — plus fiable free tier). */
-const AUTO_FREE_ENGINES: LlmEngine[] = ['gemini', 'groq', 'openrouter']
+/** Auto = Gemini + Groq uniquement (OpenRouter retiré de la boucle auto). */
+const AUTO_FREE_ENGINES: LlmEngine[] = ['gemini', 'groq']
 
-/** Priorité globale modèle/provider — fail-fast vers le suivant si échec. */
+/** Priorité globale — flash-lite d’abord (moins saturé que flash-latest). */
 const ROUTE_PRIORITY: Array<{ engine: LlmEngine; model: string }> = [
-  { engine: 'gemini', model: 'gemini-flash-latest' },
   { engine: 'gemini', model: 'gemini-flash-lite-latest' },
+  { engine: 'gemini', model: 'gemini-flash-latest' },
   { engine: 'gemini', model: 'gemini-3.5-flash' },
   { engine: 'groq', model: 'openai/gpt-oss-20b' },
-  { engine: 'openrouter', model: 'openai/gpt-oss-20b:free' },
   { engine: 'groq', model: 'openai/gpt-oss-120b' },
-  { engine: 'openrouter', model: 'google/gemma-4-31b-it:free' },
 ]
 
 interface GenerationRoute {
@@ -274,8 +274,8 @@ let geminiLiveCache: { at: number; ids: string[] } | null = null
 
 function rankGeminiModel(id: string): number {
   const n = id.toLowerCase()
-  if (n === 'gemini-flash-latest') return 0
-  if (n === 'gemini-flash-lite-latest') return 1
+  if (n === 'gemini-flash-lite-latest') return 0
+  if (n === 'gemini-flash-latest') return 1
   if (/gemini-3\.5-flash$/.test(n)) return 2
   if (/gemini-3\.1-flash-lite/.test(n)) return 3
   if (/gemini-3-flash/.test(n)) return 4
@@ -930,8 +930,9 @@ async function generateOneTier(
         lastEngine = route.engine
       }
 
-      const leftMs = Math.max(2_000, tierDeadline - Date.now())
-      if (leftMs < 500) break
+      const leftMs = tierDeadline - Date.now()
+      // Moins de 8s = appel quasi inutile (provoquait "Délai dépassé (3s)" au rattrapage)
+      if (leftMs < 8_000) break
 
       try {
         const text = await withAiRetry(() =>
@@ -981,11 +982,13 @@ async function generateOneTier(
         const msg = e instanceof Error ? e.message : String(e)
         errors.push(msg)
         console.warn(`[${route.engine}] ${route.model}:`, msg.slice(0, 200))
-        if (
-          isRateLimitError(msg) ||
-          /high demand|resource.exhausted|\b503\b/i.test(msg)
-        ) {
+        // 429 quota org/clé → abandonner tout le provider
+        if (isRateLimitError(msg) && !/high demand/i.test(msg)) {
           saturatedEngines.add(route.engine)
+          continue
+        }
+        // 503 / high demand = ce modèle est saturé → essayer le suivant (même IA)
+        if (/high demand|resource.exhausted|\b503\b/i.test(msg)) {
           continue
         }
         if (/\b404\b|no longer available|does not exist/i.test(msg)) {
@@ -1083,7 +1086,7 @@ export async function generateQuestions(
   message?: string
   error?: string
 }> {
-  const HARD_MS = 54_000
+  const HARD_MS = 58_000
   try {
     return await Promise.race([
       generateQuestionsInner(
@@ -1209,12 +1212,13 @@ async function generateQuestionsInner(
       questions: mock,
       source: 'mock',
       message:
-        'Aucune clé API free — questions mock. Ajoute GROQ_API_KEY, GEMINI_API_KEY ou OPENROUTER_API_KEY.',
+        'Aucune clé API free — questions mock. Ajoute GROQ_API_KEY ou GEMINI_API_KEY.',
     }
   }
 
-  // Garde une marge raisonnable avant le timeout global (54s) pour finir proprement
-  // avec un fallback jouable au lieu d'un échec "Génération trop longue".
+  // Garde une marge avant le timeout global + réserve pour un vrai rattrapage.
+  const TOPUP_RESERVE_MS = 16_000
+  const TOPUP_MIN_MS = 12_000
   const deadline = startedAt + hardMs - 4_000
   const collected: GeneratedQuestion[] = []
   const seen = new Set<string>()
@@ -1282,38 +1286,68 @@ async function generateQuestionsInner(
     return { ok: collected.length > 0 }
   }
 
-  // Appel principal: un lot de 10.
-  const left = Math.max(3_000, deadline - Date.now())
+  // Appel principal: réserve du temps pour un rattrapage utile (≥12s).
+  const leftForMain = Math.max(
+    8_000,
+    deadline - Date.now() - TOPUP_RESERVE_MS,
+  )
   await report(0, reportedEngine, 'Génération en cours')
-  const single = await runBatch(TARGET, Math.min(30_000, left), prePickedSlot)
+  const single = await runBatch(
+    TARGET,
+    Math.min(30_000, leftForMain),
+    prePickedSlot,
+  )
   if (single.themeInvalid && lastError) {
     return { questions: [], source: 'mock', error: lastError }
   }
 
   await report(collected.length, reportedEngine, 'Validation des questions')
 
-  // Rattrapage unique: si le lot principal est incomplet, faire un seul appel
-  // complémentaire pour demander exactement le nombre manquant.
+  // Rattrapage unique: seulement s'il reste assez de temps pour un vrai appel IA.
   if (collected.length < TARGET) {
     const missing = TARGET - collected.length
     const leftAfterMain = Math.max(0, deadline - Date.now())
-    if (missing > 0 && leftAfterMain >= 3_000) {
-      await report(collected.length, reportedEngine, `Rattrapage IA (${missing} manquantes)`)
-      const topUp = await runBatch(missing, Math.min(14_000, leftAfterMain), undefined, 'topup')
+    if (missing > 0 && leftAfterMain >= TOPUP_MIN_MS) {
+      await report(
+        collected.length,
+        reportedEngine,
+        `Rattrapage IA (${missing} manquantes)`,
+      )
+      const topUpErrorBefore = lastError
+      const topUp = await runBatch(
+        missing,
+        Math.min(TOPUP_RESERVE_MS, leftAfterMain),
+        undefined,
+        'topup',
+      )
       if (topUp.themeInvalid && lastError) {
         return { questions: [], source: 'mock', error: lastError }
       }
+      // Timeout rattrapage : ne pas masquer le vrai problème (lot incomplet)
+      if (
+        collected.length < TARGET &&
+        lastError &&
+        /délai dépassé/i.test(lastError)
+      ) {
+        lastError = topUpErrorBefore
+      }
       await report(collected.length, reportedEngine, 'Validation finale')
+    } else if (missing > 0) {
+      console.warn(
+        `[topup] ignoré — budget restant insuffisant (${leftAfterMain}ms < ${TOPUP_MIN_MS}ms)`,
+      )
     }
   }
 
   if (collected.length < TARGET) {
+    const timeoutLike = lastError && /délai dépassé/i.test(lastError)
     return {
       questions: [],
       source: 'mock',
-      error: lastError
-        ? `Génération impossible (${lastError.slice(0, 160)}). Réessaie.`
-        : `Pas assez de questions valides (${collected.length}/${TARGET}). Réessaie.`,
+      error:
+        !lastError || timeoutLike
+          ? `Pas assez de questions valides (${collected.length}/${TARGET}). Réessaie.`
+          : `Génération impossible (${lastError.slice(0, 160)}). Réessaie.`,
     }
   }
 
@@ -1472,8 +1506,8 @@ async function callGemini(
   const key = apiKey.trim()
   const maxTokens = questionCount <= 2 ? 1400 : questionCount <= 3 ? 1400 : questionCount <= 5 ? 2000 : 2800
   const timeoutMs = Math.max(
-    2_000,
-    Math.min(11_000, timeoutBudgetMs),
+    8_000,
+    Math.min(14_000, timeoutBudgetMs),
   )
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
   const res = await fetchWithTimeout(

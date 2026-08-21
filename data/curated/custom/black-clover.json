@@ -1,0 +1,52 @@
+{
+  "placementKind": "custom",
+  "theme": "Black Clover",
+  "customKey": "black-clover",
+  "groupKey": "custom/black-clover",
+  "questions": [
+    {
+      "id": "cur-mt1w4l2c-w0j7hs",
+      "at": 1787252725668,
+      "difficulty": "easy",
+      "question": "Combien de feuilles comporte le grimoire d’Asta ?",
+      "answers": [
+        "Une",
+        "Cinq",
+        "Trois",
+        "Quatre"
+      ],
+      "correctIndex": 1,
+      "correctAnswer": "Cinq",
+      "explanation": "Le grimoire d’Asta possède cinq feuilles, un symbole rare qui indique son potentiel exceptionnel.",
+      "sourceType": "Wikipédia",
+      "liked": true,
+      "verifiedOk": true,
+      "sourcesConfirmed": 2,
+      "verdict": "ok",
+      "rawTheme": "Black Clover",
+      "mode": "multi"
+    },
+    {
+      "id": "cur-mt1w3pcw-wb9ra4",
+      "at": 1787252684576,
+      "difficulty": "medium",
+      "question": "Quel personnage occupe le poste de 'Roi-Mage' au début de l'histoire de Black Clover ?",
+      "answers": [
+        "Damnatio Kira",
+        "Marx Francois",
+        "Augustus Kira Clover XIII",
+        "Julius Novachrono"
+      ],
+      "correctIndex": 3,
+      "correctAnswer": "Julius Novachrono",
+      "explanation": "Julius Novachrono est le 28ème Roi-Mage du royaume de Clover au début de la série. Il est admiré pour sa bienveillance et sa curiosité insatiable envers les magies rares.",
+      "sourceType": "Biographie officielle des personnages de Black Clover",
+      "liked": true,
+      "verifiedOk": true,
+      "sourcesConfirmed": 2,
+      "verdict": "ok",
+      "rawTheme": "Black Clover",
+      "mode": "solo"
+    }
+  ]
+}

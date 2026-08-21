@@ -15,6 +15,7 @@ import {
   getGenerationEstimateSec,
   recordGenerationMs,
 } from '../server/genStats.js'
+import { logError } from '../server/errorLog.js'
 
 export const config = {
   maxDuration: 60,
@@ -114,21 +115,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (result.error) {
       if (progressId) await clearGenProgress(progressId)
+      const publicError = isGatewayTimeoutMessage(result.error)
+        ? 'Le serveur a mis trop de temps à répondre, réessaie dans quelques secondes'
+        : result.error
+      logError({
+        scope: 'generate',
+        message: publicError,
+        detail: result.error !== publicError ? result.error : undefined,
+        status: isGatewayTimeoutMessage(result.error) ? 504 : 422,
+        theme: typeof theme === 'string' ? theme.trim() : undefined,
+        path: '/api/generate-questions',
+      })
       if (isGatewayTimeoutMessage(result.error)) {
-        return res.status(504).json({
-          error:
-            'Le serveur a mis trop de temps à répondre, réessaie dans quelques secondes',
-        })
+        return res.status(504).json({ error: publicError })
       }
       return res.status(422).json({ error: result.error })
     }
 
     if (!Array.isArray(result.questions) || result.questions.length !== 10) {
       if (progressId) await clearGenProgress(progressId)
-      return res.status(422).json({
-        error:
-          'JSON invalide : le lot ne contient pas exactement 10 questions. Réessaie.',
+      const msg =
+        'JSON invalide : le lot ne contient pas exactement 10 questions. Réessaie.'
+      logError({
+        scope: 'generate',
+        message: msg,
+        status: 422,
+        theme: typeof theme === 'string' ? theme.trim() : undefined,
+        path: '/api/generate-questions',
       })
+      return res.status(422).json({ error: msg })
     }
 
     if (progressId) await setGenProgress(progressId, 10, 10, result.source, 'Terminé')
@@ -147,11 +162,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Erreur serveur'
     console.error('[generate-questions]', message)
+    const publicError = isGatewayTimeoutMessage(message)
+      ? 'Le serveur a mis trop de temps à répondre, réessaie dans quelques secondes'
+      : message
+    logError({
+      scope: 'generate',
+      message: publicError,
+      detail: message !== publicError ? message : undefined,
+      status: isGatewayTimeoutMessage(message) ? 504 : 500,
+      path: '/api/generate-questions',
+    })
     if (isGatewayTimeoutMessage(message)) {
-      return res.status(504).json({
-        error:
-          'Le serveur a mis trop de temps à répondre, réessaie dans quelques secondes',
-      })
+      return res.status(504).json({ error: publicError })
     }
     return res.status(500).json({ error: message })
   }

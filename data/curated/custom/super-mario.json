@@ -1,0 +1,30 @@
+{
+  "placementKind": "custom",
+  "theme": "Super Mario",
+  "customKey": "super-mario",
+  "groupKey": "custom/super-mario",
+  "questions": [
+    {
+      "id": "cur-mt1w3put-wztun1",
+      "at": 1787252685221,
+      "difficulty": "hard",
+      "question": "Quel objet, introduit dans 'Super Mario World', permet à Mario de voler pendant une durée limitée en battant des ailes ?",
+      "answers": [
+        "Aile P",
+        "Plume",
+        "Cape",
+        "Feuille Tanooki"
+      ],
+      "correctIndex": 1,
+      "correctAnswer": "Plume",
+      "explanation": "La plume est l'objet emblématique de Super Mario World qui donne à Mario une cape lui permettant de planer et de voler.",
+      "sourceType": "Encyclopédie Super Mario Bros. Encyclopedia",
+      "liked": true,
+      "verifiedOk": true,
+      "sourcesConfirmed": 2,
+      "verdict": "ok",
+      "rawTheme": "Super Mario",
+      "mode": "solo"
+    }
+  ]
+}

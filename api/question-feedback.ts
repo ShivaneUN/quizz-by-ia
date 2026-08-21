@@ -59,13 +59,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const limit = Number(req.query.limit ?? 2000)
       const kind = String(req.query.kind ?? 'all')
       let events = await listQuestionFeedback(limit)
-      if (kind === 'up' || kind === 'down' || kind === 'verify') {
+      if (kind === 'up' || kind === 'down' || kind === 'verify' || kind === 'review') {
         events = events.filter((e) => e.kind === kind)
       }
       const format = String(req.query.format ?? 'json')
       if (format === 'csv') {
         const lines = [
-          'at,kind,theme,difficulty,mode,questionId,question,answer0,answer1,answer2,answer3,correctIndex,correctAnswer,playerCorrect,selectedIndex,explanation,sourceType',
+          'at,kind,theme,difficulty,mode,questionId,question,answer0,answer1,answer2,answer3,correctIndex,correctAnswer,playerCorrect,selectedIndex,explanation,sourceType,verdict,answerVerdict,sourceVerdict,sourcesConfirmed,confirmingSources,verifyProvider,verifyTitle,verifyNote',
           ...events.map((e) =>
             [
               e.at,
@@ -85,6 +85,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               e.selectedIndex ?? '',
               JSON.stringify(e.explanation ?? ''),
               JSON.stringify(e.sourceType ?? ''),
+              e.verdict ?? '',
+              e.answerVerdict ?? '',
+              e.sourceVerdict ?? '',
+              e.sourcesConfirmed ?? '',
+              JSON.stringify(e.confirmingSources ?? ''),
+              JSON.stringify(e.verifyProvider ?? ''),
+              JSON.stringify(e.verifyTitle ?? ''),
+              JSON.stringify(e.verifyNote ?? ''),
             ].join(','),
           ),
         ]

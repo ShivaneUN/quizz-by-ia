@@ -1,0 +1,30 @@
+{
+  "placementKind": "custom",
+  "theme": "Solo Leveling",
+  "customKey": "solo-leveling",
+  "groupKey": "custom/solo-leveling",
+  "questions": [
+    {
+      "id": "cur-mt1w3plv-s46d8u",
+      "at": 1787252684899,
+      "difficulty": "hard",
+      "question": "Parmi ces personnages, lequel est le Monarque de la Destruction ?",
+      "answers": [
+        "Querehsha",
+        "Antares",
+        "Yogumunt",
+        "Iron Body Monarch"
+      ],
+      "correctIndex": 1,
+      "correctAnswer": "Antares",
+      "explanation": "Antares est le plus puissant des monarques, dirigeant l'armée des dragons et portant le titre de Monarque de la Destruction.",
+      "sourceType": "Encyclopédie spécialisée sur Solo Leveling",
+      "liked": true,
+      "verifiedOk": true,
+      "sourcesConfirmed": 2,
+      "verdict": "ok",
+      "rawTheme": "Solo Leveling",
+      "mode": "solo"
+    }
+  ]
+}

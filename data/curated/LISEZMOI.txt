@@ -1,0 +1,12 @@
+Banque curatée — fichiers = source unique (plus Redis)
+
+catalog/<theme>/<sous-theme>.json  → thèmes du jeu
+custom/<nom>.json                 → thèmes libres (Dofus, etc.)
+
+Chaque fichier :
+  { "theme": "...", "subTheme": "...", "questions": [ ... ] }
+
+Pour ajouter : copie un objet dans "questions"
+(question, answers[4], correctIndex 0-3, correctAnswer, difficulty).
+
+Les doublons (même question + réponse + difficulté) sont ignorés à l’import.

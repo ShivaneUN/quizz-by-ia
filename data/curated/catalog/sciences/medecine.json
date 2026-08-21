@@ -1,0 +1,75 @@
+{
+  "placementKind": "catalog",
+  "themeId": "sciences",
+  "theme": "Sciences",
+  "subTheme": "Médecine",
+  "groupKey": "catalog/sciences/medecine",
+  "questions": [
+    {
+      "id": "cur-mt1w3odn-ln0wrn",
+      "at": 1787252683307,
+      "difficulty": "hard",
+      "question": "Quel médicament a été le premier à être approuvé par la FDA en 2019 pour le traitement de la drépanocytose chez les adultes ?",
+      "answers": [
+        "Hydroxyurée",
+        "Crizanlizumab",
+        "L‑glutamine",
+        "Voxelotor"
+      ],
+      "correctIndex": 3,
+      "correctAnswer": "Voxelotor",
+      "explanation": "Voxelotor (commercialisé sous le nom Oxbryta) augmente l’affinité de l’hémoglobine pour l’oxygène, limitant la polymérisation de l’hémoglobine S ; il a reçu l’autorisation de la FDA en novembre 2019 pour les patients adultes atteints de drépanocytose.",
+      "sourceType": "Food and Drug Administration (FDA)",
+      "liked": true,
+      "verifiedOk": true,
+      "sourcesConfirmed": 2,
+      "verdict": "ok",
+      "rawTheme": "Sciences — Médecine",
+      "mode": "solo"
+    },
+    {
+      "id": "cur-mt1w3o55-q4yi3t",
+      "at": 1787252683001,
+      "difficulty": "hard",
+      "question": "Quel est le nom de la maladie génétique qui affecte la production d'hémoglobine?",
+      "answers": [
+        "Thalassémie",
+        "Drépanocytose",
+        "Anémie falciforme",
+        "Leucémie"
+      ],
+      "correctIndex": 0,
+      "correctAnswer": "Thalassémie",
+      "explanation": "La thalassémie est une maladie génétique qui affecte la production d'hémoglobine.",
+      "sourceType": "Organisation mondiale de la santé",
+      "liked": true,
+      "verifiedOk": true,
+      "sourcesConfirmed": 2,
+      "verdict": "ok",
+      "rawTheme": "Sciences — Médecine",
+      "mode": "solo"
+    },
+    {
+      "id": "cur-mt1w3nw3-3nm2ta",
+      "at": 1787252682675,
+      "difficulty": "hard",
+      "question": "Quel est le nom de la maladie infectieuse causée par le virus de l'immunodéficience humaine?",
+      "answers": [
+        "Hépatite",
+        "SIDA",
+        "Tuberculose",
+        "VIH"
+      ],
+      "correctIndex": 1,
+      "correctAnswer": "SIDA",
+      "explanation": "Le SIDA est une maladie infectieuse causée par le virus de l'immunodéficience humaine.",
+      "sourceType": "Organisation mondiale de la santé",
+      "liked": true,
+      "verifiedOk": true,
+      "sourcesConfirmed": 2,
+      "verdict": "ok",
+      "rawTheme": "Sciences — Médecine",
+      "mode": "solo"
+    }
+  ]
+}

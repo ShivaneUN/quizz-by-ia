@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type FormEvent } from 'react'
+import { useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import {
   ORBIT_THEMES,
   SUBTHEMES,
@@ -34,7 +34,7 @@ export interface ThemeStartOptions {
 }
 
 const AI_OPTIONS: { id: AiProvider; label: string; hint: string }[] = [
-  { id: 'auto', label: 'Auto', hint: 'Rotation Groq / Gemini / OpenRouter' },
+  { id: 'auto', label: 'Auto', hint: 'Rotation Gemini / Groq' },
   { id: 'groq', label: 'Groq', hint: 'Free rapide' },
   { id: 'gemini', label: 'Gemini', hint: 'Free Google' },
 ]
@@ -59,6 +59,8 @@ interface ThemeSelectProps {
   soloLocked?: boolean
   soloLockHint?: string
   onReturnToRoom?: () => void
+  /** Barre nav icônes sous le titre (accueil) */
+  topDock?: ReactNode
 }
 
 export function ThemeSelect({
@@ -72,6 +74,7 @@ export function ThemeSelect({
   soloLocked = false,
   soloLockHint,
   onReturnToRoom,
+  topDock,
 }: ThemeSelectProps) {
   const [themeId, setThemeId] = useState<string | null>(null)
   const [subtheme, setSubtheme] = useState('Général')
@@ -261,8 +264,22 @@ export function ThemeSelect({
               onClick={() => setScope(s)}
               disabled={busy}
               aria-pressed={scope === s}
+              aria-label={QUIZ_SCOPE_LABELS[s]}
+              title={QUIZ_SCOPE_LABELS[s]}
             >
-              {QUIZ_SCOPE_LABELS[s]}
+              {s === 'fr' ? (
+                <span className="scope-chip__flag scope-chip__flag--fr" aria-hidden>
+                  <svg viewBox="0 0 9 6" width="18" height="12">
+                    <rect width="3" height="6" fill="#002395" />
+                    <rect x="3" width="3" height="6" fill="#fff" />
+                    <rect x="6" width="3" height="6" fill="#ED2939" />
+                  </svg>
+                </span>
+              ) : (
+                <span className="scope-chip__flag" aria-hidden>
+                  🌍
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -304,6 +321,7 @@ export function ThemeSelect({
                 onClick={() => setDifficulty(d)}
                 disabled={busy}
                 aria-pressed={difficulty === d}
+                title={DIFFICULTY_LABELS[d]}
               >
                 {DIFFICULTY_LABELS[d]}
               </button>
@@ -312,43 +330,64 @@ export function ThemeSelect({
         </fieldset>
       )}
 
-      {!isDeezer && (
-        <fieldset className="scope-field">
-          <legend className="scope-field__label">
-            Intelligence artificielle
-          </legend>
-          <div className="scope-field__toggle" role="group" aria-label="IA">
-            {AI_OPTIONS.map((opt) => (
-              <button
-                key={opt.id}
-                type="button"
-                className={`scope-chip${aiProvider === opt.id ? ' is-selected' : ''}`}
-                onClick={() => setAiProvider(opt.id)}
-                disabled={busy}
-                aria-pressed={aiProvider === opt.id}
-                title={opt.hint}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </fieldset>
-      )}
-
-      <button
-        type="button"
-        className={`chrono-switch${timerEnabled ? ' is-on' : ''}`}
-        role="switch"
-        aria-checked={timerEnabled}
-        disabled={busy}
-        onClick={() => setTimerEnabled((v) => !v)}
-      >
-        <span className="chrono-switch__label">Chrono 10 s</span>
-        <span className="chrono-switch__track" aria-hidden>
-          <span className="chrono-switch__thumb" />
-        </span>
-      </button>
+      <div className="game-home__ia-chrono">
+        {!isDeezer && (
+          <fieldset className="scope-field">
+            <legend className="scope-field__label">IA</legend>
+            <div className="scope-field__toggle" role="group" aria-label="IA">
+              {AI_OPTIONS.map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  className={`scope-chip${aiProvider === opt.id ? ' is-selected' : ''}`}
+                  onClick={() => setAiProvider(opt.id)}
+                  disabled={busy}
+                  aria-pressed={aiProvider === opt.id}
+                  title={opt.hint}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+        )}
+        <button
+          type="button"
+          className={`chrono-switch${timerEnabled ? ' is-on' : ''}`}
+          role="switch"
+          aria-checked={timerEnabled}
+          disabled={busy}
+          onClick={() => setTimerEnabled((v) => !v)}
+        >
+          <span className="chrono-switch__label">Chrono</span>
+          <span className="chrono-switch__track" aria-hidden>
+            <span className="chrono-switch__thumb" />
+          </span>
+        </button>
+      </div>
     </div>
+  )
+
+  const customThemeField = (
+    <label className="custom-theme custom-theme--center">
+      <span className="custom-theme__label visually-hidden">
+        Écrire ton propre thème
+      </span>
+      <input
+        value={customTheme}
+        onChange={(e) => {
+          setCustomTheme(e.target.value)
+          if (e.target.value.trim()) {
+            setThemeId(null)
+            setSubtheme('Général')
+          }
+        }}
+        placeholder="Ex. Musique — K-pop…"
+        maxLength={80}
+        enterKeyHint="go"
+        disabled={busy}
+      />
+    </label>
   )
 
   function orbitCenter() {
@@ -356,6 +395,7 @@ export function ThemeSelect({
       <div className="game-home__center">
         {brandBlock}
         {settingsFields}
+        {customThemeField}
         {playButton}
       </div>
     )
@@ -489,8 +529,95 @@ export function ThemeSelect({
           </div>
         ) : (
           <>
-            <div className="game-home__mobile-top">{orbitCenter()}</div>
+            <div className="game-home__mobile-brand">{brandBlock}</div>
 
+            {topDock ? (
+              <div className="game-home__top-dock">{topDock}</div>
+            ) : null}
+
+            {/* Mobile : réglages + thèmes côte à côte */}
+            <div className="game-home__board">
+              <aside className="game-home__settings-panel" aria-label="Réglages">
+                <p className="game-home__panel-title">Réglages</p>
+                {settingsFields}
+              </aside>
+
+              <div className="game-home__themes-panel">
+                <p className="game-home__panel-title">Thèmes</p>
+                <label className="custom-theme custom-theme--in-panel">
+                  <span className="custom-theme__label visually-hidden">
+                    Écrire ton propre thème
+                  </span>
+                  <input
+                    value={customTheme}
+                    onChange={(e) => {
+                      setCustomTheme(e.target.value)
+                      if (e.target.value.trim()) {
+                        setThemeId(null)
+                        setSubtheme('Général')
+                      }
+                    }}
+                    placeholder="Ex. Musique — K-pop…"
+                    maxLength={80}
+                    enterKeyHint="go"
+                  />
+                </label>
+                <div className="game-home__themes-scroll">
+                  <div
+                    className="game-home__themes game-home__themes--board"
+                    role="group"
+                    aria-label="Thèmes"
+                  >
+                    {ORBIT_THEMES.map((t: ThemeTile) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        className={`theme-bubble${themeId === t.id && !customTheme ? ' is-selected' : ''}`}
+                        style={
+                          {
+                            '--angle': `${t.angle}deg`,
+                            '--bubble-color': t.color,
+                          } as CSSProperties
+                        }
+                        onClick={() => selectTheme(t)}
+                        disabled={busy}
+                        aria-pressed={themeId === t.id && !customTheme}
+                      >
+                        <span className="theme-bubble__icon">
+                          <ThemeIcon id={t.id} />
+                        </span>
+                        <span className="theme-bubble__label">{t.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {parent && !customTheme.trim() && (
+                  <fieldset className="subthemes subthemes--in-panel">
+                    <legend className="subthemes__title">
+                      Sous-thèmes — {parent.label}
+                    </legend>
+                    <div className="subthemes__grid" role="group">
+                      {subs.map((s) => (
+                        <button
+                          key={s}
+                          type="button"
+                          className={`subtheme-chip${subtheme === s ? ' is-selected' : ''}`}
+                          onClick={() => setSubtheme(s)}
+                          disabled={busy}
+                          aria-pressed={subtheme === s}
+                        >
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  </fieldset>
+                )}
+              </div>
+            </div>
+
+            <div className="game-home__mobile-play">{playButton}</div>
+
+            {/* Desktop : orbite */}
             <div className="game-home__stage">
               <div className="game-home__orbit-ring" aria-hidden />
 
@@ -501,7 +628,7 @@ export function ThemeSelect({
               >
                 {ORBIT_THEMES.map((t: ThemeTile) => (
                   <button
-                    key={t.id}
+                    key={`desk-${t.id}`}
                     type="button"
                     className={`theme-bubble${themeId === t.id && !customTheme ? ' is-selected' : ''}`}
                     style={
@@ -527,49 +654,32 @@ export function ThemeSelect({
               </div>
             </div>
 
-            {parent && !customTheme.trim() && (
-              <fieldset className="subthemes">
-                <legend className="subthemes__title">
-                  Sous-thèmes — {parent.label}
-                </legend>
-                <div className="subthemes__grid" role="group">
-                  {subs.map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      className={`subtheme-chip${subtheme === s ? ' is-selected' : ''}`}
-                      onClick={() => setSubtheme(s)}
-                      disabled={busy}
-                      aria-pressed={subtheme === s}
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
-                <p className="subthemes__chosen">
-                  Thème choisi : <strong>{activeLabel}</strong>
-                </p>
-              </fieldset>
-            )}
-
-            <label className="custom-theme">
-              <span className="custom-theme__label">
-                Ou écris ton propre thème
-              </span>
-              <input
-                value={customTheme}
-                onChange={(e) => {
-                  setCustomTheme(e.target.value)
-                  if (e.target.value.trim()) {
-                    setThemeId(null)
-                    setSubtheme('Général')
-                  }
-                }}
-                placeholder="Ex. Musique — K-pop…"
-                maxLength={80}
-                enterKeyHint="go"
-              />
-            </label>
+            <div className="game-home__desktop-extras">
+              {parent && !customTheme.trim() && (
+                <fieldset className="subthemes">
+                  <legend className="subthemes__title">
+                    Sous-thèmes — {parent.label}
+                  </legend>
+                  <div className="subthemes__grid" role="group">
+                    {subs.map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        className={`subtheme-chip${subtheme === s ? ' is-selected' : ''}`}
+                        onClick={() => setSubtheme(s)}
+                        disabled={busy}
+                        aria-pressed={subtheme === s}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="subthemes__chosen">
+                    Thème choisi : <strong>{activeLabel}</strong>
+                  </p>
+                </fieldset>
+              )}
+            </div>
           </>
         )}
 

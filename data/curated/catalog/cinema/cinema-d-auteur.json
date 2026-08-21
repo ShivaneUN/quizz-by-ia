@@ -1,0 +1,8 @@
+{
+  "placementKind": "catalog",
+  "themeId": "cinema",
+  "theme": "Cinéma",
+  "subTheme": "Cinéma d’auteur",
+  "groupKey": "catalog/cinema/cinema-d-auteur",
+  "questions": []
+}

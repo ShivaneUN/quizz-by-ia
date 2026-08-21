@@ -1,4 +1,141 @@
-.home-side-nav {
+/* Barre icônes accueil (Réglages · Mini-jeux · Cache · Chat · Multi) */
+
+.home-dock {
+  width: min(22rem, 100%);
+  margin: 0.15rem auto 0.35rem;
+  display: grid;
+  gap: 0.35rem;
+  justify-items: center;
+}
+
+.home-dock__bar {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 0.15rem;
+  width: 100%;
+  padding: 0.45rem 0.55rem 0.4rem;
+  border-radius: 16px;
+  border: 1.5px solid color-mix(in srgb, #4db8ff 28%, transparent);
+  background: color-mix(in srgb, #0a1835 94%, transparent);
+  box-shadow: 0 8px 22px color-mix(in srgb, #000 32%, transparent);
+  box-sizing: border-box;
+}
+
+.home-dock__item {
+  flex: 1;
+  display: grid;
+  justify-items: center;
+  gap: 0.22rem;
+  margin: 0;
+  padding: 0.15rem 0.1rem;
+  border: none;
+  background: transparent;
+  color: #9bb4d0;
+  cursor: pointer;
+  font: inherit;
+  min-width: 0;
+}
+
+.home-dock__icon {
+  display: grid;
+  place-items: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, #4db8ff 28%, transparent);
+  background: color-mix(in srgb, #061228 80%, transparent);
+  color: #c5d4ea;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.home-dock__label {
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.1;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.home-dock__item:hover .home-dock__icon,
+.home-dock__item:focus-visible .home-dock__icon {
+  border-color: color-mix(in srgb, #f0c14b 55%, transparent);
+  color: #fff;
+}
+
+.home-dock__item.is-on .home-dock__icon,
+.home-dock__item[aria-pressed='true'] .home-dock__icon {
+  background: linear-gradient(180deg, #ffe08a 0%, #f0c14b 100%);
+  border-color: #f0c14b;
+  color: #1a1200;
+  box-shadow: 0 0 14px color-mix(in srgb, #f0c14b 45%, transparent);
+}
+
+.home-dock__item.is-on .home-dock__label {
+  color: #f0c14b;
+}
+
+.home-dock__item--danger {
+  color: #ff7a7a;
+}
+
+.home-dock__item--danger .home-dock__icon {
+  color: #ff6b6b;
+  border-color: color-mix(in srgb, #ff4d4d 45%, transparent);
+}
+
+.home-dock__item--danger .home-dock__label {
+  color: #ff6b6b;
+}
+
+.home-dock__item--danger:hover .home-dock__icon,
+.home-dock__item--danger:focus-visible .home-dock__icon {
+  border-color: #ff4d4d;
+  color: #ff8a8a;
+}
+
+.home-dock__item:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.home-dock__room {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: #ffb08a;
+}
+
+.home-dock__room button {
+  border: 1.5px solid color-mix(in srgb, #ff7a45 55%, transparent);
+  background: #0a1835;
+  color: #fff;
+  font: inherit;
+  font-size: 0.62rem;
+  font-weight: 800;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.home-dock__msg {
+  margin: 0;
+  font-size: 0.58rem;
+  font-weight: 600;
+  color: var(--ink-muted, #9bb4d0);
+  text-align: center;
+  max-width: 100%;
+}
+
+/* Ancien mode latéral (si réutilisé) */
+.home-side-nav--side {
   position: fixed;
   top: max(0.75rem, env(safe-area-inset-top));
   right: max(0.75rem, env(safe-area-inset-right));
@@ -7,31 +144,6 @@
   gap: 0.45rem;
   justify-items: stretch;
   width: min(9.5rem, 42vw);
-  pointer-events: none;
-}
-
-.home-side-nav > * {
-  pointer-events: auto;
-}
-
-.home-side-nav__room {
-  display: grid;
-  gap: 0.3rem;
-  padding: 0.45rem 0.5rem;
-  border-radius: 12px;
-  background: color-mix(in srgb, #0a1835 92%, transparent);
-  border: 1.5px solid color-mix(in srgb, #ff7a45 50%, transparent);
-  margin-bottom: 0.15rem;
-}
-
-.home-side-nav__room-code {
-  margin: 0;
-  font-size: 0.68rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #ffb08a;
-  text-align: center;
 }
 
 .home-side-nav__btn {
@@ -41,96 +153,69 @@
   font: inherit;
   font-weight: 800;
   font-size: 0.78rem;
-  letter-spacing: 0.03em;
   padding: 0.55rem 0.65rem;
   border-radius: 999px;
   cursor: pointer;
-  box-shadow: 0 6px 18px color-mix(in srgb, #000 35%, transparent);
-}
-
-.home-side-nav__btn:hover {
-  border-color: #f0c14b;
-  background: color-mix(in srgb, #f0c14b 14%, #0a1835);
-}
-
-.home-side-nav__btn--room {
-  border-color: color-mix(in srgb, #ff7a45 55%, transparent);
-  font-size: 0.7rem;
-  padding: 0.4rem 0.5rem;
-}
-
-.home-side-nav__btn--room:hover {
-  border-color: #ff7a45;
-  background: color-mix(in srgb, #ff7a45 16%, #0a1835);
 }
 
 .home-side-nav__btn--cache {
   border-color: color-mix(in srgb, #4db8ff 40%, transparent);
   color: var(--ink-muted, #9bb4d0);
   font-size: 0.7rem;
-  font-weight: 700;
-  padding: 0.45rem 0.55rem;
-  opacity: 0.92;
 }
 
-.home-side-nav__btn--cache:hover:not(:disabled) {
-  border-color: #4db8ff;
-  color: #fff;
-  opacity: 1;
+.home-side-nav__btn--room {
+  border-color: color-mix(in srgb, #ff7a45 55%, transparent);
+  font-size: 0.7rem;
 }
 
-.home-side-nav__btn--cache:disabled {
-  opacity: 0.5;
-  cursor: wait;
+.home-side-nav__room {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.45rem 0.5rem;
+  border-radius: 12px;
+  background: color-mix(in srgb, #0a1835 92%, transparent);
+  border: 1.5px solid color-mix(in srgb, #ff7a45 50%, transparent);
+}
+
+.home-side-nav__room-code {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: #ffb08a;
+  text-align: center;
 }
 
 .home-side-nav__cache-msg {
   margin: 0;
   font-size: 0.62rem;
-  font-weight: 600;
-  line-height: 1.3;
   color: var(--ink-muted, #9bb4d0);
   text-align: right;
-  max-width: 100%;
 }
 
-@media (max-width: 640px) {
-  .home-side-nav {
-    width: min(6.4rem, 32vw);
-    gap: 0.28rem;
-    top: max(0.5rem, env(safe-area-inset-top));
-    right: max(0.5rem, env(safe-area-inset-right));
+.game-home__settings-panel.is-nav-flash,
+.game-home__options.is-nav-flash {
+  outline: 2px solid color-mix(in srgb, #f0c14b 70%, transparent);
+  outline-offset: 2px;
+  transition: outline-color 0.3s ease;
+}
+
+@media (max-width: 380px) {
+  .home-dock__bar {
+    padding: 0.35rem 0.3rem 0.3rem;
   }
 
-  .home-side-nav__room {
-    padding: 0.3rem 0.35rem;
-    gap: 0.2rem;
-    border-radius: 10px;
+  .home-dock__icon {
+    width: 2.05rem;
+    height: 2.05rem;
   }
 
-  .home-side-nav__room-code {
-    font-size: 0.58rem;
+  .home-dock__icon svg {
+    width: 18px;
+    height: 18px;
   }
 
-  .home-side-nav__btn {
-    font-size: 0.62rem;
-    letter-spacing: 0.02em;
-    padding: 0.32rem 0.4rem;
-    border-width: 1.5px;
-    box-shadow: 0 3px 10px color-mix(in srgb, #000 28%, transparent);
-  }
-
-  .home-side-nav__btn--room {
-    font-size: 0.58rem;
-    padding: 0.28rem 0.35rem;
-  }
-
-  .home-side-nav__btn--cache {
-    font-size: 0.58rem;
-    padding: 0.28rem 0.35rem;
-  }
-
-  .home-side-nav__cache-msg {
-    font-size: 0.52rem;
+  .home-dock__label {
+    font-size: 0.5rem;
   }
 }

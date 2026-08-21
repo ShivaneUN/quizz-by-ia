@@ -1,0 +1,8 @@
+{
+  "placementKind": "catalog",
+  "themeId": "cinema",
+  "theme": "Cinéma",
+  "subTheme": "Acteurs & réalisateurs",
+  "groupKey": "catalog/cinema/acteurs-realisateurs",
+  "questions": []
+}

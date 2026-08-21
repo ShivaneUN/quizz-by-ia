@@ -4,10 +4,17 @@
   "framework": "vite",
   "functions": {
     "api/generate-questions.ts": {
-      "maxDuration": 60
+      "maxDuration": 60,
+      "includeFiles": "data/curated/**"
     },
     "api/room.ts": {
       "maxDuration": 60
+    },
+    "api/curated-bank.ts": {
+      "includeFiles": "data/curated/**"
+    },
+    "api/calib-stats.ts": {
+      "includeFiles": "data/curated/**"
     }
   },
   "rewrites": [

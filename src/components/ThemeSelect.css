@@ -48,6 +48,34 @@
   width: 100%;
 }
 
+.game-home__mobile-brand,
+.game-home__board,
+.game-home__mobile-play {
+  display: none;
+}
+
+.game-home__top-dock {
+  display: block;
+  width: 100%;
+  order: 0;
+}
+
+.game-home__desktop-extras {
+  display: contents;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .game-home__stage {
   --orbit-size: min(48rem, 96vw);
   --orbit-radius: min(20.5rem, 45vw);
@@ -168,18 +196,47 @@
   white-space: nowrap;
 }
 
-.game-home__center .chrono-switch {
-  width: auto;
-  min-width: 9.75rem;
-  max-width: 100%;
-  box-sizing: border-box;
-  justify-content: space-between;
-  padding: 0.22rem 0.4rem 0.22rem 0.55rem;
-  min-height: 1.85rem;
+.game-home__ia-chrono {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 0.35rem;
+  width: 100%;
+  flex-wrap: wrap;
 }
 
-.game-home__center .chrono-switch__label {
-  font-size: 0.7rem;
+.game-home__ia-chrono .scope-field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.game-home__ia-chrono .chrono-switch {
+  width: auto;
+  min-width: 0;
+  min-height: 1.7rem;
+  padding: 0.22rem 0.35rem 0.22rem 0.5rem;
+  gap: 0.35rem;
+  flex-shrink: 0;
+  align-self: flex-end;
+  margin-bottom: 0;
+}
+
+.game-home__ia-chrono .chrono-switch__label {
+  font-size: 0.65rem;
+}
+
+.game-home__ia-chrono .chrono-switch__track {
+  width: 1.85rem;
+  height: 1rem;
+}
+
+.game-home__ia-chrono .chrono-switch__thumb {
+  width: 0.78rem;
+  height: 0.78rem;
+}
+
+.game-home__ia-chrono .chrono-switch.is-on .chrono-switch__thumb {
+  transform: translate(0.78rem, -50%);
 }
 
 .game-home__center .btn-jouer {
@@ -189,6 +246,21 @@
   padding: 0.4rem 0.9rem;
   box-sizing: border-box;
   justify-self: center;
+}
+
+.game-home__center .custom-theme--center {
+  width: 100%;
+  max-width: 100%;
+  margin: 0.1rem 0 0.05rem;
+  gap: 0;
+}
+
+.game-home__center .custom-theme--center input {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.38rem 0.65rem;
+  min-height: 1.85rem;
+  text-align: center;
 }
 
 /* Deezer / hors orbite : mêmes grilles uniformes */
@@ -397,6 +469,20 @@
 .scope-chip:hover:not(:disabled):not(.is-selected) {
   color: #fff;
   background: color-mix(in srgb, #fff 8%, transparent);
+}
+
+.scope-chip__flag {
+  font-size: 1.15em;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.scope-chip__flag--fr svg {
+  display: block;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, #fff 25%, transparent);
 }
 
 .scope-chip.is-selected {
@@ -820,10 +906,17 @@
   }
 }
 
-/* Desktop texte */
 @media (min-width: 721px) {
   .game-home:not(.game-home--deezer) .game-home__form {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
     gap: 0.65rem;
+  }
+
+  .game-home__top-dock {
+    order: -1;
+    width: min(22rem, 100%);
   }
 }
 
@@ -833,7 +926,7 @@
   }
 
   .game-home__form {
-    gap: 0.85rem;
+    gap: 0.65rem;
     width: 100%;
   }
 
@@ -841,73 +934,220 @@
     display: none;
   }
 
-  .game-home__mobile-top {
+  .game-home__mobile-brand {
     display: block;
+    width: 100%;
+    text-align: center;
+  }
+
+  .game-home__mobile-brand .brand-hero {
+    margin-inline: auto;
+  }
+
+  .game-home__top-dock {
     width: min(22rem, 100%);
+    margin-inline: auto;
   }
 
-  .game-home__mobile-top .game-home__center {
-    width: 100%;
+  .game-home__board {
+    display: grid;
+    grid-template-columns: 1fr;
     gap: 0.55rem;
-    padding: 0.25rem 0;
-    background: none;
-    border: none;
-    box-shadow: none;
-  }
-
-  .game-home__desktop-center {
-    display: none;
-  }
-
-  .game-home__stage {
     width: 100%;
-    height: auto;
+    align-items: stretch;
     min-height: 0;
-    display: block;
+  }
+
+  .game-home__settings-panel,
+  .game-home__themes-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    min-height: 0;
+    height: auto;
+    padding: 0.55rem 0.65rem 0.65rem;
+    border-radius: 14px;
+    border: 1.5px solid color-mix(in srgb, #4db8ff 30%, transparent);
+    background: color-mix(in srgb, #0a1835 92%, transparent);
+    box-shadow: 0 8px 24px color-mix(in srgb, #000 35%, transparent);
+    box-sizing: border-box;
+  }
+
+  .game-home__themes-panel {
+    height: min(52vh, 24rem);
+  }
+
+  .game-home__panel-title {
+    margin: 0;
+    font-size: 0.62rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #c5d4ea;
+    text-align: center;
+    flex-shrink: 0;
+  }
+
+  .game-home__settings-panel .game-home__options {
+    flex: 0 1 auto;
+    min-height: 0;
+    overflow: visible;
+    gap: 0.4rem;
+    justify-items: stretch;
+    align-content: start;
+  }
+
+  .game-home__settings-panel .scope-field {
+    width: 100%;
+    gap: 0.12rem;
+    justify-items: stretch;
+    margin: 0;
     padding: 0;
-    animation: none;
+    border: none;
+    min-width: 0;
   }
 
-  .game-home__orbit-ring {
+  .game-home__settings-panel .scope-field__label {
+    font-size: 0.55rem;
+    letter-spacing: 0.08em;
+    text-align: left;
+  }
+
+  .game-home__settings-panel .scope-field__toggle {
+    display: flex;
+    flex-wrap: wrap;
+    width: 100%;
+    max-width: none;
+    gap: 0.25rem;
+    padding: 0.2rem;
+    border-radius: 999px;
+    box-sizing: border-box;
+    min-width: 0;
+  }
+
+  .game-home__settings-panel .scope-chip {
+    flex: 1 1 auto;
+    width: auto;
+    max-width: none;
+    min-width: 0;
+    min-height: 1.75rem;
+    font-size: 0.72rem;
+    font-weight: 800;
+    padding: 0.28rem 0.55rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.1;
+    border-radius: 999px;
+    box-sizing: border-box;
+  }
+
+  .game-home__themes-panel {
+    min-width: 0;
+  }
+
+  .custom-theme--in-panel {
+    width: 100%;
+    margin: 0;
+    flex-shrink: 0;
+  }
+
+  .custom-theme--in-panel input {
+    width: 100%;
+    font-size: 0.78rem;
+    padding: 0.45rem 0.55rem;
+    border-radius: 10px;
+  }
+
+  .game-home__themes-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .game-home__themes-scroll::-webkit-scrollbar {
     display: none;
+    width: 0;
+    height: 0;
   }
 
-  .game-home__themes {
+  .game-home__themes--board {
     position: static;
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 0.55rem 0.35rem;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.45rem 0.3rem;
     width: 100%;
     pointer-events: auto;
   }
 
-  .theme-bubble {
+  .game-home__themes--board .theme-bubble {
     position: static;
     left: auto;
     top: auto;
     width: auto;
     transform: none;
-    gap: 0.3rem;
-    min-height: 4.5rem;
+    gap: 0.25rem;
+    min-height: 3.6rem;
     touch-action: manipulation;
   }
 
-  .theme-bubble__icon {
-    width: 3.15rem;
-    height: 3.15rem;
+  .game-home__themes--board .theme-bubble__icon {
+    width: 2.55rem;
+    height: 2.55rem;
     border-width: 2px;
     margin-inline: auto;
   }
 
-  .theme-bubble__label {
-    font-size: 0.58rem;
+  .game-home__themes--board .theme-bubble__label {
+    font-size: 0.52rem;
     max-width: none;
-    line-height: 1.2;
+    line-height: 1.15;
   }
 
-  .theme-bubble:hover:not(:disabled) .theme-bubble__icon,
-  .theme-bubble.is-selected .theme-bubble__icon {
-    transform: scale(1.06);
+  .subthemes--in-panel {
+    flex-shrink: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0.4rem;
+    max-height: 5.5rem;
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+
+  .subthemes--in-panel::-webkit-scrollbar {
+    display: none;
+  }
+
+  .subthemes--in-panel .subthemes__title {
+    font-size: 0.55rem;
+  }
+
+  .subthemes--in-panel .subtheme-chip {
+    font-size: 0.65rem;
+    padding: 0.28rem 0.45rem;
+    min-height: 1.7rem;
+  }
+
+  .game-home__mobile-play {
+    display: block;
+    width: 100%;
+  }
+
+  .game-home__mobile-play .btn-jouer {
+    max-width: none;
+    width: 100%;
+    min-height: 2.85rem;
+    font-size: 1.1rem;
+    touch-action: manipulation;
+  }
+
+  .game-home__mobile-top,
+  .game-home__stage,
+  .game-home__desktop-extras {
+    display: none !important;
   }
 
   .brand-hero__title {
@@ -925,55 +1165,14 @@
     gap: 0.5rem;
   }
 
-  .scope-chip {
-    padding: 0.5rem 0.85rem;
-    font-size: 0.82rem;
-    min-height: 2.35rem;
-  }
-
-  .chrono-switch {
-    padding: 0.28rem 0.45rem 0.28rem 0.6rem;
-    width: auto;
-  }
-
-  .btn-jouer {
-    max-width: none;
-    width: 100%;
-    min-height: 3rem;
-    font-size: 1.15rem;
-    touch-action: manipulation;
-  }
-
-  .subthemes {
-    width: 100%;
-    padding: 0.75rem;
-  }
-
-  .subtheme-chip {
-    font-size: 0.8rem;
-    padding: 0.5rem 0.8rem;
-    min-height: 2.4rem;
-    touch-action: manipulation;
-  }
-
-  .custom-theme {
-    width: 100%;
-  }
-
-  .custom-theme input {
-    font-size: 1rem;
-    padding: 0.8rem 1rem;
-  }
-
   .deezer-layout {
     width: min(22rem, 100%);
   }
 }
 
 @media (max-width: 380px) {
-  .game-home__themes {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.65rem 0.3rem;
+  .game-home__themes--board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

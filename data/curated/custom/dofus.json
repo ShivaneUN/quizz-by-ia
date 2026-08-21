@@ -1,0 +1,96 @@
+{
+  "placementKind": "custom",
+  "theme": "DOFUS",
+  "customKey": "dofus",
+  "groupKey": "custom/dofus",
+  "questions": [
+    {
+      "id": "cur-mt1w4m5c-fjubah",
+      "at": 1787252727072,
+      "difficulty": "easy",
+      "question": "Comment appelle-t-on les créatures ailées et puissantes dont les œufs sont recherchés dans le jeu ?",
+      "answers": [
+        "Les Phénix",
+        "Les Wyvernes",
+        "Les Dragons",
+        "Les Griffons"
+      ],
+      "correctIndex": 2,
+      "correctAnswer": "Les Dragons",
+      "explanation": "Les Dofus sont les œufs pondus par les dragons du Monde des Douze, et leur recherche est le moteur principal de l'histoire.",
+      "sourceType": "Encyclopédie officielle du jeu",
+      "liked": true,
+      "verifiedOk": true,
+      "sourcesConfirmed": 2,
+      "verdict": "ok",
+      "rawTheme": "DOFUS",
+      "mode": "solo"
+    },
+    {
+      "id": "cur-mt1w3q3t-283u4c",
+      "at": 1787252685545,
+      "difficulty": "medium",
+      "question": "Quel est le nom du dieu protecteur de la classe des Iops, connu pour sa bravoure et son tempérament impulsif ?",
+      "answers": [
+        "Crâ",
+        "Iop",
+        "Xélor",
+        "Sram"
+      ],
+      "correctIndex": 1,
+      "correctAnswer": "Iop",
+      "explanation": "Dans le panthéon du Monde des Douze, chaque classe est associée à un dieu éponyme. Le dieu Iop est le patron des guerriers.",
+      "sourceType": "Lore officiel du Krosmoz",
+      "liked": true,
+      "verifiedOk": true,
+      "sourcesConfirmed": 2,
+      "verdict": "ok",
+      "rawTheme": "DOFUS",
+      "mode": "solo"
+    },
+    {
+      "id": "cur-mt1w3nn3-rxgge6",
+      "at": 1787252682351,
+      "difficulty": "easy",
+      "question": "Comment appelle-t-on les zones où les joueurs peuvent s'affronter en PvP ?",
+      "answers": [
+        "Donjon",
+        "Territoire",
+        "Arène",
+        "Zone d'entraînement"
+      ],
+      "correctIndex": 2,
+      "correctAnswer": "Arène",
+      "explanation": "Les Arènes sont dédiées aux combats joueur contre joueur.",
+      "sourceType": "Wikipédia – Arène (DOFUS)",
+      "liked": true,
+      "verifiedOk": true,
+      "sourcesConfirmed": 2,
+      "verdict": "ok",
+      "rawTheme": "DOFUS",
+      "mode": "solo"
+    },
+    {
+      "id": "cur-mt1w3kwz-tguzhm",
+      "at": 1787252678819,
+      "difficulty": "easy",
+      "question": "Quel est le nom de la grande cité rivale de Brâkmar, traditionnellement associée à l'ordre et à la justice ?",
+      "answers": [
+        "Frigost",
+        "Astrub",
+        "Pandala",
+        "Bonta"
+      ],
+      "correctIndex": 3,
+      "correctAnswer": "Bonta",
+      "explanation": "Bonta est la cité blanche, bastion des défenseurs de la justice et de la milice vertueuse, s'opposant historiquement à la ville sombre de Brâkmar.",
+      "sourceType": "Encyclopédie officielle Ankama",
+      "liked": true,
+      "verifiedOk": true,
+      "sourcesConfirmed": 2,
+      "verdict": "ok",
+      "rawTheme": "dofus",
+      "mode": "solo"
+    }
+  ]
+}

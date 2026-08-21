@@ -1842,6 +1842,7 @@ export default function App() {
             preferredName={preferred}
             roomCode={inRoom ? multiRoom!.code : null}
             roomChatEnabled={inRoom}
+            hideFab={screen === 'home'}
           />
         )
       })()}
@@ -1863,8 +1864,8 @@ export default function App() {
                 )}
               </p>
             )}
-            <button
-              type="button"
+        <button
+          type="button"
               className="btn-home"
               onClick={() => {
                 // Ne quitte JAMAIS la salle — solo reset + accueil
@@ -1872,7 +1873,7 @@ export default function App() {
               }}
             >
               Accueil
-            </button>
+        </button>
           </div>
         </header>
       )}
@@ -1896,22 +1897,12 @@ export default function App() {
         {screen === 'minigames' && (
           <div className="minigames-hub">
             <WaitMiniGames freePlay mode="solo" />
-          </div>
+        </div>
         )}
 
         {screen === 'home' && (
           <>
-            <AdminPanel />
-            <HomeSideNav
-              onMulti={openMultiFromHome}
-              onMinigames={() => {
-                setError(null)
-                setScreen('minigames')
-              }}
-              inRoom={Boolean(multiRoom && multiPlayerId)}
-              roomCode={multiRoom?.code}
-              onReturnToRoom={returnToActiveRoom}
-            />
+            <AdminPanel hideGear={screen === 'home'} />
             <ThemeSelect
               onStart={handleStart}
               variant="solo"
@@ -1924,6 +1915,18 @@ export default function App() {
                   : undefined
               }
               onReturnToRoom={returnToActiveRoom}
+              topDock={
+                <HomeSideNav
+                  onMulti={openMultiFromHome}
+                  onMinigames={() => {
+                    setError(null)
+                    setScreen('minigames')
+                  }}
+                  inRoom={Boolean(multiRoom && multiPlayerId)}
+                  roomCode={multiRoom?.code}
+                  onReturnToRoom={returnToActiveRoom}
+                />
+              }
             />
           </>
         )}
@@ -1975,7 +1978,7 @@ export default function App() {
             >
               Annuler la génération
             </button>
-          </div>
+        </div>
         )}
 
         {screen === 'play' && currentQuestion && (

@@ -1,0 +1,97 @@
+{
+  "placementKind": "catalog",
+  "themeId": "cinema",
+  "theme": "Cinéma",
+  "subTheme": "Séries TV",
+  "groupKey": "catalog/cinema/series-tv",
+  "questions": [
+    {
+      "id": "cur-mt1w3m4w-ss3tqi",
+      "at": 1787252680400,
+      "difficulty": "easy",
+      "question": "Dans la série 'La Casa de Papel', de quelle couleur sont les combinaisons portées par les braqueurs ?",
+      "answers": [
+        "Jaune",
+        "Rouge",
+        "Bleu",
+        "Vert"
+      ],
+      "correctIndex": 1,
+      "correctAnswer": "Rouge",
+      "explanation": "Les criminels portent des combinaisons rouges accompagnées de masques à l'effigie de Salvador Dalí.",
+      "sourceType": "Wikipédia",
+      "liked": true,
+      "verifiedOk": true,
+      "sourcesConfirmed": 2,
+      "verdict": "ok",
+      "rawTheme": "Cinéma — Séries TV",
+      "mode": "solo"
+    },
+    {
+      "id": "cur-mt1w3lvy-29bg55",
+      "at": 1787252680078,
+      "difficulty": "easy",
+      "question": "Quel objet emblématique les personnages de 'Stranger Things' utilisent-ils pour communiquer avec le monde à l'envers lors de la première saison ?",
+      "answers": [
+        "Une guirlande lumineuse",
+        "Une boule de cristal",
+        "Un miroir magique",
+        "Un talkie-walkie en or"
+      ],
+      "correctIndex": 0,
+      "correctAnswer": "Une guirlande lumineuse",
+      "explanation": "Joyce Byers utilise des lettres peintes sur son mur associées à une guirlande lumineuse de Noël pour communiquer avec son fils disparu.",
+      "sourceType": "Wikipédia",
+      "liked": true,
+      "verifiedOk": true,
+      "sourcesConfirmed": 2,
+      "verdict": "ok",
+      "rawTheme": "Cinéma — Séries TV",
+      "mode": "solo"
+    },
+    {
+      "id": "cur-mt1w3lnb-zeedcr",
+      "at": 1787252679767,
+      "difficulty": "easy",
+      "question": "Dans la série animée 'Les Simpson', quel est le prénom du bébé de la famille ?",
+      "answers": [
+        "Bart",
+        "Maggie",
+        "Lisa",
+        "Marge"
+      ],
+      "correctIndex": 1,
+      "correctAnswer": "Maggie",
+      "explanation": "Maggie est la plus jeune des enfants de la famille Simpson, toujours représentée avec sa tétine dans la bouche.",
+      "sourceType": "Wikipédia",
+      "liked": true,
+      "verifiedOk": true,
+      "sourcesConfirmed": 2,
+      "verdict": "ok",
+      "rawTheme": "Cinéma — Séries TV",
+      "mode": "solo"
+    },
+    {
+      "id": "cur-mt1w3lf4-k4lqsj",
+      "at": 1787252679472,
+      "difficulty": "easy",
+      "question": "Quel est le métier exercé en secret par Walter White, le personnage principal de 'Breaking Bad' ?",
+      "answers": [
+        "Avocat véreux",
+        "Agent secret",
+        "Fabricant de drogues",
+        "Comptable véreux"
+      ],
+      "correctIndex": 2,
+      "correctAnswer": "Fabricant de drogues",
+      "explanation": "Professeur de chimie au lycée, Walter White met ses compétences au service de la production et du trafic de méthamphétamine.",
+      "sourceType": "Wikipédia",
+      "liked": true,
+      "verifiedOk": true,
+      "sourcesConfirmed": 2,
+      "verdict": "ok",
+      "rawTheme": "Cinéma — Séries TV",
+      "mode": "solo"
+    }
+  ]
+}

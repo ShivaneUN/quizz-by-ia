@@ -1,5 +1,5 @@
 /**
- * Feedback joueur sur les questions (👍 / 👎 / à vérifier).
+ * Feedback joueur sur les questions (👍 / 👎 / vérif / à revoir).
  * Redis prod + mémoire local — indépendant du cache questions.
  */
 
@@ -7,8 +7,12 @@ import { redisCommand, redisConfigured } from './rooms.js'
 
 const REDIS_KEY = 'quizz:calib:feedback'
 const MAX_ENTRIES = 3000
+/** Évite de logger 10× la même question douteuse. */
+const REVIEW_DEDUP_MS = 7 * 24 * 60 * 60 * 1000
 
-export type FeedbackKind = 'up' | 'down' | 'verify'
+export type FeedbackKind = 'up' | 'down' | 'verify' | 'review'
+
+export type FactVerdict = 'ok' | 'douteux' | 'faux' | 'inconnu'
 
 export interface QuestionFeedbackEvent {
   at: number
@@ -26,6 +30,16 @@ export interface QuestionFeedbackEvent {
   mode?: 'solo' | 'multi'
   playerCorrect?: boolean
   selectedIndex?: number
+  /** Résultat de la vérif (surtout kind=review) */
+  verdict?: FactVerdict
+  answerVerdict?: FactVerdict
+  sourceVerdict?: FactVerdict
+  verifyProvider?: string
+  verifyTitle?: string
+  verifyNote?: string
+  /** Nb de sources confirmantes (vérif OpenRouter ≥ 2) */
+  sourcesConfirmed?: number
+  confirmingSources?: string
 }
 
 const memory: QuestionFeedbackEvent[] = []
@@ -50,11 +64,26 @@ function asAnswers(raw: unknown): [string, string, string, string] | null {
   ]
 }
 
+function asVerdict(raw: unknown): FactVerdict | undefined {
+  const v = String(raw ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+  if (v === 'ok' || v === 'vrai' || v === 'correct') return 'ok'
+  if (v === 'faux' || v === 'incorrect') return 'faux'
+  if (v === 'douteux' || v === 'incertain') return 'douteux'
+  if (v === 'inconnu' || v === 'empty' || v === 'error') return 'inconnu'
+  return undefined
+}
+
 function normalize(
   raw: Partial<QuestionFeedbackEvent>,
 ): QuestionFeedbackEvent | null {
   const kind = raw.kind
-  if (kind !== 'up' && kind !== 'down' && kind !== 'verify') return null
+  if (kind !== 'up' && kind !== 'down' && kind !== 'verify' && kind !== 'review') {
+    return null
+  }
   const question = String(raw.question ?? '').trim().slice(0, 400)
   if (question.length < 3) return null
   const answers = asAnswers(raw.answers)
@@ -90,7 +119,49 @@ function normalize(
       typeof raw.selectedIndex === 'number'
         ? Math.floor(raw.selectedIndex)
         : undefined,
+    verdict: asVerdict(raw.verdict),
+    answerVerdict: asVerdict(raw.answerVerdict),
+    sourceVerdict: asVerdict(raw.sourceVerdict),
+    verifyProvider: raw.verifyProvider
+      ? String(raw.verifyProvider).trim().slice(0, 40)
+      : undefined,
+    verifyTitle: raw.verifyTitle
+      ? String(raw.verifyTitle).trim().slice(0, 200)
+      : undefined,
+    verifyNote: raw.verifyNote
+      ? String(raw.verifyNote).trim().slice(0, 500)
+      : undefined,
+    sourcesConfirmed:
+      typeof raw.sourcesConfirmed === 'number' &&
+      Number.isFinite(raw.sourcesConfirmed)
+        ? Math.max(0, Math.min(20, Math.floor(raw.sourcesConfirmed)))
+        : undefined,
+    confirmingSources: raw.confirmingSources
+      ? String(raw.confirmingSources).trim().slice(0, 500)
+      : undefined,
   }
+}
+
+function sameQuestion(a: QuestionFeedbackEvent, b: QuestionFeedbackEvent): boolean {
+  if (a.questionId && a.questionId !== 'unknown' && a.questionId === b.questionId) {
+    return true
+  }
+  return (
+    a.question === b.question &&
+    a.correctAnswer === b.correctAnswer &&
+    (a.theme ?? '') === (b.theme ?? '')
+  )
+}
+
+async function hasRecentReview(event: QuestionFeedbackEvent): Promise<boolean> {
+  const recent = await listQuestionFeedback(400)
+  const cutoff = Date.now() - REVIEW_DEDUP_MS
+  return recent.some(
+    (e) =>
+      e.kind === 'review' &&
+      e.at >= cutoff &&
+      sameQuestion(e, event),
+  )
 }
 
 export async function recordQuestionFeedback(
@@ -98,6 +169,10 @@ export async function recordQuestionFeedback(
 ): Promise<boolean> {
   const event = normalize(input)
   if (!event) return false
+
+  if (event.kind === 'review') {
+    if (await hasRecentReview(event)) return true
+  }
 
   memory.unshift(event)
   if (memory.length > MAX_ENTRIES) memory.length = MAX_ENTRIES
@@ -149,10 +224,12 @@ export function summarizeFeedback(events: QuestionFeedbackEvent[]) {
   let up = 0
   let down = 0
   let verify = 0
+  let review = 0
   for (const e of events) {
     if (e.kind === 'up') up += 1
     else if (e.kind === 'down') down += 1
+    else if (e.kind === 'review') review += 1
     else verify += 1
   }
-  return { up, down, verify, total: events.length }
+  return { up, down, verify, review, total: events.length }
 }

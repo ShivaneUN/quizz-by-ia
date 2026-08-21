@@ -1,0 +1,31 @@
+{
+  "placementKind": "catalog",
+  "themeId": "jeuxvideo",
+  "theme": "Jeux vidéo",
+  "subTheme": "RPG",
+  "groupKey": "catalog/jeuxvideo/rpg",
+  "questions": [
+    {
+      "id": "cur-mt1w3qcs-02ao4v",
+      "at": 1787252685868,
+      "difficulty": "easy",
+      "question": "Quel est le nom du personnage principal du jeu Chrono Trigger ?",
+      "answers": [
+        "Marle",
+        "Magus",
+        "Lucca",
+        "Crono"
+      ],
+      "correctIndex": 3,
+      "correctAnswer": "Crono",
+      "explanation": "Crono est le héros muet que le joueur contrôle dès le début de Chrono Trigger, un RPG culte des années 1990.",
+      "sourceType": "Wikipédia",
+      "liked": true,
+      "verifiedOk": true,
+      "sourcesConfirmed": 2,
+      "verdict": "ok",
+      "rawTheme": "Jeux vidéo — RPG",
+      "mode": "solo"
+    }
+  ]
+}

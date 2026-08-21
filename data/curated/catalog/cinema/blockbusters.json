@@ -1,0 +1,8 @@
+{
+  "placementKind": "catalog",
+  "themeId": "cinema",
+  "theme": "Cinéma",
+  "subTheme": "Blockbusters",
+  "groupKey": "catalog/cinema/blockbusters",
+  "questions": []
+}

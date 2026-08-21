@@ -1,0 +1,30 @@
+{
+  "placementKind": "custom",
+  "theme": "Rocket League",
+  "customKey": "rocket-league",
+  "groupKey": "custom/rocket-league",
+  "questions": [
+    {
+      "id": "cur-mt1w3omp-s4h8cl",
+      "at": 1787252683633,
+      "difficulty": "hard",
+      "question": "Quel type de boost possède une capacité illimitée dans le mode d'entraînement libre (Free Play) ?",
+      "answers": [
+        "Boost turbo",
+        "Boost tactique",
+        "Boost de zone",
+        "Boost infini"
+      ],
+      "correctIndex": 3,
+      "correctAnswer": "Boost infini",
+      "explanation": "En mode entraînement libre, le joueur dispose d'un boost illimité pour s'exercer aux mécaniques sans contrainte de ramassage.",
+      "sourceType": "Manuel d'utilisation du mode entraînement",
+      "liked": true,
+      "verifiedOk": true,
+      "sourcesConfirmed": 2,
+      "verdict": "ok",
+      "rawTheme": "Rocket League",
+      "mode": "solo"
+    }
+  ]
+}

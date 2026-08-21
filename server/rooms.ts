@@ -636,6 +636,15 @@ export async function syncRoomRound(code: string): Promise<RoomState | null> {
       delete room.genQuestionsTotal
       delete room.generatingStartedAt
       await saveRoom(room)
+      void import('./errorLog.js').then((m) =>
+        m.logError({
+          scope: 'room',
+          message: room.errorMessage!,
+          theme: room.theme,
+          detail: `salle ${code}`,
+          path: 'syncRoomRound',
+        }),
+      )
       return room
     }
   }

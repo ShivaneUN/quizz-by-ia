@@ -15,6 +15,8 @@ import roomHandler from './api/room.ts'
 import genEtaHandler from './api/gen-eta.ts'
 import calibStatsHandler from './api/calib-stats.ts'
 import questionFeedbackHandler from './api/question-feedback.ts'
+import factCheckHandler from './api/fact-check.ts'
+import curatedBankHandler from './api/curated-bank.ts'
 import chatHandler from './api/chat.ts'
 import aiCapacityHandler from './api/ai-capacity.ts'
 import {
@@ -352,6 +354,109 @@ function localApiPlugin(): Plugin {
               },
             }
             await questionFeedbackHandler(fakeReq as never, fakeRes as never)
+          } catch (e) {
+            const message = e instanceof Error ? e.message : 'Erreur serveur'
+            res.statusCode = 500
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ error: message }))
+          }
+        })()
+      })
+
+      server.middlewares.use('/api/fact-check', (req, res) => {
+        void (async () => {
+          try {
+            if (req.method !== 'POST') {
+              res.statusCode = 405
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ error: 'Method not allowed' }))
+              return
+            }
+            const body = JSON.parse((await readBody(req)) || '{}')
+            const fakeReq = {
+              method: 'POST',
+              body,
+              query: {},
+              headers: req.headers,
+            }
+            const fakeRes = {
+              statusCode: 200,
+              headers: {} as Record<string, string>,
+              setHeader(k: string, v: string) {
+                this.headers[k] = v
+              },
+              status(code: number) {
+                this.statusCode = code
+                return this
+              },
+              json(payload: unknown) {
+                res.statusCode = this.statusCode
+                for (const [k, v] of Object.entries(this.headers)) {
+                  res.setHeader(k, v)
+                }
+                if (!res.getHeader('Content-Type')) {
+                  res.setHeader('Content-Type', 'application/json')
+                }
+                res.end(JSON.stringify(payload))
+                return this
+              },
+            }
+            await factCheckHandler(fakeReq as never, fakeRes as never)
+          } catch (e) {
+            const message = e instanceof Error ? e.message : 'Erreur serveur'
+            res.statusCode = 500
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ error: message }))
+          }
+        })()
+      })
+
+      server.middlewares.use('/api/curated-bank', (req, res) => {
+        void (async () => {
+          try {
+            const raw =
+              req.method === 'GET' || req.method === 'HEAD'
+                ? '{}'
+                : await readBody(req)
+            const body = JSON.parse(raw || '{}')
+            const url = new URL(req.url || '/', 'http://localhost')
+            const fakeReq = {
+              method: req.method,
+              body,
+              query: Object.fromEntries(url.searchParams.entries()),
+              headers: req.headers,
+            }
+            const fakeRes = {
+              statusCode: 200,
+              headers: {} as Record<string, string>,
+              setHeader(k: string, v: string) {
+                this.headers[k] = v
+              },
+              status(code: number) {
+                this.statusCode = code
+                return this
+              },
+              json(payload: unknown) {
+                res.statusCode = this.statusCode
+                for (const [k, v] of Object.entries(this.headers)) {
+                  res.setHeader(k, v)
+                }
+                if (!res.getHeader('Content-Type')) {
+                  res.setHeader('Content-Type', 'application/json')
+                }
+                res.end(JSON.stringify(payload))
+                return this
+              },
+              send(payload: string) {
+                res.statusCode = this.statusCode
+                for (const [k, v] of Object.entries(this.headers)) {
+                  res.setHeader(k, v)
+                }
+                res.end(payload)
+                return this
+              },
+            }
+            await curatedBankHandler(fakeReq as never, fakeRes as never)
           } catch (e) {
             const message = e instanceof Error ? e.message : 'Erreur serveur'
             res.statusCode = 500
