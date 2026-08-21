@@ -340,6 +340,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         async function finalizePlaying(pool: RoomQuestion[]): Promise<boolean> {
+          if (!room) return false
           const seen = await getSeenQuestionKeys(themeSlug)
           const selected = pickUnseenPreferring(
             pool,
