@@ -64,6 +64,9 @@ export interface GeneratedQuestion {
   deezerTrackId?: string
   /** Titre — Artiste pour l’audit (réponses QCM = titre seul) */
   revealAnswer?: string
+  answerMode?: 'qcm' | 'free'
+  acceptedAnswers?: string[]
+  freeInputHint?: 'title' | 'title_or_artist'
   /** Résumé court du fait testé (3-6 mots-clés), fourni par l'IA pour l'historique anti-doublon */
   resumeFait?: string
   /** true si la question provient du filet de sécurité statique */

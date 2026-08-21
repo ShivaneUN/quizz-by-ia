@@ -1,16 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { MultiRoom } from '../lib/multiApi'
 import { HostPlayersPanel } from './HostPlayersPanel'
 import { PlayersStreakBar } from './PlayersStreakBar'
 import { QuestionFeedback } from './QuestionFeedback'
 import { StreakFlame } from './StreakFlame'
+import { PreviewAudio } from './PreviewAudio'
 import { revealCorrectAnswer } from './AnswerAudit'
 import './MultiPlay.css'
 
 interface MultiPlayProps {
   room: MultiRoom
   playerId: string
-  onAnswer: (answerIndex: number) => void
+  onAnswer: (answer: number | string) => void
   onBegin: () => void
   onPause: () => void
   onResume: () => void
@@ -47,6 +48,8 @@ export function MultiPlay({
   const q = room.questions[room.questionIndex]
   const myAnswer = room.currentAnswers[playerId]
   const hasAnswered = myAnswer !== undefined
+  const isFree = q?.answerMode === 'free'
+  const [freeText, setFreeText] = useState('')
   const timerOn = room.timerEnabled !== false
   const waiting = room.roundPhase === 'waiting'
   const revealing = room.roundPhase === 'reveal'
@@ -82,6 +85,10 @@ export function MultiPlay({
     paused,
     room.serverNow,
   ])
+
+  useEffect(() => {
+    setFreeText('')
+  }, [room.questionIndex, q?.id])
 
   useEffect(() => {
     if (!timerRunning || paused || revealing) return
@@ -190,20 +197,14 @@ export function MultiPlay({
       <h2 className="multi-play__question">{q.question}</h2>
 
       {q.previewUrl && (
-        <figure className="multi-play__media multi-play__media--audio">
-          <audio
-            key={q.id}
-            className="multi-play__audio"
-            controls
-            preload="auto"
-            src={q.previewUrl}
-          >
-            Ton navigateur ne lit pas l’audio.
-          </audio>
-          <figcaption className="multi-play__audio-caption">
-            Extrait Deezer (~30 s)
-          </figcaption>
-        </figure>
+        <PreviewAudio
+          src={q.previewUrl}
+          questionId={q.id}
+          maxSeconds={30}
+          figureClassName="multi-play__media multi-play__media--audio"
+          audioClassName="multi-play__audio"
+          captionClassName="multi-play__audio-caption"
+        />
       )}
 
       {q.imageUrl && !q.previewUrl && (
@@ -219,49 +220,98 @@ export function MultiPlay({
         </figure>
       )}
 
-      <div className="multi-play__answers" role="group" aria-label="Réponses">
-        {q.answers.map((answer, i) => {
-          const selected = hasAnswered && myAnswer === i
-          let state = ''
-          if (revealing && typeof correctIndex === 'number') {
-            if (i === correctIndex) state = ' is-correct'
-            else if (selected) state = ' is-wrong'
-            else state = ' is-dimmed'
-          } else if (selected) {
-            state = ' is-selected'
-          }
-
-          return (
-            <button
-              key={`${q.id}-${i}`}
-              type="button"
-              className={`multi-play__answer${state}`}
+      {isFree ? (
+        <form
+          className="multi-play__free"
+          onSubmit={(e: FormEvent) => {
+            e.preventDefault()
+            if (answersLocked) return
+            const t = freeText.trim()
+            if (!t) return
+            onAnswer(t)
+          }}
+        >
+          <label className="multi-play__free-label" htmlFor={`mfree-${q.id}`}>
+            {q.freeInputHint === 'title'
+              ? 'Titre du morceau'
+              : 'Titre ou artiste'}
+          </label>
+          <div className="multi-play__free-row">
+            <input
+              id={`mfree-${q.id}`}
+              className="multi-play__free-input"
+              type="text"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder={
+                q.freeInputHint === 'title'
+                  ? 'Ex. titre du morceau'
+                  : 'Ex. titre ou nom d’artiste'
+              }
+              value={freeText}
               disabled={answersLocked}
-              onClick={() => onAnswer(i)}
+              onChange={(e) => setFreeText(e.target.value)}
+            />
+            <button
+              type="submit"
+              className="btn btn--primary"
+              disabled={answersLocked || !freeText.trim()}
             >
-              <span className="multi-play__letter" aria-hidden>
-                {String.fromCharCode(65 + i)}
-              </span>
-              <span>{answer}</span>
-              {revealing &&
-                typeof correctIndex === 'number' &&
-                i === correctIndex && (
-                  <span className="multi-play__badge multi-play__badge--ok">
-                    Correct
-                  </span>
-                )}
-              {revealing &&
-                selected &&
-                typeof correctIndex === 'number' &&
-                i !== correctIndex && (
-                  <span className="multi-play__badge multi-play__badge--ko">
-                    Faux
-                  </span>
-                )}
+              Valider
             </button>
-          )
-        })}
-      </div>
+          </div>
+          {hasAnswered && !revealing && (
+            <p className="multi-play__waiting" role="status">
+              Réponse envoyée — en attente des autres…
+            </p>
+          )}
+        </form>
+      ) : (
+        <div className="multi-play__answers" role="group" aria-label="Réponses">
+          {q.answers.map((answer, i) => {
+            const selected = hasAnswered && myAnswer === i
+            let state = ''
+            if (revealing && typeof correctIndex === 'number') {
+              if (i === correctIndex) state = ' is-correct'
+              else if (selected) state = ' is-wrong'
+              else state = ' is-dimmed'
+            } else if (selected) {
+              state = ' is-selected'
+            }
+
+            return (
+              <button
+                key={`${q.id}-${i}`}
+                type="button"
+                className={`multi-play__answer${state}`}
+                disabled={answersLocked}
+                onClick={() => onAnswer(i)}
+              >
+                <span className="multi-play__letter" aria-hidden>
+                  {String.fromCharCode(65 + i)}
+                </span>
+                <span>{answer}</span>
+                {revealing &&
+                  typeof correctIndex === 'number' &&
+                  i === correctIndex && (
+                    <span className="multi-play__badge multi-play__badge--ok">
+                      Correct
+                    </span>
+                  )}
+                {revealing &&
+                  selected &&
+                  typeof correctIndex === 'number' &&
+                  i !== correctIndex && (
+                    <span className="multi-play__badge multi-play__badge--ko">
+                      Faux
+                    </span>
+                  )}
+              </button>
+            )
+          })}
+        </div>
+      )}
 
       {needsHostStart && isHost && (
         <button

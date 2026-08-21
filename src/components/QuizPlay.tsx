@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import type { Question } from '../types'
 import { ROUND_MS } from '../types'
 import { QuestionFeedback } from './QuestionFeedback'
+import { PreviewAudio } from './PreviewAudio'
 import { revealCorrectAnswer } from './AnswerAudit'
 import './QuizPlay.css'
 
@@ -9,8 +10,9 @@ interface QuizPlayProps {
   question: Question
   index: number
   total: number
-  onAnswer: (answerIndex: number) => void
-  /** -1 = temps écoulé sans réponse */
+  /** index QCM, texte libre, ou -1 = timeout */
+  onAnswer: (answer: number | string) => void
+  /** -1 = timeout · -2 = free faux · 0–3 = QCM / free OK */
   selectedIndex: number | null
   onContinue?: () => void
   disabled?: boolean
@@ -31,18 +33,25 @@ export function QuizPlay({
   durationMs = ROUND_MS,
   theme,
 }: QuizPlayProps) {
+  const isFree = question.answerMode === 'free'
   const revealed = selectedIndex !== null
   const timedOut = selectedIndex === -1
+  const wrongFree = selectedIndex === -2
   const isCorrect =
-    revealed && !timedOut && selectedIndex === question.correctIndex
+    revealed &&
+    !timedOut &&
+    !wrongFree &&
+    selectedIndex === question.correctIndex
 
   const [startedAt, setStartedAt] = useState(() => Date.now())
   const [now, setNow] = useState(() => Date.now())
+  const [freeText, setFreeText] = useState('')
   const timedOutRef = useRef(false)
 
   useEffect(() => {
     setStartedAt(Date.now())
     setNow(Date.now())
+    setFreeText('')
     timedOutRef.current = false
   }, [question.id])
 
@@ -66,6 +75,14 @@ export function QuizPlay({
     timedOutRef.current = true
     onAnswer(-1)
   }, [timerEnabled, revealed, leftMs, onAnswer])
+
+  function submitFree(e: FormEvent) {
+    e.preventDefault()
+    if (disabled || revealed) return
+    const t = freeText.trim()
+    if (!t) return
+    onAnswer(t)
+  }
 
   return (
     <section className="quiz-play" aria-live="polite">
@@ -95,20 +112,11 @@ export function QuizPlay({
       <h2 className="quiz-play__question">{question.question}</h2>
 
       {question.previewUrl && (
-        <figure className="quiz-play__media quiz-play__media--audio">
-          <audio
-            key={question.id}
-            className="quiz-play__audio"
-            controls
-            preload="auto"
-            src={question.previewUrl}
-          >
-            Ton navigateur ne lit pas l’audio.
-          </audio>
-          <figcaption className="quiz-play__audio-caption">
-            Extrait Deezer (~30 s)
-          </figcaption>
-        </figure>
+        <PreviewAudio
+          src={question.previewUrl}
+          questionId={question.id}
+          maxSeconds={30}
+        />
       )}
 
       {question.imageUrl && !question.previewUrl && (
@@ -124,44 +132,79 @@ export function QuizPlay({
         </figure>
       )}
 
-      <div className="quiz-play__answers" role="group" aria-label="Réponses">
-        {question.answers.map((answer, i) => {
-          let state = ''
-          if (revealed) {
-            if (i === question.correctIndex) state = ' is-correct'
-            else if (!timedOut && i === selectedIndex) state = ' is-wrong'
-            else state = ' is-dimmed'
-          }
-
-          return (
-            <button
-              key={`${question.id}-${i}`}
-              type="button"
-              className={`quiz-play__answer${state}`}
+      {isFree ? (
+        <form className="quiz-play__free" onSubmit={submitFree}>
+          <label className="quiz-play__free-label" htmlFor={`free-${question.id}`}>
+            {question.freeInputHint === 'title'
+              ? 'Titre du morceau'
+              : 'Titre ou artiste'}
+          </label>
+          <div className="quiz-play__free-row">
+            <input
+              id={`free-${question.id}`}
+              className="quiz-play__free-input"
+              type="text"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder={
+                question.freeInputHint === 'title'
+                  ? 'Ex. titre du morceau'
+                  : 'Ex. titre ou nom d’artiste'
+              }
+              value={freeText}
               disabled={disabled || revealed}
-              onClick={() => onAnswer(i)}
+              onChange={(e) => setFreeText(e.target.value)}
+            />
+            <button
+              type="submit"
+              className="btn btn--primary"
+              disabled={disabled || revealed || !freeText.trim()}
             >
-              <span className="quiz-play__letter" aria-hidden>
-                {String.fromCharCode(65 + i)}
-              </span>
-              <span className="quiz-play__answer-text">{answer}</span>
-              {revealed && i === question.correctIndex && (
-                <span className="quiz-play__badge quiz-play__badge--ok">
-                  Correct
+              Valider
+            </button>
+          </div>
+        </form>
+      ) : (
+        <div className="quiz-play__answers" role="group" aria-label="Réponses">
+          {question.answers.map((answer, i) => {
+            let state = ''
+            if (revealed) {
+              if (i === question.correctIndex) state = ' is-correct'
+              else if (!timedOut && i === selectedIndex) state = ' is-wrong'
+              else state = ' is-dimmed'
+            }
+
+            return (
+              <button
+                key={`${question.id}-${i}`}
+                type="button"
+                className={`quiz-play__answer${state}`}
+                disabled={disabled || revealed}
+                onClick={() => onAnswer(i)}
+              >
+                <span className="quiz-play__letter" aria-hidden>
+                  {String.fromCharCode(65 + i)}
                 </span>
-              )}
-              {revealed &&
-                !timedOut &&
-                i === selectedIndex &&
-                i !== question.correctIndex && (
-                  <span className="quiz-play__badge quiz-play__badge--ko">
-                    Faux
+                <span className="quiz-play__answer-text">{answer}</span>
+                {revealed && i === question.correctIndex && (
+                  <span className="quiz-play__badge quiz-play__badge--ok">
+                    Correct
                   </span>
                 )}
-            </button>
-          )
-        })}
-      </div>
+                {revealed &&
+                  !timedOut &&
+                  i === selectedIndex &&
+                  i !== question.correctIndex && (
+                    <span className="quiz-play__badge quiz-play__badge--ko">
+                      Faux
+                    </span>
+                  )}
+              </button>
+            )
+          })}
+        </div>
+      )}
 
       {revealed && (
         <div

@@ -33,6 +33,11 @@ export interface Question {
   deezerTrackId?: string
   /** Affichage audit / feedback : « Titre — Artiste » (Deezer) */
   revealAnswer?: string
+  /** Deezer difficile : saisie libre titre ou artiste */
+  answerMode?: 'qcm' | 'free'
+  /** Valeurs acceptées en mode free (ne pas afficher avant révélation en multi) */
+  acceptedAnswers?: string[]
+  freeInputHint?: 'title' | 'title_or_artist'
 }
 
 /** Métadonnées d'une banque de thème */

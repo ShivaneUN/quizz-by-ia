@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { generateQuestions, normalizeThemeSlug, parseAiProvider, parseQuizContentMode } from '../server/generate.js'
+import { matchesFreeMusicAnswer } from '../server/freeAnswer.js'
 import {
   ROUND_MS,
   MULTI_QUESTION_COUNT,
@@ -17,7 +18,12 @@ import {
   hostPauseTimer,
   hostResumeTimer,
   resetPlayersForNewGame,
+  clearGeneratingFields,
+  tryAcquireGenLock,
+  releaseGenLock,
+  forceReleaseGenLock,
   type RoomState,
+  type RoomQuestion,
 } from '../server/rooms.js'
 import {
   getSeenQuestionKeys,
@@ -211,7 +217,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       // Marque « generating » tout de suite et rend la main (évite 504 client)
       room.status = 'generating'
-      room.generatingStartedAt = Date.now()
       delete room.hostPickingTheme
       // conserve quizMode (audio Deezer ou standard)
       if (room.quizMode !== 'audio') room.quizMode = 'standard'
@@ -225,12 +230,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       room.roundPhase = 'answering'
       room.currentAnswers = {}
       room.roundStartedAt = 0
+      clearGeneratingFields(room)
       room.genQuestionsDone = 0
       room.genQuestionsTotal = 10
+      room.generatingStartedAt = Date.now()
       resetPlayersForNewGame(room)
       const eta = await getGenerationEstimateSec('multi')
       room.genEstimateSec = eta.estimateSec
       await saveRoom(room)
+      await forceReleaseGenLock(code)
       return json(res, 200, {
         room: publicRoomView(room),
         message: 'Génération démarrée',
@@ -254,157 +262,258 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         })
       }
 
-      const contentMode = room.quizMode === 'audio' ? 'audio' : 'standard'
-      const themeSlug =
-        contentMode === 'audio'
-          ? `${normalizeThemeSlug(room.theme)}--${room.scope}--audio`
-          : `${normalizeThemeSlug(room.theme)}--${room.scope}`
-      const difficulty = parseDifficulty(room.difficulty)
-      const provider = parseAiProvider(room.aiProvider ?? 'auto')
-      const excludeQuestions = await getSeenQuestionTexts(themeSlug)
+      const lock = await tryAcquireGenLock(code)
+      if (!lock.acquired) {
+        room = (await getRoom(code)) ?? room
+        return json(res, 200, {
+          room: publicRoomView(room),
+          message: 'Génération déjà en cours',
+        })
+      }
 
-      let gen: Awaited<ReturnType<typeof generateQuestions>>
-      const genStarted = Date.now()
-      let lastProgDone = -1
       try {
-        gen = await generateQuestions(
-          room.theme,
-          themeSlug,
-          'complementary',
-          difficulty,
-          room.scope,
-          provider,
-          contentMode,
-          excludeQuestions,
-          async (done, total) => {
-            if (done === lastProgDone) return
-            lastProgDone = done
-            const latest = await getRoom(code)
-            if (!latest || latest.status !== 'generating') return
-            latest.genQuestionsDone = done
-            latest.genQuestionsTotal = total
-            await saveRoom(latest)
-          },
-        )
-      } catch (e) {
-        const message =
-          e instanceof Error ? e.message : 'Erreur de génération'
-        const latest = (await getRoom(code)) ?? room
-        if (latest.status !== 'generating') {
-          return json(res, 200, { room: publicRoomView(latest) })
+        room = (await getRoom(code)) ?? room
+        if (room.status !== 'generating') {
+          return json(res, 200, { room: publicRoomView(room) })
         }
-        latest.status = 'error'
-        latest.errorMessage = message
-        delete latest.genEstimateSec
-        delete latest.genQuestionsDone
-        delete latest.genQuestionsTotal
-        delete latest.generatingStartedAt
-        await saveRoom(latest)
-        logError({
-          scope: 'room',
-          message,
-          status: 422,
-          theme: latest.theme,
-          detail: `salle ${code}`,
-          path: '/api/room',
-        })
-        return json(res, 422, {
-          error: message,
-          room: publicRoomView(latest),
-        })
-      }
-      const generationMs = Date.now() - genStarted
-      if (!gen.error) {
-        await recordGenerationMs(generationMs)
-      }
 
-      // Recharge : cancel / leave pendant la génération
-      room = (await getRoom(code)) ?? room
-      if (room.status !== 'generating') {
-        return json(res, 200, { room: publicRoomView(room) })
-      }
-
-      if (gen.error) {
-        room.status = 'error'
-        room.errorMessage = gen.error
-        delete room.genEstimateSec
-        delete room.genQuestionsDone
-        delete room.genQuestionsTotal
-        delete room.generatingStartedAt
+        room.needsTopUp = false
         await saveRoom(room)
-        logError({
-          scope: 'room',
-          message: gen.error,
-          status: 422,
-          theme: room.theme,
-          detail: `salle ${code}`,
-          path: '/api/room',
-        })
-        return json(res, 422, {
-          error: gen.error,
+
+        const contentMode = room.quizMode === 'audio' ? 'audio' : 'standard'
+        const themeSlug =
+          contentMode === 'audio'
+            ? `${normalizeThemeSlug(room.theme)}--${room.scope}--audio`
+            : `${normalizeThemeSlug(room.theme)}--${room.scope}`
+        const difficulty = parseDifficulty(room.difficulty)
+        const provider = parseAiProvider(room.aiProvider ?? 'auto')
+
+        const collected: RoomQuestion[] = [
+          ...(room.genCollectedQuestions ?? []),
+        ]
+        const collectedFp = new Set(
+          collected.map((q) =>
+            q.question.trim().toLowerCase().replace(/\s+/g, ' '),
+          ),
+        )
+
+        function ingestGenerated(
+          qs: Array<{
+            id: string
+            question: string
+            answers: [string, string, string, string]
+            correctIndex: 0 | 1 | 2 | 3
+            explanation?: string
+            sourceType?: string
+            previewUrl?: string
+            coverUrl?: string
+            deezerTrackId?: string
+            revealAnswer?: string
+            answerMode?: 'qcm' | 'free'
+            acceptedAnswers?: string[]
+            freeInputHint?: 'title' | 'title_or_artist'
+            difficulty?: string
+          }>,
+        ): void {
+          for (const q of qs) {
+            if (q.difficulty && q.difficulty !== difficulty) continue
+            const fp = q.question.trim().toLowerCase().replace(/\s+/g, ' ')
+            if (!fp || collectedFp.has(fp)) continue
+            collectedFp.add(fp)
+            collected.push({
+              id: q.id,
+              question: q.question,
+              answers: q.answers,
+              correctIndex: q.correctIndex,
+              explanation: q.explanation,
+              sourceType: q.sourceType,
+              previewUrl: q.previewUrl,
+              coverUrl: q.coverUrl,
+              deezerTrackId: q.deezerTrackId,
+              revealAnswer: q.revealAnswer,
+              answerMode: q.answerMode,
+              acceptedAnswers: q.acceptedAnswers,
+              freeInputHint: q.freeInputHint,
+            })
+            if (collected.length >= MULTI_QUESTION_COUNT) break
+          }
+        }
+
+        async function finalizePlaying(pool: RoomQuestion[]): Promise<boolean> {
+          const seen = await getSeenQuestionKeys(themeSlug)
+          const selected = pickUnseenPreferring(
+            pool,
+            seen,
+            MULTI_QUESTION_COUNT,
+          )
+          const questions = selected.slice(0, MULTI_QUESTION_COUNT)
+          if (questions.length < MULTI_QUESTION_COUNT) {
+            room.needsTopUp = true
+            room.genCollectedQuestions = pool
+            room.genQuestionsDone = pool.length
+            room.genQuestionsTotal = MULTI_QUESTION_COUNT
+            await saveRoom(room)
+            return false
+          }
+          await rememberQuestionKeys(
+            themeSlug,
+            questions.map((q) => q.question),
+          )
+          const now = Date.now()
+          room.status = 'playing'
+          delete room.errorMessage
+          clearGeneratingFields(room)
+          room.questions = questions
+          room.questionIndex = 0
+          prepareRound(room, now)
+          await saveRoom(room)
+          return true
+        }
+
+        if (collected.length >= MULTI_QUESTION_COUNT) {
+          const ok = await finalizePlaying(collected)
+          if (ok) {
+            return json(res, 200, {
+              room: publicRoomView(room),
+              message: 'Questions prêtes',
+            })
+          }
+          return json(res, 200, {
+            room: publicRoomView(room),
+            message: `Lot partiel (${collected.length}/10) — complément…`,
+          })
+        }
+
+        const histExclude = await getSeenQuestionTexts(themeSlug)
+        const excludeQuestions = [
+          ...histExclude,
+          ...collected.map((q) => q.question),
+        ]
+
+        const genStarted = Date.now()
+        let lastProgDone = -1
+        let gen: Awaited<ReturnType<typeof generateQuestions>>
+        try {
+          gen = await generateQuestions(
+            room.theme,
+            themeSlug,
+            'complementary',
+            difficulty,
+            room.scope,
+            provider,
+            contentMode,
+            excludeQuestions,
+            async (done, total) => {
+              if (done === lastProgDone) return
+              lastProgDone = done
+              const latest = await getRoom(code)
+              if (!latest || latest.status !== 'generating') return
+              latest.genQuestionsDone = Math.min(
+                MULTI_QUESTION_COUNT,
+                Math.max(collected.length, done),
+              )
+              latest.genQuestionsTotal = total
+              await saveRoom(latest)
+            },
+            true,
+          )
+        } catch (e) {
+          const message =
+            e instanceof Error ? e.message : 'Erreur de génération'
+          const latest = (await getRoom(code)) ?? room
+          if (latest.status !== 'generating') {
+            return json(res, 200, { room: publicRoomView(latest) })
+          }
+          if (collected.length > 0) {
+            latest.genCollectedQuestions = collected
+            latest.genQuestionsDone = collected.length
+            latest.genQuestionsTotal = MULTI_QUESTION_COUNT
+            latest.needsTopUp = true
+            await saveRoom(latest)
+            return json(res, 200, {
+              room: publicRoomView(latest),
+              message: `Lot partiel (${collected.length}/10) — complément…`,
+            })
+          }
+          latest.status = 'error'
+          latest.errorMessage = message
+          clearGeneratingFields(latest)
+          await saveRoom(latest)
+          logError({
+            scope: 'room',
+            message,
+            status: 422,
+            theme: latest.theme,
+            detail: `salle ${code}`,
+            path: '/api/room',
+          })
+          return json(res, 422, {
+            error: message,
+            room: publicRoomView(latest),
+          })
+        }
+
+        const generationMs = Date.now() - genStarted
+        if (!gen.error || gen.partial) {
+          await recordGenerationMs(generationMs)
+        }
+
+        ingestGenerated(gen.questions ?? [])
+
+        room = (await getRoom(code)) ?? room
+        if (room.status !== 'generating') {
+          return json(res, 200, { room: publicRoomView(room) })
+        }
+
+        room.genCollectedQuestions = collected
+        room.genQuestionsDone = collected.length
+        room.genQuestionsTotal = MULTI_QUESTION_COUNT
+
+        if (collected.length === 0) {
+          const err =
+            gen.error ??
+            `Pas assez de questions (0/${MULTI_QUESTION_COUNT}). Réessaie.`
+          room.status = 'error'
+          room.errorMessage = err
+          clearGeneratingFields(room)
+          await saveRoom(room)
+          logError({
+            scope: 'room',
+            message: err,
+            status: 422,
+            theme: room.theme,
+            detail: `salle ${code}`,
+            path: '/api/room',
+          })
+          return json(res, 422, {
+            error: err,
+            room: publicRoomView(room),
+          })
+        }
+
+        if (collected.length < MULTI_QUESTION_COUNT) {
+          room.needsTopUp = true
+          await saveRoom(room)
+          return json(res, 200, {
+            room: publicRoomView(room),
+            message: `Lot partiel (${collected.length}/10) — complément…`,
+          })
+        }
+
+        const ok = await finalizePlaying(collected)
+        if (!ok) {
+          return json(res, 200, {
+            room: publicRoomView(room),
+            message: `Lot partiel (${collected.length}/10) — complément…`,
+          })
+        }
+        return json(res, 200, {
           room: publicRoomView(room),
+          message: gen.message,
         })
+      } finally {
+        await releaseGenLock(code, lock.token)
       }
-
-      const pool = gen.questions.filter((q) => q.difficulty === difficulty)
-      const seen = await getSeenQuestionKeys(themeSlug)
-      const selected = pickUnseenPreferring(pool, seen, MULTI_QUESTION_COUNT)
-      const questions = selected.map((q) => ({
-        id: q.id,
-        question: q.question,
-        answers: q.answers,
-        correctIndex: q.correctIndex,
-        explanation: q.explanation,
-        sourceType: q.sourceType,
-        previewUrl: q.previewUrl,
-        coverUrl: q.coverUrl,
-        deezerTrackId: q.deezerTrackId,
-        revealAnswer: q.revealAnswer,
-      }))
-
-      if (questions.length < MULTI_QUESTION_COUNT) {
-        const err = `Pas assez de questions (${questions.length}/${MULTI_QUESTION_COUNT}). Réessaie.`
-        room.status = 'error'
-        room.errorMessage = err
-        delete room.genEstimateSec
-        delete room.genQuestionsDone
-        delete room.genQuestionsTotal
-        delete room.generatingStartedAt
-        await saveRoom(room)
-        logError({
-          scope: 'room',
-          message: err,
-          status: 422,
-          theme: room.theme,
-          detail: `salle ${code}`,
-          path: '/api/room',
-        })
-        return json(res, 422, {
-          error: err,
-          room: publicRoomView(room),
-        })
-      }
-
-      await rememberQuestionKeys(
-        themeSlug,
-        questions.map((q) => q.question),
-      )
-
-      const now = Date.now()
-      room.status = 'playing'
-      delete room.errorMessage
-      delete room.genEstimateSec
-      delete room.genQuestionsDone
-      delete room.genQuestionsTotal
-      delete room.generatingStartedAt
-      room.questions = questions
-      room.questionIndex = 0
-      prepareRound(room, now)
-      await saveRoom(room)
-      return json(res, 200, {
-        room: publicRoomView(room),
-        message: gen.message,
-      })
     }
 
     if (action === 'setTheme') {
@@ -468,10 +577,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       room.status = 'lobby'
       delete room.errorMessage
-      delete room.genEstimateSec
-      delete room.genQuestionsDone
-      delete room.genQuestionsTotal
-      delete room.generatingStartedAt
+      clearGeneratingFields(room)
       room.questions = []
       room.questionIndex = 0
       room.currentAnswers = {}
@@ -481,6 +587,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       room.roundStartedAt = 0
       room.roundDeadlineAt = 0
       await saveRoom(room)
+      await forceReleaseGenLock(code)
       return json(res, 200, {
         room: publicRoomView(room),
         message: 'Génération annulée',
@@ -502,10 +609,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       room.status = 'lobby'
       delete room.errorMessage
-      delete room.genEstimateSec
-      delete room.genQuestionsDone
-      delete room.genQuestionsTotal
-      delete room.generatingStartedAt
+      clearGeneratingFields(room)
       room.questions = []
       room.questionIndex = 0
       room.roundPhase = 'answering'
@@ -576,11 +680,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         delete room.hostPickingTheme
         if (room.status === 'generating') {
           room.status = 'lobby'
-          delete room.genEstimateSec
-          delete room.genQuestionsDone
-          delete room.genQuestionsTotal
-          delete room.generatingStartedAt
+          clearGeneratingFields(room)
           delete room.errorMessage
+          void forceReleaseGenLock(code)
         }
       }
 
@@ -637,6 +739,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (action === 'answer') {
       const code = String(body.code ?? '').trim().toUpperCase()
       const playerId = String(body.playerId ?? '')
+      const answerText =
+        typeof body.answerText === 'string' ? body.answerText : ''
+      const hasText = answerText.trim().length > 0
       const answerIndex = Number(body.answerIndex)
       let room = await syncRoomRound(code)
       if (!room) return json(res, 404, { error: 'Salle introuvable' })
@@ -653,12 +758,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (playerId in room.currentAnswers) {
         return json(res, 200, { room: publicRoomView(room) })
       }
-      if (
-        !Number.isInteger(answerIndex) ||
-        answerIndex < 0 ||
-        answerIndex > 3
-      ) {
-        return json(res, 400, { error: 'Réponse invalide' })
+
+      const currentQ = room.questions[room.questionIndex]
+      const isFree = currentQ?.answerMode === 'free'
+
+      let storedAnswer: number
+      if (isFree) {
+        if (!hasText) {
+          return json(res, 400, { error: 'Réponse invalide' })
+        }
+        const ok = matchesFreeMusicAnswer(
+          answerText,
+          currentQ.acceptedAnswers,
+        )
+        storedAnswer = ok ? currentQ.correctIndex : -1
+      } else {
+        if (
+          !Number.isInteger(answerIndex) ||
+          answerIndex < 0 ||
+          answerIndex > 3
+        ) {
+          return json(res, 400, { error: 'Réponse invalide' })
+        }
+        storedAnswer = answerIndex
       }
 
       const now = Date.now()
@@ -684,7 +806,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return json(res, 200, { room: publicRoomView(fresh) })
       }
 
-      fresh.currentAnswers[playerId] = answerIndex
+      fresh.currentAnswers[playerId] = storedAnswer
       const closed = maybeCloseRound(fresh, now)
       if (closed.changed) {
         const latest = await getRoom(code)

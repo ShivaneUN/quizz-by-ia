@@ -518,7 +518,8 @@ export function ThemeSelect({
                 Thème musical : <strong>{activeLabel}</strong>
               </p>
               <p className="deezer-panel__hint">
-                Réponses = titres seuls · l’audit affiche titre + artiste
+                Facile / Moyen = QCM · Difficile = saisie libre : style / décennie
+                / hits → titre ou artiste ; artiste précis → titre seul
               </p>
             </div>
 

@@ -118,6 +118,37 @@
   gap: 0.55rem;
 }
 
+.multi-play__free {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.multi-play__free-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--ink-muted);
+}
+
+.multi-play__free-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: stretch;
+}
+
+.multi-play__free-input {
+  flex: 1 1 12rem;
+  min-width: 0;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  padding: 0.85rem 0.9rem;
+  border-radius: 12px;
+  border: 1.5px solid color-mix(in srgb, var(--teal) 30%, transparent);
+  background: var(--paper-elevated);
+  color: var(--ink);
+}
+
 .multi-play__answer {
   display: flex;
   align-items: flex-start;

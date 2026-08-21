@@ -24,6 +24,8 @@ export interface MultiQuestion {
   coverUrl?: string
   deezerTrackId?: string
   revealAnswer?: string
+  answerMode?: 'qcm' | 'free'
+  freeInputHint?: 'title' | 'title_or_artist'
 }
 
 export interface MultiRoom {
@@ -46,6 +48,8 @@ export interface MultiRoom {
   genQuestionsTotal?: number
   /** Début génération (watchdog anti-blocage) */
   generatingStartedAt?: number
+  /** L’hôte doit relancer runGenerate pour un complément de lot */
+  needsTopUp?: boolean
   /** L’hôte choisit un thème — rester dans le lobby */
   hostPickingTheme?: boolean
   players: MultiPlayer[]
@@ -297,7 +301,8 @@ export async function kickRoomPlayer(input: {
 export async function answerRoom(input: {
   code: string
   playerId: string
-  answerIndex: number
+  answerIndex?: number
+  answerText?: string
 }) {
   const data = await postRoom({ action: 'answer', ...input })
   return { room: data.room!, playerId: data.playerId, message: data.message }

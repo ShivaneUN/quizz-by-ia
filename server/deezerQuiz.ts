@@ -2,9 +2,14 @@
  * Quiz musical via API publique Deezer (pas de clé requise).
  * https://api.deezer.com
  *
- * - Réponses QCM = titre seul
+ * - Réponses QCM = titre seul (moyen/difficile) ; titre — artiste (facile)
  * - Audit / explication = titre + artiste
- * - Tirage : Hits (global) | style | recherche libre
+ * - Tirage : Hits (global) | style | recherche libre (artiste via /artist/top)
+ * - Difficulté :
+ *   - facile = originaux connus, QCM (titre + artiste)
+ *   - moyen = originaux moins connus, QCM (titre seul)
+ *   - difficile = mélange facile/moyen, réponse libre
+ *     (artiste choisi → titre seul ; sinon titre OU artiste)
  * - Décennies optionnelles : 80 / 90 / 2000 / 2010 / 2020
  */
 
@@ -27,6 +32,12 @@ export interface DeezerQuizQuestion {
   deezerTrackId?: string
   /** Titre — Artiste (audit / feedback) */
   revealAnswer: string
+  /** qcm = 4 choix ; free = saisie titre ou artiste */
+  answerMode?: 'qcm' | 'free'
+  /** Réponses acceptées en mode free (titre, artiste, variantes) */
+  acceptedAnswers?: string[]
+  /** free : 'title' = titre seul (quiz artiste) ; 'title_or_artist' sinon */
+  freeInputHint?: 'title' | 'title_or_artist'
 }
 
 interface DeezerArtist {
@@ -159,6 +170,20 @@ function normalizeKey(s: string): string {
     .replace(/\s+/g, ' ')
 }
 
+/** Clé anti-doublon : ignore remix / feat / remaster (même « appellation »). */
+function titleDedupeKey(s: string): string {
+  return normalizeKey(s)
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(
+      /\b(feat|ft|featuring|with|remix|remaster(?:ed)?|live|radio edit|version|acoustic|deluxe|extended|edit|bonus|instrumental)\b.*$/g,
+      ' ',
+    )
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 async function deezerGet<T>(pathAndQuery: string): Promise<T> {
   const url = pathAndQuery.startsWith('http')
     ? pathAndQuery
@@ -199,8 +224,8 @@ function trackArtist(t: DeezerTrack): string {
   return String(t.artist?.name ?? '').trim()
 }
 
-/** Artistes / catalogues à exclure (compil, spam, métadonnées foireuses). */
-const JUNK_ARTIST_KEYS = new Set(
+/** Artistes / catalogues spam (toujours exclus). */
+const SPAM_ARTIST_KEYS = new Set(
   [
     'various artists',
     'various',
@@ -217,10 +242,6 @@ const JUNK_ARTIST_KEYS = new Set(
     'inconnus',
     'karaoke',
     'karaoke version',
-    'tribute',
-    'tribute band',
-    'cover',
-    'covers',
     'soundtrack',
     'ost',
     'movie sounds',
@@ -237,15 +258,28 @@ const JUNK_ARTIST_KEYS = new Set(
   ].map((s) => normalizeKey(s)),
 )
 
-function isJunkArtist(name: string): boolean {
+/** Actes cover / tribute — exclus hors mode difficile. */
+function isCoverActArtist(name: string): boolean {
+  const n = normalizeKey(name)
+  if (!n) return false
+  if (n === 'cover' || n === 'covers' || n === 'tribute' || n === 'tribute band') {
+    return true
+  }
+  if (n.includes('tribute to') || n.includes('tribute')) return true
+  if (/\bcover(s)?\b/.test(n)) return true
+  if (/\b(cover|tribute)\s+(band|version|project|players?|orchestra)\b/.test(n)) {
+    return true
+  }
+  return false
+}
+
+function isSpamArtist(name: string): boolean {
   const n = normalizeKey(name)
   if (!n || n.length < 2) return true
-  if (JUNK_ARTIST_KEYS.has(n)) return true
+  if (SPAM_ARTIST_KEYS.has(n)) return true
   if (n.includes('various artist')) return true
   if (n.includes('karaoke')) return true
-  if (n.includes('tribute to') || n.includes('tribute')) return true
   if (n.includes('multi-interprete') || n.includes('multi interprete')) return true
-  if (/\bcover(s)?\b/.test(n) && n.length < 40) return true
   // Faux “artistes” type playlist / genre / hits
   if (
     /\b(hits?|tubes?|variete|playlist|best of|compilation|karaoke|soundtrack|ost)\b/.test(
@@ -273,7 +307,6 @@ function isJunkArtist(name: string): boolean {
   if (/\b(annees?|years?)\s*\d{2,4}\b/.test(n)) return true
   if (n.includes('frenchy') || n.includes('lounge orchestra')) return true
   if (n.includes('union du son') || n.includes('viva la rock')) return true
-  if (/\b(cover|tribute)\s+(band|version|project)\b/.test(n)) return true
   // Nom d’artiste = juste un genre
   if (
     /^(pop|rock|rap|hip hop|jazz|metal|electro|reggae|rnb|soul|classique|classical)$/.test(
@@ -285,6 +318,53 @@ function isJunkArtist(name: string): boolean {
   return false
 }
 
+function isJunkArtist(name: string, allowCoverActs = false): boolean {
+  if (isSpamArtist(name)) return true
+  if (!allowCoverActs && isCoverActArtist(name)) return true
+  return false
+}
+
+/**
+ * Classification piste — les remix sont exclus de tous les niveaux.
+ */
+function isRemixTrack(t: DeezerTrack): boolean {
+  const title = normalizeKey(trackTitle(t))
+  return /\b(remix|rmx|bootleg|mash[\s-]?up|rework|vip mix|club mix|extended mix|dub mix)\b/.test(
+    title,
+  )
+}
+
+function isCoverTrack(t: DeezerTrack): boolean {
+  const title = normalizeKey(trackTitle(t))
+  const album = normalizeKey(String(t.album?.title ?? ''))
+  if (/\b(cover|covers|tribute)\b/.test(title)) return true
+  if (isCoverActArtist(trackArtist(t))) return true
+  if (/\b(covers?|tributes?)\b/.test(album)) return true
+  return false
+}
+
+function isInstrumentalTrack(t: DeezerTrack): boolean {
+  const title = normalizeKey(trackTitle(t))
+  const album = normalizeKey(String(t.album?.title ?? ''))
+  if (/\b(instrumental|instru|backing track)\b/.test(title)) return true
+  if (/\binstrumentals?\b/.test(album)) return true
+  return false
+}
+
+/** original uniquement (pas cover/instru/remix) — tous niveaux Deezer actuels */
+type TrackVariantFilter = 'original'
+
+function variantForDifficulty(_d: DeezerDifficulty): TrackVariantFilter {
+  return 'original'
+}
+
+function matchesVariant(t: DeezerTrack, _variant: TrackVariantFilter): boolean {
+  if (isRemixTrack(t)) return false
+  if (isInstrumentalTrack(t)) return false
+  if (isCoverTrack(t)) return false
+  return true
+}
+
 /** Popularité Deezer (rank) — plus haut = plus connu */
 function trackFame(t: DeezerTrack): number {
   return typeof t.rank === 'number' && Number.isFinite(t.rank) && t.rank > 0
@@ -292,20 +372,32 @@ function trackFame(t: DeezerTrack): number {
     : 0
 }
 
-/** Plancher de popularité selon le niveau (évite les obscurs). */
+/**
+ * Plancher de popularité selon le niveau.
+ * Facile = tubes ; moyen = connus ; difficile = mélange (plancher type moyen).
+ */
 function minRankForDifficulty(
   difficulty: DeezerDifficulty,
   decadeMode = false,
 ): number {
-  // Les hits d’époque ont souvent un rank Deezer plus bas que les tubes actuels
   if (decadeMode) {
-    if (difficulty === 'easy') return 80_000
-    if (difficulty === 'medium') return 35_000
-    return 12_000
+    if (difficulty === 'easy') return 100_000
+    if (difficulty === 'medium') return 40_000
+    return 25_000
   }
-  if (difficulty === 'easy') return 400_000
-  if (difficulty === 'medium') return 120_000
-  return 40_000
+  if (difficulty === 'easy') return 500_000
+  if (difficulty === 'medium') return 150_000
+  return 80_000
+}
+
+/** Plafond : exclut les mega-hits du vivier moyen (difficile mélange via orderPool). */
+function maxRankForDifficulty(
+  difficulty: DeezerDifficulty,
+  decadeMode = false,
+): number | null {
+  if (difficulty === 'easy' || difficulty === 'hard') return null
+  if (decadeMode) return 220_000
+  return 900_000
 }
 
 /**
@@ -315,12 +407,20 @@ function minRankForDifficulty(
 function isQualityTrack(
   t: DeezerTrack,
   minRank: number,
+  maxRank: number | null = null,
+  allowCoverActs = false,
+  variant: TrackVariantFilter = 'original',
 ): boolean {
   if (!trackUsable(t)) return false
   const artist = trackArtist(t)
   const title = trackTitle(t)
-  if (isJunkArtist(artist)) return false
-  if (trackFame(t) < minRank) return false
+  if (isJunkArtist(artist, allowCoverActs)) return false
+  if (!matchesVariant(t, variant)) return false
+  const fame = trackFame(t)
+  if (fame < minRank) return false
+  // Covers : pas de plafond rank (souvent hors charts) — inutilisé si originaux only
+  const skipCeiling = isCoverTrack(t)
+  if (maxRank != null && !skipCeiling && fame > maxRank) return false
 
   const album = String(t.album?.title ?? '').trim()
   if (album && normalizeKey(artist) === normalizeKey(album)) return false
@@ -344,9 +444,14 @@ function isQualityTrack(
   return true
 }
 
-/** Réponse affichée au joueur : titre seul */
-function answerLabel(t: DeezerTrack): string {
-  return trackTitle(t)
+/** Réponse QCM : facile = titre + artiste ; moyen/difficile = titre seul */
+function answerLabel(t: DeezerTrack, difficulty: DeezerDifficulty): string {
+  const title = trackTitle(t)
+  if (difficulty === 'easy') {
+    const artist = trackArtist(t)
+    return artist ? `${title} — ${artist}` : title
+  }
+  return title
 }
 
 function findDecadeByLabel(part: string): (typeof DEEZER_DECADES)[number] | null {
@@ -513,6 +618,100 @@ async function fetchTracksForQuery(
   return (data.data ?? []).filter(trackUsable)
 }
 
+interface DeezerArtistHit {
+  id?: number
+  name?: string
+  nb_fan?: number
+}
+
+interface DeezerArtistSearchResponse {
+  data?: DeezerArtistHit[]
+  error?: { message?: string }
+}
+
+interface DeezerTrackListResponse {
+  data?: DeezerTrack[]
+  error?: { message?: string }
+}
+
+function artistNameScore(query: string, name: string): number {
+  const q = normalizeKey(query)
+  const n = normalizeKey(name)
+  if (!q || !n) return 0
+  if (q === n) return 1000
+  if (n.startsWith(q) || q.startsWith(n)) return 800
+  if (n.includes(q) || q.includes(n)) return 600
+  const qw = q.split(' ').filter(Boolean)
+  const nw = new Set(n.split(' ').filter(Boolean))
+  const overlap = qw.filter((w) => nw.has(w)).length
+  return overlap * 80
+}
+
+/**
+ * Catalogue artiste : top + radio (même artiste uniquement).
+ * Si la recherche libre est un nom d’artiste, on ancre le quiz dessus.
+ */
+async function fetchArtistCatalog(artistQuery: string): Promise<{
+  artistName: string
+  tracks: DeezerTrack[]
+} | null> {
+  const q = artistQuery.trim()
+  if (q.length < 2) return null
+
+  const search = await deezerGet<DeezerArtistSearchResponse>(
+    `/search/artist?q=${encodeURIComponent(q)}&limit=8`,
+  )
+  if (search.error?.message) throw new Error(search.error.message)
+
+  const candidates = (search.data ?? []).filter(
+    (a) => a.id && a.name && !isJunkArtist(a.name, false),
+  )
+  if (candidates.length === 0) return null
+
+  candidates.sort((a, b) => {
+    const sa = artistNameScore(q, a.name!)
+    const sb = artistNameScore(q, b.name!)
+    if (sb !== sa) return sb - sa
+    return (b.nb_fan ?? 0) - (a.nb_fan ?? 0)
+  })
+
+  const best = candidates[0]!
+  if (artistNameScore(q, best.name!) < 600) return null
+
+  const artistName = best.name!.trim()
+  const artistKey = normalizeKey(artistName)
+  const byId = new Map<number, DeezerTrack>()
+
+  try {
+    const top = await deezerGet<DeezerTrackListResponse>(
+      `/artist/${best.id}/top?limit=50`,
+    )
+    for (const t of top.data ?? []) {
+      if (trackUsable(t)) byId.set(t.id, t)
+    }
+  } catch {
+    /* top indisponible */
+  }
+
+  try {
+    const radio = await deezerGet<DeezerTrackListResponse>(
+      `/artist/${best.id}/radio?limit=40`,
+    )
+    for (const t of radio.data ?? []) {
+      if (!trackUsable(t) || byId.has(t.id)) continue
+      // Radio Deezer mélange parfois des proches — garder l’artiste cible
+      if (normalizeKey(trackArtist(t)) !== artistKey) continue
+      byId.set(t.id, t)
+    }
+  } catch {
+    /* radio optionnelle */
+  }
+
+  const tracks = [...byId.values()]
+  if (tracks.length < 6) return null
+  return { artistName, tracks }
+}
+
 async function fetchChartTracks(limit = 100): Promise<DeezerTrack[]> {
   const out: DeezerTrack[] = []
   const pages = [0, 25, 50, 75, 100]
@@ -537,10 +736,13 @@ function addTracks(
   tracks: DeezerTrack[],
   minRank: number,
   decadeId: string | null = null,
+  maxRank: number | null = null,
+  allowCoverActs = false,
+  variant: TrackVariantFilter = 'original',
 ) {
   for (const t of tracks) {
     if (byId.has(t.id)) continue
-    if (!isQualityTrack(t, minRank)) continue
+    if (!isQualityTrack(t, minRank, maxRank, allowCoverActs, variant)) continue
     if (isDecadeSpam(t, decadeId)) continue
     byId.set(t.id, t)
   }
@@ -551,31 +753,96 @@ async function collectTracks(
   scope: DeezerScope,
   need: number,
   difficulty: DeezerDifficulty,
-): Promise<DeezerTrack[]> {
+): Promise<{ tracks: DeezerTrack[]; anchoredArtist: string | null }> {
   const parsed = parseDeezerTheme(theme)
   const queries = buildSearchQueries(theme, scope)
   const decadeMode = Boolean(parsed.decadeId)
   const minRank = minRankForDifficulty(difficulty, decadeMode)
-  // Pendant la collecte : plancher bas pour remplir le vivier, puis filtre minRank
+  const maxRank = maxRankForDifficulty(difficulty, decadeMode)
+  const variant = variantForDifficulty(difficulty)
+  const allowCoverActs = false
   const searchFloor = decadeMode
-    ? Math.max(3_000, Math.floor(minRank * 0.25))
-    : Math.max(10_000, Math.floor(minRank * 0.4))
+    ? Math.max(2_000, Math.floor(minRank * 0.2))
+    : Math.max(8_000, Math.floor(minRank * 0.3))
   const byId = new Map<number, DeezerTrack>()
+  let anchoredArtist: string | null = null
 
-  // Hits (global) sans décennie : charts Deezer en premier (vrais tubes).
-  // Styles / décennies : pas de chart mondial (hors-sujet) — recherche + rank.
-  if (parsed.mode === 'global' && !parsed.decadeId) {
+  // Catalogue artiste (originaux)
+  if (parsed.mode === 'custom' && parsed.query) {
     try {
-      addTracks(byId, await fetchChartTracks(120), searchFloor, null)
+      const catalog = await fetchArtistCatalog(parsed.query)
+      if (catalog) {
+        anchoredArtist = catalog.artistName
+        addTracks(
+          byId,
+          catalog.tracks,
+          searchFloor,
+          parsed.decadeId,
+          null,
+          allowCoverActs,
+          variant,
+        )
+      }
+    } catch {
+      /* fallback search */
+    }
+  }
+
+  // Charts : Hits global uniquement (jamais si artiste ancré)
+  if (
+    parsed.mode === 'global' &&
+    !parsed.decadeId &&
+    !anchoredArtist &&
+    (difficulty === 'easy' || difficulty === 'hard')
+  ) {
+    try {
+      addTracks(
+        byId,
+        await fetchChartTracks(120),
+        searchFloor,
+        null,
+        null,
+        allowCoverActs,
+        variant,
+      )
     } catch {
       /* fallback search */
     }
   }
 
   const chartEnough =
-    parsed.mode === 'global' && !parsed.decadeId && byId.size >= need * 2
+    parsed.mode === 'global' &&
+    !parsed.decadeId &&
+    !anchoredArtist &&
+    difficulty === 'easy' &&
+    byId.size >= need * 2
 
-  if (!chartEnough) {
+  if (anchoredArtist) {
+    // Compléter uniquement via recherches bornées à l’artiste (pas de hors-sujet)
+    if (byId.size < need * 4) {
+      const artistQueries = [
+        `artist:"${anchoredArtist}"`,
+        anchoredArtist,
+        `${anchoredArtist} hits`,
+      ]
+      for (const q of artistQueries) {
+        if (byId.size >= need * 6) break
+        try {
+          addTracks(
+            byId,
+            await fetchTracksForQuery(q, 80),
+            searchFloor,
+            parsed.decadeId,
+            null,
+            allowCoverActs,
+            variant,
+          )
+        } catch {
+          /* suivante */
+        }
+      }
+    }
+  } else if (!chartEnough) {
     for (const q of queries) {
       if (byId.size >= need * 8) break
       try {
@@ -584,6 +851,9 @@ async function collectTracks(
           await fetchTracksForQuery(q, 80),
           searchFloor,
           parsed.decadeId,
+          null,
+          allowCoverActs,
+          variant,
         )
       } catch {
         /* requête suivante */
@@ -591,35 +861,72 @@ async function collectTracks(
     }
   }
 
-  let list = [...byId.values()].filter(
-    (t) =>
-      isQualityTrack(t, minRank) && !isDecadeSpam(t, parsed.decadeId),
-  )
+  const themeTokens = themeFocusTokens(theme)
 
-  // Assouplir progressivement si vivier trop petit (jamais junk / spam décennie)
+  function filterPool(floor: number, ceiling: number | null): DeezerTrack[] {
+    const effectiveCeiling = anchoredArtist ? null : ceiling
+
+    let list = [...byId.values()].filter(
+      (t) =>
+        isQualityTrack(
+          t,
+          floor,
+          effectiveCeiling,
+          allowCoverActs,
+          variant,
+        ) && !isDecadeSpam(t, parsed.decadeId),
+    )
+
+    if (anchoredArtist) {
+      // Strict : jamais d’autre artiste
+      const key = normalizeKey(anchoredArtist)
+      list = list.filter((t) => normalizeKey(trackArtist(t)) === key)
+    } else if (parsed.mode === 'style' && themeTokens.length > 0) {
+      const themed = list.filter((t) => trackMatchesTheme(t, themeTokens))
+      if (themed.length >= Math.min(need, 6)) list = themed
+    } else if (
+      parsed.mode === 'custom' &&
+      parsed.query &&
+      themeTokens.length > 0
+    ) {
+      const themed = list.filter((t) => trackMatchesTheme(t, themeTokens))
+      // Strict si possible — sinon garde themed même petit (évite hors-thème)
+      if (themed.length >= 4) list = themed
+    }
+
+    return list.sort((a, b) => trackFame(b) - trackFame(a))
+  }
+
+  const artistMin = anchoredArtist
+    ? Math.max(500, Math.floor(minRank * 0.02))
+    : minRank
+
+  let list = filterPool(artistMin, maxRank)
+
   if (list.length < need + 4) {
-    for (const factor of [0.5, 0.25, 0.12]) {
-      const relaxed = Math.max(decadeMode ? 2_000 : 8_000, Math.floor(minRank * factor))
-      list = [...byId.values()]
-        .filter(
-          (t) =>
-            isQualityTrack(t, relaxed) && !isDecadeSpam(t, parsed.decadeId),
-        )
-        .sort((a, b) => trackFame(b) - trackFame(a))
+    for (const factor of [0.55, 0.3, 0.15, 0.05]) {
+      const base = anchoredArtist ? artistMin : minRank
+      const relaxed = Math.max(
+        decadeMode ? 1_500 : anchoredArtist ? 200 : 5_000,
+        Math.floor(base * factor),
+      )
+      const relaxedMax =
+        maxRank == null || anchoredArtist
+          ? null
+          : Math.max(maxRank, Math.floor(maxRank * (1 + (1 - factor))))
+      list = filterPool(relaxed, relaxedMax)
       if (list.length >= need + 4) break
     }
   }
 
-  // Recherche libre : ancrage thème si possible
-  if (parsed.mode === 'custom' && parsed.query) {
-    const themeTokens = themeFocusTokens(theme)
-    if (themeTokens.length > 0) {
-      const themed = list.filter((t) => trackMatchesTheme(t, themeTokens))
-      if (themed.length >= need) list = themed
-    }
+  if (list.length < need + 4 && maxRank != null && !anchoredArtist) {
+    list = filterPool(
+      Math.max(decadeMode ? 1_500 : 5_000, Math.floor(minRank * 0.12)),
+      null,
+    )
   }
 
-  return list.sort((a, b) => trackFame(b) - trackFame(a))
+  return { tracks: list, anchoredArtist }
 }
 
 function themeFocusTokens(theme: string): string[] {
@@ -643,10 +950,32 @@ function themeFocusTokens(theme: string): string[] {
 
 function trackMatchesTheme(t: DeezerTrack, tokens: string[]): boolean {
   if (tokens.length === 0) return true
-  const hay = normalizeKey(
-    [trackTitle(t), trackArtist(t), t.album?.title || ''].join(' '),
-  )
-  return tokens.some((tok) => hay.includes(tok))
+  const artist = normalizeKey(trackArtist(t))
+  const title = normalizeKey(trackTitle(t))
+  const album = normalizeKey(t.album?.title || '')
+  const sig = tokens.filter((tok) => tok.length >= 3)
+  if (sig.length === 0) return true
+
+  // Artiste : tous les tokens du nom (ex. « daft punk »)
+  if (sig.every((tok) => artist.includes(tok))) return true
+
+  const phrase = sig.join(' ')
+  if (phrase.length >= 4 && artist.includes(phrase)) return true
+
+  // Genre / thème libre : au moins un token significatif (≥4) dans titre/artiste/album
+  if (sig.length === 1) {
+    const tok = sig[0]!
+    return (
+      artist.includes(tok) || title.includes(tok) || album.includes(tok)
+    )
+  }
+
+  // Multi-mots hors artiste exact : majorité des tokens
+  const hits = sig.filter(
+    (tok) =>
+      artist.includes(tok) || title.includes(tok) || album.includes(tok),
+  ).length
+  return hits >= Math.ceil(sig.length * 0.6)
 }
 
 /** Rejette les faux “hits années X” (artiste = playlist décennie). */
@@ -672,50 +1001,60 @@ function isDecadeSpam(t: DeezerTrack, decadeId: string | null): boolean {
 }
 
 /**
- * Facile → top hits (vivier assez large pour 10 Q + leurres)
- * Moyen → pool populaire (haut du classement)
- * Difficile → moins évident mais toujours au-dessus du plancher rank
+ * Tranches par popularité.
+ * Facile → top · Moyen → milieu · Difficile → mélange facile + moyen
  */
 function orderPoolForDifficulty(
   pool: DeezerTrack[],
   difficulty: DeezerDifficulty,
 ): DeezerTrack[] {
   const sorted = [...pool].sort((a, b) => trackFame(b) - trackFame(a))
-  if (sorted.length <= 16) return shuffle(sorted)
+  const n = sorted.length
+  if (n <= 14) return shuffle(sorted)
 
   if (difficulty === 'easy') {
-    // Assez large pour 10 bonnes réponses + leurres variés
-    const topN = Math.min(
-      sorted.length,
-      Math.max(28, Math.ceil(sorted.length * 0.55)),
-    )
-    return shuffle(sorted.slice(0, topN))
+    const end = Math.min(n, Math.max(18, Math.ceil(n * 0.32)))
+    return shuffle(sorted.slice(0, end))
   }
 
-  if (difficulty === 'hard') {
-    const start = Math.min(
-      Math.floor(sorted.length * 0.15),
-      Math.max(0, sorted.length - 24),
-    )
-    const end = Math.min(
-      sorted.length,
-      start + Math.max(24, Math.ceil(sorted.length * 0.55)),
-    )
+  if (difficulty === 'medium') {
+    const start = Math.floor(n * 0.22)
+    const end = Math.min(n, start + Math.max(18, Math.ceil(n * 0.4)))
     const slice = sorted.slice(start, end)
-    return shuffle(slice.length >= 12 ? slice : sorted.slice(0, 28))
+    return shuffle(
+      slice.length >= 12
+        ? slice
+        : sorted.slice(Math.floor(n * 0.15), Math.min(n, Math.floor(n * 0.7))),
+    )
   }
 
-  // medium
-  const midN = Math.min(sorted.length, Math.max(28, Math.ceil(sorted.length * 0.7)))
-  return shuffle(sorted.slice(0, midN))
+  // hard : moitié hits (facile) + moitié moins connus (moyen)
+  const easyEnd = Math.min(n, Math.max(12, Math.ceil(n * 0.32)))
+  const midStart = Math.floor(n * 0.22)
+  const midEnd = Math.min(n, midStart + Math.max(12, Math.ceil(n * 0.4)))
+  const easyPool = sorted.slice(0, easyEnd)
+  const midPool = sorted.slice(midStart, midEnd)
+  const half = Math.max(6, Math.ceil(Math.min(needHint(n), 10) / 2))
+  const fromEasy = shuffle(easyPool).slice(0, half)
+  const fromMid = shuffle(midPool).slice(0, half)
+  const mixed = [...fromEasy, ...fromMid]
+  const seen = new Set(mixed.map((t) => t.id))
+  for (const t of shuffle(sorted)) {
+    if (mixed.length >= 24) break
+    if (seen.has(t.id)) continue
+    seen.add(t.id)
+    mixed.push(t)
+  }
+  return shuffle(mixed)
+}
+
+function needHint(poolSize: number): number {
+  return Math.min(20, Math.max(10, Math.ceil(poolSize * 0.3)))
 }
 
 /**
- * Leurres aléatoires (titre seul).
- * - facile : tirage au sort parmi les autres artistes populaires (pas toujours les mêmes top)
- * - moyen : mix aléatoire du pool
- * - difficile : même artiste en priorité, puis aléatoire
- * avoidTitles : évite de répéter les mêmes leurres d’une question à l’autre
+ * Leurres QCM — dédup par appellation (remix/feat ignorés).
+ * Facile : libellé « titre — artiste » ; moyen/difficile : titre seul.
  */
 function pickWrongLabels(
   pool: DeezerTrack[],
@@ -726,17 +1065,17 @@ function pickWrongLabels(
 ): string[] {
   const correctId = correct.id
   const correctArtist = normalizeKey(trackArtist(correct))
-  const correctTitle = normalizeKey(trackTitle(correct))
+  const correctTitle = titleDedupeKey(trackTitle(correct))
   const seen = new Set<string>([correctTitle, ...avoidTitles])
   const out: string[] = []
 
   function tryAdd(t: DeezerTrack): boolean {
     if (t.id === correctId) return false
-    const title = answerLabel(t)
-    const n = normalizeKey(title)
-    if (!title || seen.has(n)) return false
+    const label = answerLabel(t, difficulty)
+    const n = titleDedupeKey(trackTitle(t))
+    if (!label || !n || seen.has(n)) return false
     seen.add(n)
-    out.push(title)
+    out.push(label)
     return out.length >= count
   }
 
@@ -763,13 +1102,12 @@ function pickWrongLabels(
     if (pickFrom(sameArtist)) return out
     if (pickFrom(otherArtists)) return out
   } else if (difficulty === 'easy') {
-    // Top populaire, puis mélange aléatoire (évite toujours les 3 mêmes tubes)
     const famousSorted = [...otherArtists].sort(
       (a, b) => trackFame(b) - trackFame(a),
     )
     const topN = Math.max(
       12,
-      Math.min(famousSorted.length, Math.ceil(famousSorted.length * 0.65)),
+      Math.min(famousSorted.length, Math.ceil(famousSorted.length * 0.55)),
     )
     const famousPool = famousSorted.slice(0, topN)
     if (pickFrom(famousPool)) return out
@@ -785,11 +1123,11 @@ function pickWrongLabels(
   const softOut = [...out]
   for (const t of shuffle(pool)) {
     if (t.id === correctId) continue
-    const title = answerLabel(t)
-    const n = normalizeKey(title)
-    if (!title || softSeen.has(n)) continue
+    const label = answerLabel(t, difficulty)
+    const n = titleDedupeKey(trackTitle(t))
+    if (!label || !n || softSeen.has(n)) continue
     softSeen.add(n)
-    if (!softOut.includes(title)) softOut.push(title)
+    if (!softOut.includes(label)) softOut.push(label)
     if (softOut.length >= count) break
   }
   return softOut.slice(0, count)
@@ -812,6 +1150,61 @@ function themeQuestionPrompts(themeLabel: string): string[] {
   ]
 }
 
+function freeQuestionPrompts(
+  themeLabel: string,
+  titleOnly: boolean,
+): string[] {
+  const focus = themeLabel.trim()
+  if (titleOnly) {
+    if (!focus) {
+      return [
+        'Écris le titre du morceau.',
+        'Quel est le titre de cet extrait ?',
+        'Saisis uniquement le titre.',
+      ]
+    }
+    return [
+      `« ${focus} » — quel est le titre ?`,
+      `Retrouve le titre de cet extrait (${focus}).`,
+      `Saisis le titre du morceau (pas l’artiste).`,
+    ]
+  }
+  if (!focus) {
+    return [
+      'Écris le titre OU le nom de l’artiste.',
+      'Quel titre ou quel artiste entends-tu ?',
+      'Saisis le titre ou l’artiste de cet extrait.',
+    ]
+  }
+  return [
+    `« ${focus} » — écris le titre OU l’artiste.`,
+    `Retrouve le titre ou l’artiste (${focus}).`,
+    `Saisis le titre ou le nom de l’artiste pour « ${focus} ».`,
+  ]
+}
+
+/** Réponses libres acceptées. titleOnly = quiz artiste (le nom d’artiste ne compte pas). */
+function buildAcceptedAnswers(
+  title: string,
+  artist: string,
+  titleOnly: boolean,
+): string[] {
+  const out = new Set<string>()
+  const raws = titleOnly ? [title] : [title, artist]
+  for (const raw of raws) {
+    const t = raw.trim()
+    if (!t) continue
+    out.add(t)
+    out.add(titleDedupeKey(t))
+    out.add(normalizeKey(t))
+  }
+  if (!titleOnly) {
+    const an = normalizeKey(artist)
+    if (an.startsWith('the ')) out.add(an.slice(4))
+  }
+  return [...out].filter((s) => s.length >= 2)
+}
+
 function makeTitleQuestion(
   track: DeezerTrack,
   pool: DeezerTrack[],
@@ -822,12 +1215,44 @@ function makeTitleQuestion(
   promptIndex: number,
   themeLabel: string,
   avoidWrongTitles: Set<string> = new Set(),
+  /** Quiz généré sur un artiste précis → saisie = titre seul */
+  artistLocked = false,
 ): DeezerQuizQuestion | null {
   const artist = trackArtist(track)
   const title = trackTitle(track)
   const preview = String(track.preview ?? '').trim()
-  const correct = answerLabel(track)
-  if (!preview || !artist || !title || !correct) return null
+  if (!preview || !artist || !title) return null
+
+  const revealAnswer = `${title} — ${artist}`
+  const explanation = `L’extrait correspond à « ${title} » de ${artist} (thème : ${themeLabel || 'Deezer'}).`
+
+  // Difficile : réponse libre
+  if (difficulty === 'hard') {
+    const titleOnly = artistLocked
+    const prompts = freeQuestionPrompts(themeLabel, titleOnly)
+    return {
+      id: newId(),
+      question: prompts[promptIndex % prompts.length],
+      answers: [title, artist, title, artist],
+      correctIndex: 0,
+      difficulty,
+      themeSlug,
+      createdAt: now,
+      batchId,
+      explanation,
+      sourceType: 'Deezer (extrait officiel)',
+      previewUrl: preview,
+      coverUrl: track.album?.cover_medium || undefined,
+      deezerTrackId: String(track.id),
+      revealAnswer,
+      answerMode: 'free',
+      acceptedAnswers: buildAcceptedAnswers(title, artist, titleOnly),
+      freeInputHint: titleOnly ? 'title' : 'title_or_artist',
+    }
+  }
+
+  const correct = answerLabel(track, difficulty)
+  if (!correct) return null
 
   const wrongs = pickWrongLabels(
     pool,
@@ -856,12 +1281,13 @@ function makeTitleQuestion(
     themeSlug,
     createdAt: now,
     batchId,
-    explanation: `L’extrait correspond à « ${title} » de ${artist} (thème : ${themeLabel || 'Deezer'}).`,
+    explanation,
     sourceType: 'Deezer (extrait officiel)',
     previewUrl: preview,
     coverUrl: track.album?.cover_medium || undefined,
     deezerTrackId: String(track.id),
-    revealAnswer: `${title} — ${artist}`,
+    revealAnswer,
+    answerMode: 'qcm',
   }
 }
 
@@ -882,13 +1308,16 @@ export async function buildDeezerQuiz(input: {
   )
 
   let pool: DeezerTrack[]
+  let anchoredArtist: string | null = null
   try {
-    pool = await collectTracks(
+    const collected = await collectTracks(
       input.theme,
       input.scope,
       count + 60,
       input.difficulty,
     )
+    pool = collected.tracks
+    anchoredArtist = collected.anchoredArtist
   } catch (e) {
     return {
       error:
@@ -901,13 +1330,18 @@ export async function buildDeezerQuiz(input: {
   if (pool.length < 8) {
     return {
       error:
-        'Pas assez de tubes connus pour ce thème. Essaie Hits (global), un autre style, ou élargis la décennie.',
+        anchoredArtist
+          ? `Pas assez de titres de « ${anchoredArtist} » pour ce niveau. Essaie un autre artiste.`
+          : input.difficulty === 'hard'
+            ? 'Pas assez de titres pour ce thème en mode difficile. Essaie un artiste ou un style plus large.'
+            : 'Pas assez de tubes connus pour ce thème. Essaie Hits (global), un autre style, ou élargis la décennie.',
     }
   }
 
   // Vivier large pour les leurres ; sous-ensemble pour les bonnes réponses
   const distractorPool = [...pool]
   const answerPool = orderPoolForDifficulty(pool, input.difficulty)
+  const artistLocked = Boolean(anchoredArtist)
 
   const batchId = newId()
   const now = new Date().toISOString()
@@ -916,7 +1350,9 @@ export async function buildDeezerQuiz(input: {
   const usedTitles = new Set<string>()
   const usedWrongTitles = new Set<string>()
   const parsed = parseDeezerTheme(input.theme)
-  const themeLabel = parsed.focusLabel || 'Deezer'
+  const themeLabel = artistLocked
+    ? anchoredArtist || parsed.focusLabel || 'Deezer'
+    : parsed.focusLabel || 'Deezer'
 
   const DIFF_FR = { easy: 'facile', medium: 'moyen', hard: 'difficile' } as const
 
@@ -927,7 +1363,7 @@ export async function buildDeezerQuiz(input: {
     for (const track of shuffle(candidates)) {
       if (questions.length >= count) return
       if (usedTrackIds.has(track.id)) continue
-      const titleKey = normalizeKey(trackTitle(track))
+      const titleKey = titleDedupeKey(trackTitle(track))
       if (!titleKey || usedTitles.has(titleKey)) continue
       if (!opts.allowWrongAsCorrect && usedWrongTitles.has(titleKey)) continue
 
@@ -945,6 +1381,7 @@ export async function buildDeezerQuiz(input: {
         questions.length,
         themeLabel,
         avoidWrongs,
+        artistLocked,
       )
       if (!q) continue
       const fingerprint = normalizeKey(
@@ -964,7 +1401,7 @@ export async function buildDeezerQuiz(input: {
       usedTitles.add(titleKey)
       for (let i = 0; i < q.answers.length; i++) {
         if (i === q.correctIndex) continue
-        usedWrongTitles.add(normalizeKey(q.answers[i]))
+        usedWrongTitles.add(titleDedupeKey(q.answers[i]))
       }
       questions.push(q)
     }

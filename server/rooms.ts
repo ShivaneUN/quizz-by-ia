@@ -44,6 +44,9 @@ export interface RoomQuestion {
   coverUrl?: string
   deezerTrackId?: string
   revealAnswer?: string
+  answerMode?: 'qcm' | 'free'
+  acceptedAnswers?: string[]
+  freeInputHint?: 'title' | 'title_or_artist'
 }
 
 /** Réponse d’un joueur sur une manche (null = pas répondu / faux auto) */
@@ -101,6 +104,13 @@ export interface RoomState {
   genQuestionsTotal?: number
   /** Horodatage début génération — watchdog anti-blocage */
   generatingStartedAt?: number
+  /**
+   * Questions déjà collectées pendant generating (top-up multi).
+   * Jamais exposé via publicRoomView.
+   */
+  genCollectedQuestions?: RoomQuestion[]
+  /** Signal public : l’hôte doit rappeler runGenerate pour un complément */
+  needsTopUp?: boolean
   /** L’hôte est sur l’écran choix de thème — les autres restent au lobby */
   hostPickingTheme?: boolean
   createdAt: number
@@ -113,8 +123,11 @@ export const MULTI_QUESTION_COUNT = 10
 export const ROOM_TTL_SEC = 60 * 5
 /** Au-delà : génération orpheline (ex. kill Vercel) → status error */
 export const GENERATING_STALE_MS = 65_000
+/** Verrou runGenerate (secondes) — ≥ budget IA + marge */
+export const GEN_LOCK_TTL_SEC = 70
 
 const memory = new Map<string, RoomState>()
+const genLockMemory = new Map<string, { token: string; expiresAt: number }>()
 
 function redisConfigured(): boolean {
   return Boolean(
@@ -150,6 +163,82 @@ export { redisCommand, redisConfigured }
 
 function roomKey(code: string): string {
   return `quizz:room:${code.toUpperCase()}`
+}
+
+function genLockKey(code: string): string {
+  return `quizz:genlock:${code.toUpperCase()}`
+}
+
+/** Pose un verrou exclusif pour runGenerate (SET NX EX). */
+export async function tryAcquireGenLock(
+  code: string,
+): Promise<{ acquired: boolean; token: string }> {
+  const c = code.trim().toUpperCase()
+  const token = newPlayerId()
+  if (redisConfigured()) {
+    const result = await redisCommand<string | null>(
+      'SET',
+      genLockKey(c),
+      token,
+      'NX',
+      'EX',
+      GEN_LOCK_TTL_SEC,
+    )
+    return { acquired: result === 'OK', token }
+  }
+  const now = Date.now()
+  const cur = genLockMemory.get(c)
+  if (cur && cur.expiresAt > now) {
+    return { acquired: false, token }
+  }
+  genLockMemory.set(c, {
+    token,
+    expiresAt: now + GEN_LOCK_TTL_SEC * 1000,
+  })
+  return { acquired: true, token }
+}
+
+/** Libère le verrou si le token correspond (fin normale / finally). */
+export async function releaseGenLock(
+  code: string,
+  token: string,
+): Promise<void> {
+  const c = code.trim().toUpperCase()
+  if (redisConfigured()) {
+    try {
+      const cur = await redisCommand<string | null>('GET', genLockKey(c))
+      if (cur === token) await redisCommand('DEL', genLockKey(c))
+    } catch {
+      /* best effort */
+    }
+    return
+  }
+  const cur = genLockMemory.get(c)
+  if (cur?.token === token) genLockMemory.delete(c)
+}
+
+/** Annulation hôte / watchdog — force la libération. */
+export async function forceReleaseGenLock(code: string): Promise<void> {
+  const c = code.trim().toUpperCase()
+  if (redisConfigured()) {
+    try {
+      await redisCommand('DEL', genLockKey(c))
+    } catch {
+      /* best effort */
+    }
+    return
+  }
+  genLockMemory.delete(c)
+}
+
+/** Nettoie les champs de génération (progress + partial + signal top-up). */
+export function clearGeneratingFields(room: RoomState): void {
+  delete room.genEstimateSec
+  delete room.genQuestionsDone
+  delete room.genQuestionsTotal
+  delete room.generatingStartedAt
+  delete room.genCollectedQuestions
+  delete room.needsTopUp
 }
 
 function normalizeRoomStatus(raw: string | undefined): RoomStatus {
@@ -455,6 +544,8 @@ export function publicRoomView(
     previewUrl?: string
     coverUrl?: string
     revealAnswer?: string
+    answerMode?: 'qcm' | 'free'
+    freeInputHint?: 'title' | 'title_or_artist'
   }>
   roundEndsAt: number
   /** Horloge serveur au moment de la réponse — pour corriger le skew client */
@@ -496,12 +587,13 @@ export function publicRoomView(
   const roundEndsAt = timerOff ? now + 365 * 24 * 60 * 60 * 1000 : deadline
 
   return {
-    ...room,
+    ...(({ genCollectedQuestions: _omit, ...safe }) => safe)(room),
     quizMode: room.quizMode === 'audio' ? 'audio' : 'standard',
     timerStarted: Boolean(room.timerStarted),
     timerPaused: Boolean(room.timerPaused),
     roundDurationMs: duration,
     roundDeadlineAt: deadline,
+    needsTopUp: Boolean(room.needsTopUp),
     questions: room.questions.map((q, i) => {
       const show =
         revealAll ||
@@ -515,6 +607,9 @@ export function publicRoomView(
         previewUrl: q.previewUrl,
         coverUrl: q.coverUrl,
         imageUrl: undefined,
+        answerMode: q.answerMode === 'free' ? 'free' : 'qcm',
+        freeInputHint:
+          q.freeInputHint === 'title' ? 'title' : 'title_or_artist',
         ...(show
           ? {
               correctIndex: q.correctIndex,
@@ -631,11 +726,9 @@ export async function syncRoomRound(code: string): Promise<RoomState | null> {
       room.status = 'error'
       room.errorMessage =
         'La génération a expiré (délai serveur). Réessaie.'
-      delete room.genEstimateSec
-      delete room.genQuestionsDone
-      delete room.genQuestionsTotal
-      delete room.generatingStartedAt
+      clearGeneratingFields(room)
       await saveRoom(room)
+      void forceReleaseGenLock(code)
       void import('./errorLog.js').then((m) =>
         m.logError({
           scope: 'room',

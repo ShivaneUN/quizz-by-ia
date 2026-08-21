@@ -16,6 +16,7 @@ import {
 import { createEmptyTierAttempts, resolveTierOutcome } from './lib/progression'
 import { reportCalibHand } from './lib/calibTelemetry'
 import { bankSlug, isEphemeralTheme } from './lib/themeSlug'
+import { matchesFreeMusicAnswer } from './lib/freeAnswer'
 import {
   answerRoom,
   beginRoomRound,
@@ -173,6 +174,7 @@ export default function App() {
   /** true si l’utilisateur a cliqué Annuler / Accueil — pas d’erreur parasite */
   const soloCancelRef = useRef(false)
   const multiGenAbortRef = useRef<AbortController | null>(null)
+  const multiTopUpInFlightRef = useRef(false)
   const multiThemeReturnRef = useRef<'lobby' | 'score'>('lobby')
   const screenRef = useRef(screen)
   screenRef.current = screen
@@ -531,6 +533,76 @@ export default function App() {
     }
   }, [multiRoom?.code, multiPlayerId, screen])
 
+  // Hôte : complément de génération multi (needsTopUp) sans double appel concurrent
+  useEffect(() => {
+    if (!multiRoom || !multiPlayerId) return
+    if (multiPlayerId !== multiRoom.hostId) return
+    if (multiRoom.status !== 'generating' || !multiRoom.needsTopUp) return
+    if (multiTopUpInFlightRef.current) return
+
+    const code = multiRoom.code
+    const playerId = multiPlayerId
+    multiTopUpInFlightRef.current = true
+    setStatusMsg('Complément de génération…')
+
+    void (async () => {
+      try {
+        const gen = await runRoomGenerate(
+          { code, playerId },
+          multiGenAbortRef.current?.signal,
+        )
+        setMultiRoom((prev) => preferNewerRoom(prev, gen.room))
+        if (gen.message) setStatusMsg(gen.message)
+        if (
+          gen.room.status === 'playing' ||
+          gen.room.status === 'finished'
+        ) {
+          setError(null)
+          setStatusMsg(null)
+          setScreen(multiScreenForStatus(gen.room.status))
+        }
+      } catch (e) {
+        if (multiGenAbortRef.current?.signal.aborted) return
+        const fromErr = roomFromError(e)
+        if (fromErr) {
+          setMultiRoom((prev) => preferNewerRoom(prev, fromErr))
+          if (fromErr.status === 'error') {
+            setError(
+              fromErr.errorMessage ||
+                (e instanceof Error ? e.message : 'Génération échouée'),
+            )
+          }
+        }
+        try {
+          const { room } = await pollRoom(code)
+          setMultiRoom((prev) => preferNewerRoom(prev, room))
+          if (room.status === 'error') {
+            setError(
+              room.errorMessage ||
+                (e instanceof Error ? e.message : 'Génération échouée'),
+            )
+          } else if (
+            room.status === 'playing' ||
+            room.status === 'finished'
+          ) {
+            setError(null)
+            setScreen(multiScreenForStatus(room.status))
+          }
+        } catch {
+          /* poll best-effort */
+        }
+      } finally {
+        multiTopUpInFlightRef.current = false
+      }
+    })()
+  }, [
+    multiRoom?.code,
+    multiRoom?.status,
+    multiRoom?.needsTopUp,
+    multiRoom?.updatedAt,
+    multiPlayerId,
+  ])
+
   // Ouvre le dashboard frappe quand la génération multi se termine
   useEffect(() => {
     const status = multiRoom?.status ?? null
@@ -816,15 +888,26 @@ export default function App() {
     }
   }
 
-  function handleAnswer(answerIndex: number) {
+  function handleAnswer(answer: number | string) {
     if (selectedIndex !== null || screen !== 'play' || pendingScored) return
 
     const q = session.currentHand[session.handIndex]
     if (!q) return
 
-    const timedOut = answerIndex < 0
-    const correct = !timedOut && answerIndex === q.correctIndex
-    setSelectedIndex(timedOut ? -1 : answerIndex)
+    let timedOut = false
+    let correct = false
+    let storedIndex = 0
+
+    if (typeof answer === 'string') {
+      correct = matchesFreeMusicAnswer(answer, q.acceptedAnswers)
+      storedIndex = correct ? q.correctIndex : -2
+    } else {
+      timedOut = answer < 0
+      correct = !timedOut && answer === q.correctIndex
+      storedIndex = timedOut ? -1 : answer
+    }
+
+    setSelectedIndex(storedIndex)
     setPendingScored(true)
 
     setAudit((prev) => [
@@ -833,7 +916,7 @@ export default function App() {
         questionId: q.id,
         question: q.question,
         answers: q.answers,
-        selectedIndex: timedOut ? -1 : answerIndex,
+        selectedIndex: storedIndex,
         correctIndex: q.correctIndex,
         correct,
         explanation: q.explanation,
@@ -1483,7 +1566,14 @@ export default function App() {
 
       if (genRoom) {
         setError(null)
-        setScreen(multiScreenForStatus(genRoom.status))
+        if (genRoom.status === 'generating' && genRoom.needsTopUp) {
+          setStatusMsg(
+            'Lot partiel — complément de génération en cours…',
+          )
+          setScreen('multi-lobby')
+        } else {
+          setScreen(multiScreenForStatus(genRoom.status))
+        }
       }
     } catch (e) {
       if (ac.signal.aborted) return
@@ -1718,13 +1808,15 @@ export default function App() {
     }
   }
 
-  async function handleMultiAnswer(answerIndex: number) {
+  async function handleMultiAnswer(answer: number | string) {
     if (!multiRoom || !multiPlayerId) return
     try {
       const res = await answerRoom({
         code: multiRoom.code,
         playerId: multiPlayerId,
-        answerIndex,
+        ...(typeof answer === 'string'
+          ? { answerText: answer }
+          : { answerIndex: answer }),
       })
       setMultiRoom((prev) => preferNewerRoom(prev, res.room))
       if (res.room.status === 'finished') {
