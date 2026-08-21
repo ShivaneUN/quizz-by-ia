@@ -88,6 +88,12 @@ async function main() {
     console.log('ERREUR:', result.error)
     process.exit(1)
   }
+  if (result.partial) {
+    console.log(
+      `ERREUR: lot partiel (${result.received ?? result.questions?.length ?? 0}/${result.target ?? 10})`,
+    )
+    process.exit(1)
+  }
 
   const qs = result.questions ?? []
   console.log(`Questions: ${qs.length}`)

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { generateQuestions } from './lib/api'
 import { attachImagesToQuestions } from './lib/resolveImage'
 import {
+  clearBankTier,
   collectExcludeQuestionTexts,
   drawUnseen,
   getOrCreatePlayerId,
@@ -344,6 +345,7 @@ export default function App() {
 
       let bank = loadBank(themeSlug)
       let lastGenError: string | undefined
+      let usedPartialLot = false
 
       async function generateAndMerge(): Promise<boolean> {
         try {
@@ -364,6 +366,7 @@ export default function App() {
               if (stage) setStatusMsg(stage)
             },
           )
+          if (gen.partial === true) usedPartialLot = true
           const tierQs = await finalizeImageQs(
             gen.questions.filter((q) => q.difficulty === difficulty),
           )
@@ -447,6 +450,10 @@ export default function App() {
         hand.map((q) => q.question),
       )
       saveHistory(playerId, themeSlug, history)
+
+      if (usedPartialLot) {
+        clearBankTier(themeSlug, difficulty)
+      }
 
       return { hand, msg }
     },

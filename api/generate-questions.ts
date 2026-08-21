@@ -110,10 +110,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             await setGenProgress(progressId, done, total, engine, stage)
           }
         : undefined,
+      true,
     )
     const generationMs = Date.now() - started
+    const qCount = Array.isArray(result.questions) ? result.questions.length : 0
 
-    if (result.error) {
+    if (result.partial && qCount >= 1 && qCount <= 9) {
+      if (progressId) {
+        await setGenProgress(progressId, qCount, 10, result.source, 'Lot partiel')
+      }
+      await recordGenerationMs(generationMs)
+      const { estimateSec } = await getGenerationEstimateSec('solo')
+      return res.status(200).json({
+        theme: theme.trim(),
+        themeSlug,
+        questions: result.questions,
+        source: result.source,
+        message: result.message,
+        generationMs,
+        estimateSec,
+        partial: true,
+        received: result.received ?? qCount,
+        target: result.target ?? 10,
+      })
+    }
+
+    if (result.error && qCount === 0) {
       if (progressId) await clearGenProgress(progressId)
       const publicError = isGatewayTimeoutMessage(result.error)
         ? 'Le serveur a mis trop de temps à répondre, réessaie dans quelques secondes'
@@ -132,33 +154,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(422).json({ error: result.error })
     }
 
-    if (!Array.isArray(result.questions) || result.questions.length !== 10) {
-      if (progressId) await clearGenProgress(progressId)
-      const msg =
-        'JSON invalide : le lot ne contient pas exactement 10 questions. Réessaie.'
-      logError({
-        scope: 'generate',
-        message: msg,
-        status: 422,
-        theme: typeof theme === 'string' ? theme.trim() : undefined,
-        path: '/api/generate-questions',
+    if (qCount === 10) {
+      if (progressId) await setGenProgress(progressId, 10, 10, result.source, 'Terminé')
+      await recordGenerationMs(generationMs)
+      const { estimateSec } = await getGenerationEstimateSec('solo')
+      return res.status(200).json({
+        theme: theme.trim(),
+        themeSlug,
+        questions: result.questions,
+        source: result.source,
+        message: result.message,
+        generationMs,
+        estimateSec,
       })
-      return res.status(422).json({ error: msg })
     }
 
-    if (progressId) await setGenProgress(progressId, 10, 10, result.source, 'Terminé')
-    await recordGenerationMs(generationMs)
-    const { estimateSec } = await getGenerationEstimateSec('solo')
-
-    return res.status(200).json({
-      theme: theme.trim(),
-      themeSlug,
-      questions: result.questions,
-      source: result.source,
-      message: result.message,
-      generationMs,
-      estimateSec,
+    if (progressId) await clearGenProgress(progressId)
+    const msg =
+      'JSON invalide : le lot ne contient pas exactement 10 questions. Réessaie.'
+    logError({
+      scope: 'generate',
+      message: msg,
+      status: 422,
+      theme: typeof theme === 'string' ? theme.trim() : undefined,
+      path: '/api/generate-questions',
     })
+    return res.status(422).json({ error: msg })
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Erreur serveur'
     console.error('[generate-questions]', message)

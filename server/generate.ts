@@ -1066,9 +1066,20 @@ export type GenProgressCb = (
   stage?: string,
 ) => void | Promise<void>
 
+export type GenerateQuestionsResult = {
+  questions: GeneratedQuestion[]
+  source: GenerateSource
+  message?: string
+  error?: string
+  partial?: boolean
+  received?: number
+  target?: number
+}
+
 /**
  * Un seul palier par appel. provider: auto | groq | gemini | cerebras | deepseek | openrouter.
  * Lots de 3 + garde-fou 50s (sous le kill Vercel 60s).
+ * allowPartial: si true, un lot 1–9 est renvoyé sans error (partial/received/target).
  */
 export async function generateQuestions(
   theme: string,
@@ -1080,13 +1091,30 @@ export async function generateQuestions(
   contentMode: QuizContentMode = 'standard',
   excludeQuestions: string[] = [],
   onProgress?: GenProgressCb,
-): Promise<{
-  questions: GeneratedQuestion[]
-  source: GenerateSource
-  message?: string
-  error?: string
-}> {
+  allowPartial = false,
+): Promise<GenerateQuestionsResult> {
   const HARD_MS = 58_000
+  const TARGET = 10
+  /** Partagé avec Inner : lisible si le timeout gagne la race. */
+  const collected: GeneratedQuestion[] = []
+
+  function hardFail(error: string): GenerateQuestionsResult {
+    return { questions: [], source: 'mock', error }
+  }
+
+  function partialOrHardFail(error: string): GenerateQuestionsResult {
+    if (allowPartial && collected.length > 0) {
+      return {
+        questions: collected.slice(),
+        source: 'mock',
+        partial: true,
+        received: collected.length,
+        target: TARGET,
+      }
+    }
+    return hardFail(error)
+  }
+
   try {
     return await Promise.race([
       generateQuestionsInner(
@@ -1100,29 +1128,23 @@ export async function generateQuestions(
         excludeQuestions,
         onProgress,
         HARD_MS,
+        collected,
+        allowPartial,
       ),
-      new Promise<{
-        questions: GeneratedQuestion[]
-        source: GenerateSource
-        message?: string
-        error?: string
-      }>((resolve) => {
+      new Promise<GenerateQuestionsResult>((resolve) => {
         setTimeout(() => {
-          resolve({
-            questions: [],
-            source: 'mock',
-            error:
+          resolve(
+            partialOrHardFail(
               'Génération trop longue (limite serveur). Réessaie dans quelques secondes.',
-          })
+            ),
+          )
         }, HARD_MS)
       }),
     ])
   } catch (e) {
-    return {
-      questions: [],
-      source: 'mock',
-      error: e instanceof Error ? e.message : 'Erreur de génération',
-    }
+    return partialOrHardFail(
+      e instanceof Error ? e.message : 'Erreur de génération',
+    )
   }
 }
 
@@ -1137,12 +1159,9 @@ async function generateQuestionsInner(
   excludeQuestions: string[],
   onProgress: GenProgressCb | undefined,
   hardMs: number,
-): Promise<{
-  questions: GeneratedQuestion[]
-  source: GenerateSource
-  message?: string
-  error?: string
-}> {
+  collected: GeneratedQuestion[],
+  allowPartial: boolean,
+): Promise<GenerateQuestionsResult> {
   void mode
   const batchId = newId()
   const now = new Date().toISOString()
@@ -1220,7 +1239,6 @@ async function generateQuestionsInner(
   const TOPUP_RESERVE_MS = 16_000
   const TOPUP_MIN_MS = 12_000
   const deadline = startedAt + hardMs - 4_000
-  const collected: GeneratedQuestion[] = []
   const seen = new Set<string>()
   const excluded = new Set(
     excludeQuestions.map((q) => q.trim().toLowerCase().replace(/\s+/g, ' ')),
@@ -1340,6 +1358,15 @@ async function generateQuestionsInner(
   }
 
   if (collected.length < TARGET) {
+    if (allowPartial && collected.length > 0) {
+      return {
+        questions: collected.slice(),
+        source: lastSource ?? 'mock',
+        partial: true,
+        received: collected.length,
+        target: TARGET,
+      }
+    }
     const timeoutLike = lastError && /délai dépassé/i.test(lastError)
     return {
       questions: [],

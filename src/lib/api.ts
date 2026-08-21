@@ -24,6 +24,10 @@ export interface GenerateResponse {
   generationMs?: number
   /** Prochaine ETA suggérée (s) */
   estimateSec?: number
+  /** Lot incomplet accepté côté serveur (1–9 questions) */
+  partial?: boolean
+  received?: number
+  target?: number
 }
 
 const TIMEOUT_MSG =
@@ -152,12 +156,12 @@ export async function generateQuestions(
       }
 
       const data = (await res.json()) as GenerateResponse
-      if (!Array.isArray(data.questions) || data.questions.length !== 10) {
-        throw new Error(
-          'JSON invalide : le lot ne contient pas exactement 10 questions. Réessaie.',
-        )
-      }
-      return data
+      const n = Array.isArray(data.questions) ? data.questions.length : 0
+      if (n === 10) return data
+      if (data.partial === true && n >= 1 && n <= 9) return data
+      throw new Error(
+        'JSON invalide : le lot ne contient pas exactement 10 questions. Réessaie.',
+      )
     } finally {
       stopPoll()
     }
@@ -176,7 +180,7 @@ export async function generateQuestions(
       data = await runAttempt(secondProgressId)
     }
 
-    bump(10, 10)
+    bump(data.received ?? data.questions.length, data.target ?? 10)
 
     const serverMs = Number(data.generationMs)
     if (Number.isFinite(serverMs) && serverMs > 0) {

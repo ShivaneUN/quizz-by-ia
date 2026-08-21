@@ -125,30 +125,67 @@ function localApiPlugin(): Plugin {
                     await setGenProgress(progressId, done, total, engine, stage)
                   }
                 : undefined,
+              true,
             )
             const generationMs = Date.now() - started
+            const qCount = Array.isArray(result.questions)
+              ? result.questions.length
+              : 0
 
-            if (result.error) {
+            if (result.partial && qCount >= 1 && qCount <= 9) {
+              await recordGenerationMs(generationMs)
+              const { estimateSec } = await getGenerationEstimateSec('solo')
+              res.statusCode = 200
+              res.setHeader('Content-Type', 'application/json')
+              res.end(
+                JSON.stringify({
+                  theme: theme.trim(),
+                  themeSlug,
+                  questions: result.questions,
+                  source: result.source,
+                  message: result.message,
+                  generationMs,
+                  estimateSec,
+                  partial: true,
+                  received: result.received ?? qCount,
+                  target: result.target ?? 10,
+                }),
+              )
+              return
+            }
+
+            if (result.error && qCount === 0) {
               res.statusCode = 422
               res.setHeader('Content-Type', 'application/json')
               res.end(JSON.stringify({ error: result.error }))
               return
             }
 
-            await recordGenerationMs(generationMs)
-            const { estimateSec } = await getGenerationEstimateSec('solo')
+            if (qCount === 10) {
+              await recordGenerationMs(generationMs)
+              const { estimateSec } = await getGenerationEstimateSec('solo')
+              res.statusCode = 200
+              res.setHeader('Content-Type', 'application/json')
+              res.end(
+                JSON.stringify({
+                  theme: theme.trim(),
+                  themeSlug,
+                  questions: result.questions,
+                  source: result.source,
+                  message: result.message,
+                  generationMs,
+                  estimateSec,
+                }),
+              )
+              return
+            }
 
-            res.statusCode = 200
+            res.statusCode = 422
             res.setHeader('Content-Type', 'application/json')
             res.end(
               JSON.stringify({
-                theme: theme.trim(),
-                themeSlug,
-                questions: result.questions,
-                source: result.source,
-                message: result.message,
-                generationMs,
-                estimateSec,
+                error:
+                  'JSON invalide : le lot ne contient pas exactement 10 questions. Réessaie.',
               }),
             )
           } catch (e) {

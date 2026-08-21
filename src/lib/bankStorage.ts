@@ -60,6 +60,27 @@ export function clearBank(themeSlug: string): void {
   localStorage.removeItem(BANK_PREFIX + themeSlug)
 }
 
+/** Retire uniquement les questions d’un palier ; supprime la clé si plus rien. */
+export function clearBankTier(themeSlug: string, difficulty: Difficulty): void {
+  const bank = loadBank(themeSlug)
+  if (!bank) return
+  const questions = bank.questions.filter((q) => q.difficulty !== difficulty)
+  if (questions.length === 0) {
+    localStorage.removeItem(BANK_PREFIX + themeSlug)
+    return
+  }
+  const counts = { easy: 0, medium: 0, hard: 0 } as QuestionBank['meta']['counts']
+  for (const q of questions) counts[q.difficulty]++
+  saveBank({
+    meta: {
+      ...bank.meta,
+      updatedAt: new Date().toISOString(),
+      counts,
+    },
+    questions,
+  })
+}
+
 /**
  * Vide banques de questions + historiques solo (localStorage).
  * Conserve l’id joueur, les sessions multi, et le classement mini-jeux.
