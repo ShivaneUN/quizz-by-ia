@@ -1,7 +1,7 @@
 import { defineConfig, loadEnv, type Plugin, type Connect } from 'vite'
 import react from '@vitejs/plugin-react'
 import {
-  generateQuestions,
+  generateQuestionsWithPartialCache,
   normalizeThemeSlug,
   parseAiProvider,
   parseQuizContentMode,
@@ -24,6 +24,7 @@ import {
   isValidProgressId,
   setGenProgress,
 } from './server/genProgress.ts'
+import { synthesizeQuizSpeech } from './server/tts.ts'
 
 function readBody(req: Connect.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -111,7 +112,7 @@ function localApiPlugin(): Plugin {
               ? String(rawProgressId).trim()
               : null
             if (progressId) await setGenProgress(progressId, 0, 10, undefined, 'Préparation')
-            const result = await generateQuestions(
+            const result = await generateQuestionsWithPartialCache(
               theme.trim(),
               themeSlug,
               mode,
@@ -496,6 +497,43 @@ function localApiPlugin(): Plugin {
             await curatedBankHandler(fakeReq as never, fakeRes as never)
           } catch (e) {
             const message = e instanceof Error ? e.message : 'Erreur serveur'
+            res.statusCode = 500
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ error: message }))
+          }
+        })()
+      })
+
+      server.middlewares.use('/api/tts', (req, res) => {
+        if (req.method !== 'POST') {
+          res.statusCode = 405
+          res.setHeader('Allow', 'POST')
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify({ error: 'Method not allowed' }))
+          return
+        }
+
+        void (async () => {
+          try {
+            const body = JSON.parse((await readBody(req)) || '{}') as Record<
+              string,
+              unknown
+            >
+            const result = await synthesizeQuizSpeech(body)
+            if (!result.ok) {
+              res.statusCode = result.status
+              res.setHeader('Content-Type', 'application/json')
+              res.setHeader('Cache-Control', 'no-store')
+              res.end(JSON.stringify({ error: result.error }))
+              return
+            }
+            res.statusCode = 200
+            res.setHeader('Content-Type', result.contentType)
+            res.setHeader('Cache-Control', 'no-store')
+            res.end(result.audio)
+          } catch (e) {
+            const message = e instanceof Error ? e.message : 'Erreur serveur'
+            console.error('[local tts]', message)
             res.statusCode = 500
             res.setHeader('Content-Type', 'application/json')
             res.end(JSON.stringify({ error: message }))

@@ -108,6 +108,37 @@
 
 .quiz-play__audio {
   width: min(100%, 22rem);
+  flex: 1 1 auto;
+}
+
+.preview-audio__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  width: 100%;
+}
+
+.preview-audio__auto {
+  flex-shrink: 0;
+  min-height: 2rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--ink) 18%, transparent);
+  background: color-mix(in srgb, var(--paper) 88%, var(--ink));
+  color: var(--ink);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.preview-audio__auto.is-on {
+  border-color: color-mix(in srgb, var(--teal) 45%, transparent);
+  background: color-mix(in srgb, var(--teal) 22%, var(--paper));
+  color: color-mix(in srgb, var(--teal) 55%, var(--ink));
 }
 
 .quiz-play__audio-caption {

@@ -6,27 +6,44 @@ export type ThemeTile = {
   color: string
   shape: 'circle' | 'rect'
   angle?: number
+  /** Pastille désactivée (ex. bientôt) */
+  soon?: boolean
 }
 
-/** Tous les thèmes sur la roue (16 pastilles, 22.5° d’écart) */
-export const ORBIT_THEMES: ThemeTile[] = [
-  { id: 'histoire', label: 'Histoire', color: '#6b4423', shape: 'circle', angle: -90 },
-  { id: 'sport', label: 'Sport', color: '#1e7a3a', shape: 'circle', angle: -67.5 },
-  { id: 'musique', label: 'Musique', color: '#5b2d8e', shape: 'circle', angle: -45 },
-  { id: 'cinema', label: 'Cinéma', color: '#8b1e2d', shape: 'circle', angle: -22.5 },
-  { id: 'geographie', label: 'Géographie', color: '#0d6b6b', shape: 'circle', angle: 0 },
-  { id: 'sciences', label: 'Sciences', color: '#1a4a8a', shape: 'circle', angle: 22.5 },
-  { id: 'tech', label: 'Tech', color: '#0f4c75', shape: 'circle', angle: 45 },
-  { id: 'nature', label: 'Nature', color: '#2d6a4f', shape: 'circle', angle: 67.5 },
-  { id: 'cuisine', label: 'Cuisine', color: '#a35a1f', shape: 'circle', angle: 90 },
-  { id: 'art', label: 'Art', color: '#9b2d5a', shape: 'circle', angle: 112.5 },
-  { id: 'mythologie', label: 'Mythologie', color: '#6a3d9a', shape: 'circle', angle: 135 },
-  { id: 'litterature', label: 'Littérature', color: '#2a5080', shape: 'circle', angle: 157.5 },
-  { id: 'animaux', label: 'Animaux', color: '#3d6b2a', shape: 'circle', angle: 180 },
-  { id: 'espace', label: 'Espace', color: '#1a2a6b', shape: 'circle', angle: 202.5 },
-  { id: 'jeuxvideo', label: 'Jeux vidéo', color: '#0d5c5c', shape: 'circle', angle: 225 },
-  { id: 'actualite', label: 'Actualité', color: '#8a3a1a', shape: 'circle', angle: 247.5 },
+const ORBIT_IDS: Omit<ThemeTile, 'angle'>[] = [
+  { id: 'histoire', label: 'Histoire', color: '#6b4423', shape: 'circle' },
+  { id: 'sport', label: 'Sport', color: '#1e7a3a', shape: 'circle' },
+  { id: 'musique', label: 'Musique', color: '#5b2d8e', shape: 'circle' },
+  { id: 'cinema', label: 'Cinéma', color: '#8b1e2d', shape: 'circle' },
+  { id: 'geographie', label: 'Géographie', color: '#0d6b6b', shape: 'circle' },
+  { id: 'sciences', label: 'Sciences', color: '#1a4a8a', shape: 'circle' },
+  { id: 'tech', label: 'Tech', color: '#0f4c75', shape: 'circle' },
+  { id: 'nature', label: 'Nature', color: '#2d6a4f', shape: 'circle' },
+  { id: 'cuisine', label: 'Cuisine', color: '#a35a1f', shape: 'circle' },
+  { id: 'art', label: 'Art', color: '#9b2d5a', shape: 'circle' },
+  { id: 'mythologie', label: 'Mythologie', color: '#6a3d9a', shape: 'circle' },
+  { id: 'litterature', label: 'Littérature', color: '#2a5080', shape: 'circle' },
+  { id: 'animaux', label: 'Animaux', color: '#3d6b2a', shape: 'circle' },
+  { id: 'espace', label: 'Espace', color: '#1a2a6b', shape: 'circle' },
+  { id: 'jeuxvideo', label: 'Jeux vidéo', color: '#0d5c5c', shape: 'circle' },
+  { id: 'actualite', label: 'Actualité', color: '#8a3a1a', shape: 'circle' },
+  /** Orphelins banque — bientôt */
+  { id: 'custom', label: 'Custom', color: '#4a5568', shape: 'circle', soon: true },
+  /** Banque Q déjà générées — bientôt */
+  {
+    id: 'pregen',
+    label: 'Thème pré-généré',
+    color: '#6a5a2a',
+    shape: 'circle',
+    soon: true,
+  },
 ]
+
+/** Tous les thèmes sur la roue (angles répartis) */
+export const ORBIT_THEMES: ThemeTile[] = ORBIT_IDS.map((t, i) => ({
+  ...t,
+  angle: -90 + (360 / ORBIT_IDS.length) * i,
+}))
 
 /** @deprecated tout est dans ORBIT_THEMES */
 export const BOTTOM_THEMES: ThemeTile[] = []
@@ -34,6 +51,7 @@ export const BOTTOM_THEMES: ThemeTile[] = []
 /**
  * Sous-thèmes par thème parent.
  * "Général" = tout le thème sans focus particulier.
+ * `custom` : sous-thèmes orphelins banque (complétés dynamiquement côté UI).
  */
 export const SUBTHEMES: Record<string, string[]> = {
   histoire: [
@@ -180,6 +198,16 @@ export const SUBTHEMES: Record<string, string[]> = {
     'Sciences & tech',
     'Sport actualité',
   ],
+  custom: ['Général'],
+  pregen: ['Général'],
+}
+
+/** Sous-thèmes officiels + pastille « Custom » (générés associés). */
+export function officialSubsForTheme(themeId: string): string[] {
+  const base = SUBTHEMES[themeId] ?? ['Général']
+  if (themeId === 'custom' || themeId === 'pregen') return base
+  if (base.includes('Custom')) return base
+  return [...base, 'Custom']
 }
 
 export function getThemeById(id: string): ThemeTile | undefined {

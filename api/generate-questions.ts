@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import {
-  generateQuestions,
+  generateQuestionsWithPartialCache,
   normalizeThemeSlug,
   parseAiProvider,
   parseQuizContentMode,
@@ -96,7 +96,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const started = Date.now()
     if (progressId) await setGenProgress(progressId, 0, 10, undefined, 'Préparation')
 
-    const result = await generateQuestions(
+    const result = await generateQuestionsWithPartialCache(
       theme.trim(),
       themeSlug,
       mode,
@@ -147,6 +147,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         status: isGatewayTimeoutMessage(result.error) ? 504 : 422,
         theme: typeof theme === 'string' ? theme.trim() : undefined,
         path: '/api/generate-questions',
+        instead: isGatewayTimeoutMessage(result.error)
+          ? 'Message timeout au joueur — réessai manuel'
+          : 'Erreur affichée au joueur (génération solo échouée)',
       })
       if (isGatewayTimeoutMessage(result.error)) {
         return res.status(504).json({ error: publicError })
@@ -178,6 +181,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       status: 422,
       theme: typeof theme === 'string' ? theme.trim() : undefined,
       path: '/api/generate-questions',
+      instead: 'Lot incomplet rejeté — joueur doit réessayer',
     })
     return res.status(422).json({ error: msg })
   } catch (e) {
@@ -192,6 +196,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       detail: message !== publicError ? message : undefined,
       status: isGatewayTimeoutMessage(message) ? 504 : 500,
       path: '/api/generate-questions',
+      instead: isGatewayTimeoutMessage(message)
+        ? 'Message timeout au joueur — réessai manuel'
+        : 'Erreur 500 affichée au joueur',
     })
     if (isGatewayTimeoutMessage(message)) {
       return res.status(504).json({ error: publicError })

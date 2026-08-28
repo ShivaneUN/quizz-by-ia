@@ -7,6 +7,9 @@
       "maxDuration": 60,
       "includeFiles": "data/curated/**"
     },
+    "api/fact-check.ts": {
+      "maxDuration": 60
+    },
     "api/room.ts": {
       "maxDuration": 60
     },
@@ -15,6 +18,9 @@
     },
     "api/calib-stats.ts": {
       "includeFiles": "data/curated/**"
+    },
+    "api/tts.ts": {
+      "maxDuration": 25
     }
   },
   "rewrites": [

@@ -1,7 +1,6 @@
 /**
- * Client : banque curatée (liké + vérif OK).
- * Placement catalogue ou fichier custom — jamais de nouveau thème UI sans demande.
- * L’envoi serveur est no-op tant que l’ingest est désactivé.
+ * Client : banque curatée.
+ * Pour l’instant : enregistre seulement les thèmes / sous-thèmes custom (pas les questions).
  */
 
 import type { Difficulty } from '../types'
@@ -14,9 +13,7 @@ export interface CuratedQuestionPayload {
   difficulty: Difficulty
   theme: string
   themeSlug?: string
-  /** Id catalogue si connu (ex: musique) — ne pas inventer */
   themeId?: string
-  /** Sous-thème catalogue exact si connu */
   subTheme?: string
   scope?: 'fr' | 'international'
   explanation?: string
@@ -32,7 +29,34 @@ export interface CuratedQuestionPayload {
   playMode?: 'manual' | 'progression'
 }
 
-/** Prépare un envoi — no-op utile tant que l’API refuse (ingest off). */
+/** Enregistre un slot thème/sous-thème custom (fichier vide) — pas de questions. */
+export function ensureCuratedThemeFromPlay(
+  rawTheme: string,
+  hints?: { themeId?: string; subTheme?: string },
+): void {
+  const raw = String(rawTheme ?? '').trim()
+  if (!raw) return
+  try {
+    void fetch('/api/curated-bank', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'ensure-theme',
+        rawTheme: raw,
+        theme: raw,
+        themeId: hints?.themeId,
+        subTheme: hints?.subTheme ?? raw,
+      }),
+      keepalive: true,
+    }).catch(() => {
+      /* ignore */
+    })
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Prépare un envoi question — no-op tant que l’ingest questions est off. */
 export function reportCuratedCandidate(payload: CuratedQuestionPayload): void {
   try {
     void fetch('/api/curated-bank', {

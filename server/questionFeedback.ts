@@ -1,5 +1,5 @@
 /**
- * Feedback joueur sur les questions (👍 / 👎 / vérif / à revoir).
+ * Feedback joueur sur les questions (👍 / 👎 / vérif / à revoir / signalement).
  * Redis prod + mémoire local — indépendant du cache questions.
  */
 
@@ -10,7 +10,8 @@ const MAX_ENTRIES = 3000
 /** Évite de logger 10× la même question douteuse. */
 const REVIEW_DEDUP_MS = 7 * 24 * 60 * 60 * 1000
 
-export type FeedbackKind = 'up' | 'down' | 'verify' | 'review'
+export type FeedbackKind = 'up' | 'down' | 'verify' | 'review' | 'report'
+export type ReportTarget = 'question' | 'answer' | 'both'
 
 export type FactVerdict = 'ok' | 'douteux' | 'faux' | 'inconnu'
 
@@ -30,6 +31,8 @@ export interface QuestionFeedbackEvent {
   mode?: 'solo' | 'multi'
   playerCorrect?: boolean
   selectedIndex?: number
+  /** Cible du signalement (kind=report) */
+  reportTarget?: ReportTarget
   /** Résultat de la vérif (surtout kind=review) */
   verdict?: FactVerdict
   answerVerdict?: FactVerdict
@@ -77,11 +80,25 @@ function asVerdict(raw: unknown): FactVerdict | undefined {
   return undefined
 }
 
+function asReportTarget(raw: unknown): ReportTarget | undefined {
+  const v = String(raw ?? '')
+    .toLowerCase()
+    .trim()
+  if (v === 'question' || v === 'answer' || v === 'both') return v
+  return undefined
+}
+
 function normalize(
   raw: Partial<QuestionFeedbackEvent>,
 ): QuestionFeedbackEvent | null {
   const kind = raw.kind
-  if (kind !== 'up' && kind !== 'down' && kind !== 'verify' && kind !== 'review') {
+  if (
+    kind !== 'up' &&
+    kind !== 'down' &&
+    kind !== 'verify' &&
+    kind !== 'review' &&
+    kind !== 'report'
+  ) {
     return null
   }
   const question = String(raw.question ?? '').trim().slice(0, 400)
@@ -94,6 +111,10 @@ function normalize(
   const correctAnswer =
     String(raw.correctAnswer ?? answers[idx] ?? '').trim().slice(0, 200) ||
     answers[idx]
+  const reportTarget =
+    kind === 'report'
+      ? asReportTarget(raw.reportTarget) ?? 'both'
+      : undefined
   return {
     at: Number(raw.at) || Date.now(),
     kind,
@@ -119,6 +140,7 @@ function normalize(
       typeof raw.selectedIndex === 'number'
         ? Math.floor(raw.selectedIndex)
         : undefined,
+    reportTarget,
     verdict: asVerdict(raw.verdict),
     answerVerdict: asVerdict(raw.answerVerdict),
     sourceVerdict: asVerdict(raw.sourceVerdict),
@@ -129,12 +151,11 @@ function normalize(
       ? String(raw.verifyTitle).trim().slice(0, 200)
       : undefined,
     verifyNote: raw.verifyNote
-      ? String(raw.verifyNote).trim().slice(0, 500)
+      ? String(raw.verifyNote).trim().slice(0, 400)
       : undefined,
     sourcesConfirmed:
-      typeof raw.sourcesConfirmed === 'number' &&
-      Number.isFinite(raw.sourcesConfirmed)
-        ? Math.max(0, Math.min(20, Math.floor(raw.sourcesConfirmed)))
+      typeof raw.sourcesConfirmed === 'number'
+        ? Math.max(0, Math.floor(raw.sourcesConfirmed))
         : undefined,
     confirmingSources: raw.confirmingSources
       ? String(raw.confirmingSources).trim().slice(0, 500)
@@ -225,11 +246,13 @@ export function summarizeFeedback(events: QuestionFeedbackEvent[]) {
   let down = 0
   let verify = 0
   let review = 0
+  let report = 0
   for (const e of events) {
     if (e.kind === 'up') up += 1
     else if (e.kind === 'down') down += 1
     else if (e.kind === 'review') review += 1
+    else if (e.kind === 'report') report += 1
     else verify += 1
   }
-  return { up, down, verify, review, total: events.length }
+  return { up, down, verify, review, report, total: events.length }
 }

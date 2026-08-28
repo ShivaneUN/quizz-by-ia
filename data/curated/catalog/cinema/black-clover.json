@@ -1,8 +1,9 @@
 {
-  "placementKind": "custom",
-  "theme": "Black Clover",
-  "customKey": "black-clover",
-  "groupKey": "custom/black-clover",
+  "placementKind": "catalog",
+  "themeId": "cinema",
+  "theme": "Cinéma",
+  "subTheme": "Black Clover",
+  "groupKey": "catalog/cinema/black-clover",
   "questions": [
     {
       "id": "cur-mt1w4l2c-w0j7hs",

@@ -165,6 +165,26 @@ export function ThemeIcon({ id }: { id: string }) {
           <path fill="none" stroke={stroke} strokeWidth="2.5" d="M16 18h16M16 24h16M16 30h10" />
         </svg>
       )
+    case 'custom':
+      return (
+        <svg viewBox="0 0 48 48" aria-hidden>
+          <path
+            fill="none"
+            stroke={stroke}
+            strokeWidth="3"
+            strokeLinecap="round"
+            d="M24 10v28M10 24h28"
+          />
+          <circle cx="24" cy="24" r="14" fill="none" stroke={stroke} strokeWidth="2.5" strokeDasharray="4 3" />
+        </svg>
+      )
+    case 'pregen':
+      return (
+        <svg viewBox="0 0 48 48" aria-hidden>
+          <rect x="12" y="10" width="24" height="28" rx="3" fill="none" stroke={stroke} strokeWidth="3" />
+          <path fill="none" stroke={stroke} strokeWidth="2.5" d="M18 18h12M18 24h12M18 30h8" />
+        </svg>
+      )
     default:
       return (
         <svg viewBox="0 0 48 48" aria-hidden>

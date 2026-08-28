@@ -53,7 +53,8 @@ export function listApiKeys(engine: RotateEngine): string[] {
   }
 
   push(process.env[prefix])
-  for (let i = 2; i <= 8; i++) push(process.env[`${prefix}_${i}`])
+  // Gemini : jusqu’à 16 clés numérotées ; Groq reste en pratique ≤ 8
+  for (let i = 2; i <= 16; i++) push(process.env[`${prefix}_${i}`])
 
   const csv = process.env[`${prefix}S`]
   if (csv) {
@@ -171,37 +172,35 @@ async function claim(c: Cand): Promise<PickedAi> {
   }
 }
 
-/** Essaie de prendre un slot libre (RR puis multi-capacité). */
-async function tryClaimFree(): Promise<PickedAi | null> {
-  const engines = enginesWithKeys()
-  if (engines.length === 0) return null
-  const cands = await buildCandidates()
-  if (cands.length === 0) return null
+/** Ordre RR : preferred, puis les autres (Gemini ↔ Groq en alternance). */
+function enginesFromRr(engines: RotateEngine[], rr: number): RotateEngine[] {
+  if (engines.length === 0) return []
+  const i = ((rr % engines.length) + engines.length) % engines.length
+  return [...engines.slice(i), ...engines.slice(0, i)]
+}
 
-  const rr = await nextRoundRobinIndex(engines.length)
-  const preferred = engines[rr]
-  const preferredFree = cands
-    .filter((c) => c.engine === preferred && c.free > 0)
-    .sort((a, b) => a.inflight - b.inflight)
-  if (preferredFree[0]) return claim(preferredFree[0])
-
-  const anyFree = [...cands]
-    .filter((c) => c.free > 0)
-    .sort((a, b) => {
-      if (b.capacity !== a.capacity) return b.capacity - a.capacity
-      return a.inflight - b.inflight
-    })
-  if (anyFree[0]) return claim(anyFree[0])
+async function pickFreeInOrder(
+  cands: Cand[],
+  order: RotateEngine[],
+): Promise<PickedAi | null> {
+  for (const eng of order) {
+    const free = cands
+      .filter((c) => c.engine === eng && c.free > 0)
+      .sort((a, b) => a.inflight - b.inflight || a.keyIndex - b.keyIndex)
+    if (free[0]) return claim(free[0])
+  }
   return null
 }
 
-/** Plus aucun slot libre → moins chargé (secours après file courte). */
-async function claimLeastLoaded(): Promise<PickedAi | null> {
+/** Moins chargé, en gardant la préférence RR (pas de biais « plus de clés Gemini »). */
+async function claimLeastLoaded(order: RotateEngine[]): Promise<PickedAi | null> {
   const cands = await buildCandidates()
   if (cands.length === 0) return null
   const least = [...cands].sort((a, b) => {
-    if (b.capacity !== a.capacity) return b.capacity - a.capacity
-    return a.inflight - b.inflight
+    const ai = order.indexOf(a.engine)
+    const bi = order.indexOf(b.engine)
+    if (ai !== bi) return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi)
+    return a.inflight - b.inflight || a.keyIndex - b.keyIndex
   })[0]
   return claim(least)
 }
@@ -209,26 +208,58 @@ async function claimLeastLoaded(): Promise<PickedAi | null> {
 /**
  * Choisit 1 IA. Attend invisiblement jusqu’à ~1,5s un slot libre ;
  * sinon prend le moins chargé (plusieurs joueurs en parallèle).
+ * Auto = alternance stricte Gemini ↔ Groq (1 gén → 1 provider).
  */
 export async function pickAiForGeneration(): Promise<PickedAi | null> {
-  if (enginesWithKeys().length === 0) return null
+  const engines = enginesWithKeys()
+  if (engines.length === 0) return null
 
-  const free = await tryClaimFree()
-  if (free) return free
+  const rr = await nextRoundRobinIndex(engines.length)
+  const order = enginesFromRr(engines, rr)
+
+  let cands = await buildCandidates()
+  const first = await pickFreeInOrder(cands, order)
+  if (first) return first
 
   const deadline = Date.now() + QUEUE_WAIT_MS
   while (Date.now() < deadline) {
     await sleep(QUEUE_POLL_MS)
-    const again = await tryClaimFree()
+    cands = await buildCandidates()
+    const again = await pickFreeInOrder(cands, order)
     if (again) return again
   }
 
-  return claimLeastLoaded()
+  return claimLeastLoaded(order)
 }
 
 export async function releaseAiSlot(slot: string | undefined): Promise<void> {
   if (!slot) return
   await addInflight(slot, -1)
+}
+
+/**
+ * Réserve un slot du même provider (ex. rattrapage) — ne change pas d’IA.
+ * Si saturé : file courte puis least-loaded de ce provider.
+ */
+export async function pickAiForEngine(
+  engine: RotateEngine,
+): Promise<PickedAi | null> {
+  if (listApiKeys(engine).length === 0) return null
+  const order: RotateEngine[] = [engine]
+
+  let cands = await buildCandidates()
+  const first = await pickFreeInOrder(cands, order)
+  if (first) return first
+
+  const deadline = Date.now() + QUEUE_WAIT_MS
+  while (Date.now() < deadline) {
+    await sleep(QUEUE_POLL_MS)
+    cands = await buildCandidates()
+    const again = await pickFreeInOrder(cands, order)
+    if (again) return again
+  }
+
+  return claimLeastLoaded(order)
 }
 
 /** Ordre de fallback après l’IA choisie (les autres free). */

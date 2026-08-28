@@ -187,18 +187,14 @@ export function markSeen(
 }
 
 /**
- * Textes à exclure à la génération : banque locale + historique vu.
+ * Textes à exclure à la génération : historique anti-doublon uniquement.
  */
 export function collectExcludeQuestionTexts(
   themeSlug: string,
   playerId: string,
 ): string[] {
-  const bank = loadBank(themeSlug)
   const history = loadHistory(playerId, themeSlug)
   const out = new Set<string>()
-  for (const q of bank?.questions ?? []) {
-    if (q.question.trim()) out.add(q.question.trim())
-  }
   for (const t of history.seenTexts ?? []) {
     if (t.trim()) out.add(t.trim())
   }

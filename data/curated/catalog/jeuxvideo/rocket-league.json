@@ -1,8 +1,9 @@
 {
-  "placementKind": "custom",
-  "theme": "Rocket League",
-  "customKey": "rocket-league",
-  "groupKey": "custom/rocket-league",
+  "placementKind": "catalog",
+  "themeId": "jeuxvideo",
+  "theme": "Jeux vidéo",
+  "subTheme": "Rocket League",
+  "groupKey": "catalog/jeuxvideo/rocket-league",
   "questions": [
     {
       "id": "cur-mt1w3omp-s4h8cl",

@@ -19,6 +19,8 @@ export interface ErrorLogEvent {
   at: number
   scope: ErrorScope
   message: string
+  /** Ce que le système a fait à la place (fallback / bascule / message user) */
+  instead?: string
   status?: number
   theme?: string
   detail?: string
@@ -51,19 +53,52 @@ function asScope(raw: unknown): ErrorScope {
   return 'other'
 }
 
+/** Déduit une action de secours si le champ instead est absent (anciens logs). */
+export function inferErrorInstead(message: string, status?: number): string {
+  const m = message.toLowerCase()
+  if (status === 504 || /délai dépassé|timeout|trop de temps/i.test(m)) {
+    return 'Demande au joueur de réessayer (timeout serveur)'
+  }
+  if (/\b429\b|saturé|rate limit|quota/i.test(m)) {
+    return 'Bascule vers une autre IA / un autre modèle (si disponible)'
+  }
+  if (/json invalide|aucune question valide|pas assez de questions/i.test(m)) {
+    return 'Essai modèle suivant ou rattrapage partiel ; sinon erreur affichée'
+  }
+  if (/404|no longer available|does not exist/i.test(m)) {
+    return 'Modèle ignoré → suivant dans la pile'
+  }
+  if (/mock/i.test(m)) {
+    return 'Questions mock (aucune clé / échec total)'
+  }
+  if (/lot partiel|complément|top-?up|needsTopUp/i.test(m)) {
+    return 'Lot partiel conservé + rattrapage automatique'
+  }
+  if (/clé invalide|non autorisée|api key/i.test(m)) {
+    return 'Clé abandonnée → autre slot / autre provider'
+  }
+  if (/deezer/i.test(m)) {
+    return 'Quiz musical en échec — message d’erreur au joueur'
+  }
+  return 'Erreur renvoyée au joueur (pas de secours enregistré)'
+}
+
 function normalize(raw: Partial<ErrorLogEvent>): ErrorLogEvent | null {
   const message = String(raw.message ?? '')
     .trim()
     .slice(0, 500)
   if (message.length < 2) return null
+  const status =
+    typeof raw.status === 'number' && Number.isFinite(raw.status)
+      ? Math.floor(raw.status)
+      : undefined
+  const insteadRaw = raw.instead ? String(raw.instead).trim().slice(0, 240) : ''
   return {
     at: Number(raw.at) || Date.now(),
     scope: asScope(raw.scope),
     message,
-    status:
-      typeof raw.status === 'number' && Number.isFinite(raw.status)
-        ? Math.floor(raw.status)
-        : undefined,
+    instead: insteadRaw || inferErrorInstead(message, status),
+    status,
     theme: raw.theme ? String(raw.theme).trim().slice(0, 80) : undefined,
     detail: raw.detail ? String(raw.detail).trim().slice(0, 400) : undefined,
     path: raw.path ? String(raw.path).trim().slice(0, 80) : undefined,

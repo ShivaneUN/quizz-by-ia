@@ -101,17 +101,19 @@ export async function rememberQuestionKeys(
 
 /**
  * Préfère les questions jamais vues ; complète avec des déjà vues si besoin.
+ * fingerprintFn : empreinte custom (ex. Deezer = question+piste).
  */
 export function pickUnseenPreferring<T extends { question: string }>(
   questions: T[],
   seen: Set<string>,
   limit: number,
+  fingerprintFn: (q: T) => string = (q) => questionFingerprint(q.question),
 ): T[] {
   const unseen: T[] = []
   const known: T[] = []
   for (const q of questions) {
-    const fp = questionFingerprint(q.question)
-    if (seen.has(fp)) known.push(q)
+    const fp = fingerprintFn(q)
+    if (seen.has(fp) || seen.has(questionFingerprint(fp))) known.push(q)
     else unseen.push(q)
   }
   const picked = [...unseen, ...known].slice(0, limit)

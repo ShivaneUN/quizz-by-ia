@@ -23,6 +23,7 @@ import {
   listCuratedQuestions,
   summarizeCuratedBank,
 } from '../server/curatedBank.js'
+import { listCuratedThemeSlots } from '../server/curatedFiles.js'
 
 export const config = {
   maxDuration: 30,
@@ -87,6 +88,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const errorSummary = summarizeErrorLog(errorEvents)
       const curatedEvents = await listCuratedQuestions(Math.min(limit, 5000))
       const curatedSummary = summarizeCuratedBank(curatedEvents)
+      const themeSlots = listCuratedThemeSlots()
       const format = String(req.query.format ?? 'json')
       if (format === 'csv') {
         const summaryLines = [
@@ -189,7 +191,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       if (format === 'errors-csv') {
         const lines = [
-          'at,scope,status,theme,message,detail,path',
+          'at,scope,status,theme,message,instead,detail,path',
           ...errorEvents.map((e) =>
             [
               e.at,
@@ -197,6 +199,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               e.status ?? '',
               JSON.stringify(e.theme ?? ''),
               JSON.stringify(e.message),
+              JSON.stringify(e.instead ?? ''),
               JSON.stringify(e.detail ?? ''),
               JSON.stringify(e.path ?? ''),
             ].join(','),
@@ -243,8 +246,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           },
           curated: {
             ingestEnabled: CURATED_BANK_INGEST_ENABLED,
+            questionsIngestEnabled: false,
             count: curatedEvents.length,
             summary: curatedSummary,
+            themeSlots,
             events: curatedEvents,
           },
         }
@@ -272,8 +277,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         },
         curated: {
           ingestEnabled: CURATED_BANK_INGEST_ENABLED,
+          questionsIngestEnabled: false,
           count: curatedEvents.length,
           summary: curatedSummary,
+          themeSlots,
           events: curatedEvents,
         },
       })

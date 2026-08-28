@@ -1,16 +1,19 @@
-import { useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import {
   ORBIT_THEMES,
-  SUBTHEMES,
   formatThemeQuery,
   getThemeById,
+  officialSubsForTheme,
   type ThemeTile,
 } from '../lib/themes'
 import {
-  DEEZER_DECADE_OPTIONS,
   DEEZER_GLOBAL_OPTION,
   DEEZER_STYLE_OPTIONS,
   formatDeezerTheme,
+  getDeezerDecadeOptions,
+  isDeezerStyleNativeToScope,
+  scopeForDeezerStyle,
+  deezerStyleScopeHint,
   type DeezerPoolMode,
 } from '../lib/deezerStyles'
 import type { Difficulty, QuizContentMode, QuizScope } from '../types'
@@ -21,12 +24,15 @@ import {
 } from '../types'
 import type { AiProvider } from '../types'
 import { ThemeIcon } from './ThemeIcon'
+import { ensureCuratedThemeFromPlay } from '../lib/curatedBank'
 import './ThemeSelect.css'
 
 export type GameModeOption = 'progression' | 'free'
 
 export interface ThemeStartOptions {
   timerEnabled: boolean
+  /** Deezer : démarrer l’extrait automatiquement */
+  audioAutoplay: boolean
   difficulty: Difficulty
   gameMode: GameModeOption
   aiProvider: AiProvider
@@ -79,6 +85,14 @@ export function ThemeSelect({
   const [themeId, setThemeId] = useState<string | null>(null)
   const [subtheme, setSubtheme] = useState('Général')
   const [customTheme, setCustomTheme] = useState('')
+  const [customSubsByTheme, setCustomSubsByTheme] = useState<
+    Record<string, string[]>
+  >({})
+  const [orphanCustomSubs, setOrphanCustomSubs] = useState<string[]>([])
+  /** Parent catalogue si Custom → bascule saisie manuelle (centre) */
+  const [customFromThemeId, setCustomFromThemeId] = useState<string | null>(
+    null,
+  )
   const [scope, setScope] = useState<QuizScope>('fr')
   const [difficulty, setDifficulty] = useState<Difficulty>('easy')
   const [timerEnabled, setTimerEnabled] = useState(false)
@@ -95,10 +109,57 @@ export function ThemeSelect({
   const isDeezer = quizMode === 'audio'
 
   const parent = themeId ? getThemeById(themeId) : undefined
-  const subs = themeId ? (SUBTHEMES[themeId] ?? ['Général']) : []
+  const officialSubs = themeId ? officialSubsForTheme(themeId) : []
+  const generatedUnderTheme =
+    themeId && themeId !== 'custom' && themeId !== 'pregen'
+      ? (customSubsByTheme[themeId] ?? [])
+      : []
+  const orphanSubs = orphanCustomSubs
   const deezerStyle =
     DEEZER_STYLE_OPTIONS.find((s) => s.id === deezerStyleId) ??
     DEEZER_STYLE_OPTIONS[0]
+
+  useEffect(() => {
+    let cancelled = false
+    void fetch('/api/curated-bank?slots=1')
+      .then((r) => r.json())
+      .then(
+        (data: {
+          byThemeId?: Record<string, unknown>
+          orphans?: unknown
+          subs?: unknown
+        }) => {
+          if (cancelled) return
+          const by: Record<string, string[]> = {}
+          if (data.byThemeId && typeof data.byThemeId === 'object') {
+            for (const [id, list] of Object.entries(data.byThemeId)) {
+              if (Array.isArray(list)) {
+                by[id] = list.map(String).filter(Boolean)
+              }
+            }
+          }
+          setCustomSubsByTheme(by)
+          const orphans = Array.isArray(data.orphans)
+            ? data.orphans.map(String).filter(Boolean)
+            : Array.isArray(data.subs)
+              ? data.subs.map(String).filter(Boolean)
+              : []
+          setOrphanCustomSubs(orphans)
+        },
+      )
+      .catch(() => {
+        /* ignore */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (themeId === 'custom' || themeId === 'pregen') {
+      if (subtheme !== 'Général') setSubtheme('Général')
+    }
+  }, [themeId, subtheme])
 
   function deezerThemeLabel(): string {
     return formatDeezerTheme({
@@ -113,6 +174,37 @@ export function ThemeSelect({
     setThemeId(t.id)
     setSubtheme('Général')
     setCustomTheme('')
+    setCustomFromThemeId(null)
+  }
+
+  /** Custom d’un thème → même flux que la barre manuelle du centre */
+  function enterManualFromCustom() {
+    if (!themeId || themeId === 'custom' || themeId === 'pregen') return
+    setCustomFromThemeId(themeId)
+    setThemeId(null)
+    setSubtheme('Général')
+    setCustomTheme('')
+    requestAnimationFrame(() => {
+      const inputs = document.querySelectorAll<HTMLInputElement>(
+        '.custom-theme input',
+      )
+      for (const input of inputs) {
+        if (input.offsetParent !== null) {
+          input.focus()
+          break
+        }
+      }
+    })
+  }
+
+  function playThemeLabel(): string {
+    const manual = customTheme.trim()
+    if (manual) return manual
+    if (!parent || !themeId) return ''
+    if (themeId === 'custom' || themeId === 'pregen') return ''
+    if (generatedUnderTheme.includes(subtheme)) return subtheme.trim()
+    if (subtheme === 'Custom') return ''
+    return formatThemeQuery(parent.label, subtheme)
   }
 
   function handleSubmit(e: FormEvent) {
@@ -124,6 +216,7 @@ export function ThemeSelect({
       if (!t) return
       onStart(t, '', scope, {
         timerEnabled,
+        audioAutoplay: true,
         difficulty: gameMode === 'free' ? difficulty : 'easy',
         gameMode,
         aiProvider,
@@ -132,15 +225,23 @@ export function ThemeSelect({
       return
     }
 
-    const custom = customTheme.trim()
-    const t = custom
-      ? custom
-      : parent
-        ? formatThemeQuery(parent.label, subtheme)
-        : ''
+    const t = playThemeLabel()
     if (!t) return
+    const placeUnder =
+      customFromThemeId ||
+      (themeId &&
+      themeId !== 'custom' &&
+      themeId !== 'pregen' &&
+      generatedUnderTheme.includes(subtheme)
+        ? themeId
+        : null)
+    ensureCuratedThemeFromPlay(
+      t,
+      placeUnder ? { themeId: placeUnder, subTheme: t } : undefined,
+    )
     onStart(t, '', scope, {
       timerEnabled,
+      audioAutoplay: false,
       difficulty: gameMode === 'free' ? difficulty : 'easy',
       gameMode,
       aiProvider,
@@ -150,14 +251,91 @@ export function ThemeSelect({
 
   const activeLabel = isDeezer
     ? deezerThemeLabel()
-    : customTheme.trim()
-      ? customTheme.trim()
-      : parent
-        ? formatThemeQuery(parent.label, subtheme)
-        : ''
+    : playThemeLabel()
   const canPlay =
     Boolean(activeLabel) && !busy && !(variant === 'solo' && soloLocked)
   const deezerUsingCustom = Boolean(deezerQuery.trim())
+
+  function renderSubthemes(opts?: { inPanel?: boolean; showChosen?: boolean }) {
+    if (!parent || customTheme.trim()) return null
+    const inPanel = Boolean(opts?.inPanel)
+    const isOrbitCustom = themeId === 'custom'
+    const primarySubs = isOrbitCustom
+      ? ['Général', ...orphanSubs.filter((s) => s !== 'Général')]
+      : officialSubs
+
+    return (
+      <fieldset
+        className={`subthemes${inPanel ? ' subthemes--in-panel' : ''}`}
+      >
+        <legend className="subthemes__title">
+          Sous-thèmes — {parent.label}
+        </legend>
+        <div className="subthemes__grid" role="group">
+          {primarySubs.map((s) => {
+            const isCustomChip = s === 'Custom'
+            const selected =
+              subtheme === s ||
+              (isCustomChip && generatedUnderTheme.includes(subtheme))
+            return (
+              <button
+                key={s}
+                type="button"
+                className={`subtheme-chip${selected ? ' is-selected' : ''}${isCustomChip ? ' subtheme-chip--custom' : ''}`}
+                onClick={() => {
+                  if (isCustomChip) {
+                    enterManualFromCustom()
+                    return
+                  }
+                  setSubtheme(s)
+                  setCustomFromThemeId(null)
+                }}
+                disabled={busy}
+                aria-pressed={selected}
+                title={
+                  isCustomChip
+                    ? 'Générer un thème libre (comme la saisie manuelle)'
+                    : s
+                }
+              >
+                {s}
+              </button>
+            )
+          })}
+        </div>
+        {generatedUnderTheme.length > 0 && (
+          <div className="subthemes__generated">
+            <p className="subthemes__generated-title">
+              Custom — déjà associés
+            </p>
+            <div className="subthemes__grid" role="group">
+              {generatedUnderTheme.map((s) => (
+                <button
+                  key={`gen-${s}`}
+                  type="button"
+                  className={`subtheme-chip subtheme-chip--gen${subtheme === s ? ' is-selected' : ''}`}
+                  onClick={() => {
+                    setSubtheme(s)
+                    setCustomTheme('')
+                    setCustomFromThemeId(null)
+                  }}
+                  disabled={busy}
+                  aria-pressed={subtheme === s}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {opts?.showChosen && (
+          <p className="subthemes__chosen">
+            Thème choisi : <strong>{activeLabel || '…'}</strong>
+          </p>
+        )}
+      </fieldset>
+    )
+  }
 
   const brandBlock = (
     <div className="brand-hero">
@@ -261,7 +439,16 @@ export function ThemeSelect({
               key={s}
               type="button"
               className={`scope-chip${scope === s ? ' is-selected' : ''}`}
-              onClick={() => setScope(s)}
+              onClick={() => {
+                setScope(s)
+                // Si le style actuel ne colle pas à la nouvelle portée → style neutre
+                if (
+                  deezerPoolMode === 'style' &&
+                  !isDeezerStyleNativeToScope(deezerStyleId, s)
+                ) {
+                  setDeezerStyleId(s === 'fr' ? 'variete' : 'pop')
+                }
+              }}
               disabled={busy}
               aria-pressed={scope === s}
               aria-label={QUIZ_SCOPE_LABELS[s]}
@@ -376,13 +563,23 @@ export function ThemeSelect({
       <input
         value={customTheme}
         onChange={(e) => {
-          setCustomTheme(e.target.value)
-          if (e.target.value.trim()) {
-            setThemeId(null)
-            setSubtheme('Général')
+          const v = e.target.value
+          setCustomTheme(v)
+          if (v.trim()) {
+            // Saisie manuelle pure (pas via Custom d’un thème)
+            if (!customFromThemeId) {
+              setThemeId(null)
+              setSubtheme('Général')
+            }
+          } else {
+            setCustomFromThemeId(null)
           }
         }}
-        placeholder="Ex. Musique — K-pop…"
+        placeholder={
+          customFromThemeId
+            ? `Thème libre sous ${getThemeById(customFromThemeId)?.label ?? 'ce thème'}…`
+            : 'Ex. Musique — K-pop…'
+        }
         maxLength={80}
         enterKeyHint="go"
         disabled={busy}
@@ -398,6 +595,39 @@ export function ThemeSelect({
         {customThemeField}
         {playButton}
       </div>
+    )
+  }
+
+  function renderOrbitBubble(t: ThemeTile, keyPrefix = '') {
+    const soon = Boolean(t.soon)
+    return (
+      <button
+        key={`${keyPrefix}${t.id}`}
+        type="button"
+        className={`theme-bubble${themeId === t.id && !customTheme && !soon ? ' is-selected' : ''}${soon ? ' theme-bubble--soon' : ''}`}
+        style={
+          {
+            '--angle': `${t.angle}deg`,
+            '--bubble-color': t.color,
+          } as CSSProperties
+        }
+        onClick={() => {
+          if (soon) return
+          selectTheme(t)
+        }}
+        disabled={busy || soon}
+        aria-pressed={themeId === t.id && !customTheme && !soon}
+        title={soon ? 'Disponible prochainement' : t.label}
+        aria-label={
+          soon ? `${t.label} — disponible prochainement` : t.label
+        }
+      >
+        <span className="theme-bubble__icon">
+          <ThemeIcon id={t.id} />
+        </span>
+        <span className="theme-bubble__label">{t.label}</span>
+        {soon && <span className="theme-bubble__soon">Bientôt</span>}
+      </button>
     )
   }
 
@@ -446,41 +676,53 @@ export function ThemeSelect({
                     disabled={busy}
                     aria-pressed={deezerPoolMode === 'style' && !deezerUsingCustom}
                   >
-                    Par style
+                    Hits par style
                   </button>
                 </div>
               </fieldset>
 
               {deezerPoolMode === 'style' && (
                 <fieldset className="subthemes">
-                  <legend className="subthemes__title">Styles musicaux</legend>
+                  <legend className="subthemes__title">Hits par style</legend>
+                  <p className="deezer-panel__hint deezer-panel__hint--scope">
+                    {scope === 'fr'
+                      ? '🇫🇷 Francophone — les styles mondiaux basculent en 🌍'
+                      : '🌍 International — la variété FR bascule en 🇫🇷'}
+                  </p>
                   <div className="subthemes__grid" role="group">
-                    {DEEZER_STYLE_OPTIONS.map((s) => (
-                      <button
-                        key={s.id}
-                        type="button"
-                        className={`subtheme-chip${deezerStyleId === s.id && !deezerUsingCustom ? ' is-selected' : ''}`}
-                        onClick={() => {
-                          setDeezerPoolMode('style')
-                          setDeezerStyleId(s.id)
-                          setDeezerQuery('')
-                        }}
-                        disabled={busy}
-                        aria-pressed={
-                          deezerStyleId === s.id && !deezerUsingCustom
-                        }
-                      >
-                        {s.label}
-                      </button>
-                    ))}
+                    {DEEZER_STYLE_OPTIONS.map((s) => {
+                      const native = isDeezerStyleNativeToScope(s.id, scope)
+                      const hint = deezerStyleScopeHint(s.id, scope)
+                      const selected =
+                        deezerStyleId === s.id && !deezerUsingCustom
+                      return (
+                        <button
+                          key={s.id}
+                          type="button"
+                          className={`subtheme-chip${selected ? ' is-selected' : ''}${!native ? ' is-scope-mismatch' : ''}`}
+                          onClick={() => {
+                            setDeezerPoolMode('style')
+                            setDeezerStyleId(s.id)
+                            setDeezerQuery('')
+                            const nextScope = scopeForDeezerStyle(s.id, scope)
+                            if (nextScope !== scope) setScope(nextScope)
+                          }}
+                          disabled={busy}
+                          aria-pressed={selected}
+                          title={hint ?? s.label}
+                        >
+                          {s.label}
+                        </button>
+                      )
+                    })}
                   </div>
                 </fieldset>
               )}
 
               <fieldset className="subthemes">
-                <legend className="subthemes__title">Décennie</legend>
-                <div className="subthemes__grid" role="group" aria-label="Décennie">
-                  {DEEZER_DECADE_OPTIONS.map((d) => (
+                <legend className="subthemes__title">Période</legend>
+                <div className="subthemes__grid" role="group" aria-label="Période">
+                  {getDeezerDecadeOptions().map((d) => (
                     <button
                       key={d.id}
                       type="button"
@@ -552,13 +794,22 @@ export function ThemeSelect({
                   <input
                     value={customTheme}
                     onChange={(e) => {
-                      setCustomTheme(e.target.value)
-                      if (e.target.value.trim()) {
-                        setThemeId(null)
-                        setSubtheme('Général')
+                      const v = e.target.value
+                      setCustomTheme(v)
+                      if (v.trim()) {
+                        if (!customFromThemeId) {
+                          setThemeId(null)
+                          setSubtheme('Général')
+                        }
+                      } else {
+                        setCustomFromThemeId(null)
                       }
                     }}
-                    placeholder="Ex. Musique — K-pop…"
+                    placeholder={
+                      customFromThemeId
+                        ? `Thème libre sous ${getThemeById(customFromThemeId)?.label ?? 'ce thème'}…`
+                        : 'Ex. Musique — K-pop…'
+                    }
                     maxLength={80}
                     enterKeyHint="go"
                   />
@@ -569,50 +820,10 @@ export function ThemeSelect({
                     role="group"
                     aria-label="Thèmes"
                   >
-                    {ORBIT_THEMES.map((t: ThemeTile) => (
-                      <button
-                        key={t.id}
-                        type="button"
-                        className={`theme-bubble${themeId === t.id && !customTheme ? ' is-selected' : ''}`}
-                        style={
-                          {
-                            '--angle': `${t.angle}deg`,
-                            '--bubble-color': t.color,
-                          } as CSSProperties
-                        }
-                        onClick={() => selectTheme(t)}
-                        disabled={busy}
-                        aria-pressed={themeId === t.id && !customTheme}
-                      >
-                        <span className="theme-bubble__icon">
-                          <ThemeIcon id={t.id} />
-                        </span>
-                        <span className="theme-bubble__label">{t.label}</span>
-                      </button>
-                    ))}
+                    {ORBIT_THEMES.map((t) => renderOrbitBubble(t))}
                   </div>
                 </div>
-                {parent && !customTheme.trim() && (
-                  <fieldset className="subthemes subthemes--in-panel">
-                    <legend className="subthemes__title">
-                      Sous-thèmes — {parent.label}
-                    </legend>
-                    <div className="subthemes__grid" role="group">
-                      {subs.map((s) => (
-                        <button
-                          key={s}
-                          type="button"
-                          className={`subtheme-chip${subtheme === s ? ' is-selected' : ''}`}
-                          onClick={() => setSubtheme(s)}
-                          disabled={busy}
-                          aria-pressed={subtheme === s}
-                        >
-                          {s}
-                        </button>
-                      ))}
-                    </div>
-                  </fieldset>
-                )}
+                {renderSubthemes({ inPanel: true })}
               </div>
             </div>
 
@@ -627,27 +838,7 @@ export function ThemeSelect({
                 role="group"
                 aria-label="Thèmes"
               >
-                {ORBIT_THEMES.map((t: ThemeTile) => (
-                  <button
-                    key={`desk-${t.id}`}
-                    type="button"
-                    className={`theme-bubble${themeId === t.id && !customTheme ? ' is-selected' : ''}`}
-                    style={
-                      {
-                        '--angle': `${t.angle}deg`,
-                        '--bubble-color': t.color,
-                      } as CSSProperties
-                    }
-                    onClick={() => selectTheme(t)}
-                    disabled={busy}
-                    aria-pressed={themeId === t.id && !customTheme}
-                  >
-                    <span className="theme-bubble__icon">
-                      <ThemeIcon id={t.id} />
-                    </span>
-                    <span className="theme-bubble__label">{t.label}</span>
-                  </button>
-                ))}
+                {ORBIT_THEMES.map((t) => renderOrbitBubble(t, 'desk-'))}
               </div>
 
               <div className="game-home__desktop-center">
@@ -656,30 +847,7 @@ export function ThemeSelect({
             </div>
 
             <div className="game-home__desktop-extras">
-              {parent && !customTheme.trim() && (
-                <fieldset className="subthemes">
-                  <legend className="subthemes__title">
-                    Sous-thèmes — {parent.label}
-                  </legend>
-                  <div className="subthemes__grid" role="group">
-                    {subs.map((s) => (
-                      <button
-                        key={s}
-                        type="button"
-                        className={`subtheme-chip${subtheme === s ? ' is-selected' : ''}`}
-                        onClick={() => setSubtheme(s)}
-                        disabled={busy}
-                        aria-pressed={subtheme === s}
-                      >
-                        {s}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="subthemes__chosen">
-                    Thème choisi : <strong>{activeLabel}</strong>
-                  </p>
-                </fieldset>
-              )}
+              {renderSubthemes({ showChosen: true })}
             </div>
           </>
         )}

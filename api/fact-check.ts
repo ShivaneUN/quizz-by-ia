@@ -3,7 +3,7 @@ import { verifyFactWithOpenRouter } from '../server/factCheckAi.js'
 import { logError } from '../server/errorLog.js'
 
 export const config = {
-  maxDuration: 30,
+  maxDuration: 60,
 }
 
 /**
@@ -58,6 +58,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         theme,
         detail: question.slice(0, 200),
         path: '/api/fact-check',
+        instead: 'Vérif source échouée — résultat affiché au joueur',
       })
       return res.status(422).json({ error: result.error })
     }
@@ -70,6 +71,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       message,
       status: 500,
       path: '/api/fact-check',
+      instead: 'Erreur vérif — message au joueur',
     })
     return res.status(500).json({ error: message })
   }

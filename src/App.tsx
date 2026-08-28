@@ -2,20 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { generateQuestions } from './lib/api'
 import { attachImagesToQuestions } from './lib/resolveImage'
 import {
-  clearBankTier,
   collectExcludeQuestionTexts,
-  drawUnseen,
   getOrCreatePlayerId,
-  loadBank,
   loadHistory,
   markSeen,
-  mergeQuestionsIntoBank,
-  saveBank,
   saveHistory,
 } from './lib/bankStorage'
 import { createEmptyTierAttempts, resolveTierOutcome } from './lib/progression'
 import { reportCalibHand } from './lib/calibTelemetry'
-import { bankSlug, isEphemeralTheme } from './lib/themeSlug'
+import { bankSlug } from './lib/themeSlug'
 import { matchesFreeMusicAnswer } from './lib/freeAnswer'
 import {
   answerRoom,
@@ -71,6 +66,7 @@ import type {
   Difficulty,
   GameSession,
   Question,
+  QuizContentMode,
   QuizScope,
 } from './types'
 import { DIFFICULTIES, DIFFICULTY_LABELS, PASS_THRESHOLD, QUESTIONS_PER_TIER, QUIZ_SCOPE_LABELS } from './types'
@@ -99,6 +95,17 @@ function multiScreenForStatus(status: MultiRoom['status']): Screen {
 
 /** Timeout client solo — évite un loading infini si le fetch ne revient jamais. */
 const SOLO_GEN_TIMEOUT_MS = 65_000
+
+type SoloGenArgs = {
+  theme: string
+  themeSlug: string
+  difficulty: Difficulty
+  scope: QuizScope
+  provider: AiProvider
+  quizMode: QuizContentMode
+  from: 'home' | 'tier-result'
+  unlocked?: Difficulty[]
+}
 
 function armSoloGenTimeout(ac: AbortController): {
   clear: () => void
@@ -138,6 +145,7 @@ const initialSession = (): GameSession => ({
   playerName: '',
   playMode: 'manual',
   timerEnabled: false,
+  audioAutoplay: true,
   aiProvider: 'auto',
   quizMode: 'standard',
   currentDifficulty: 'easy',
@@ -173,6 +181,7 @@ export default function App() {
   const soloGenAbortRef = useRef<AbortController | null>(null)
   /** true si l’utilisateur a cliqué Annuler / Accueil — pas d’erreur parasite */
   const soloCancelRef = useRef(false)
+  const soloGenArgsRef = useRef<SoloGenArgs | null>(null)
   const multiGenAbortRef = useRef<AbortController | null>(null)
   const multiTopUpInFlightRef = useRef(false)
   const multiThemeReturnRef = useRef<'lobby' | 'score'>('lobby')
@@ -282,7 +291,6 @@ export default function App() {
     ): Promise<{ hand: Question[]; msg?: string } | { error: string }> => {
       const playerId = getOrCreatePlayerId()
       let history = loadHistory(playerId, themeSlug)
-      let msg: string | undefined
 
       async function finalizeImageQs(qs: Question[]): Promise<Question[]> {
         if (quizMode !== 'image') return qs
@@ -294,170 +302,64 @@ export default function App() {
         return qs.filter((q) => Boolean(q.previewUrl))
       }
 
-      // Actualité / Deezer : régénérer (pas de banque figée)
-      if (isEphemeralTheme(theme, themeSlug) || quizMode === 'audio') {
-        try {
-          const gen = await generateQuestions(
-            {
-              theme,
-              mode: 'complementary',
-              difficulty,
-              scope,
-              provider,
-              quizMode,
-              excludeQuestions: collectExcludeQuestionTexts(themeSlug, playerId),
-            },
-            signal,
-            (done, _total, engine, stage) => {
-              setGenQuestionsDone((n) => Math.max(n, done))
-              if (engine) setGenAiSource(engine)
-              if (stage) setStatusMsg(stage)
-            },
-          )
-          let hand = await finalizeImageQs(
-            gen.questions.filter((q) => q.difficulty === difficulty),
-          )
-          hand = finalizeAudioQs(hand)
-          hand = hand.slice(0, QUESTIONS_PER_TIER)
-          if (hand.length < QUESTIONS_PER_TIER) {
-            return {
-              error:
-                quizMode === 'audio'
-                  ? `Impossible de constituer 10 questions musicales (${hand.length}/10). Réessaie avec un autre style.`
-                  : `Impossible de constituer 10 questions illustrées (${hand.length}/10). Réessaie.`,
-            }
-          }
-          history = markSeen(
-            history,
+      // Toujours générer (pas de banque localStorage) — anti-doublon via historique.
+      try {
+        const gen = await generateQuestions(
+          {
+            theme,
+            mode: 'complementary',
             difficulty,
-            hand.map((q) => q.id),
-            hand.map((q) => q.question),
-          )
-          saveHistory(playerId, themeSlug, history)
-          return { hand, msg: gen.message }
-        } catch (e) {
-          return {
-            error:
-              e instanceof Error
-                ? e.message
-                : 'Thème non valide ou génération impossible',
-          }
-        }
-      }
-
-      let bank = loadBank(themeSlug)
-      let lastGenError: string | undefined
-      let usedPartialLot = false
-
-      async function generateAndMerge(): Promise<boolean> {
-        try {
-          const gen = await generateQuestions(
-            {
-              theme,
-              mode: 'complementary',
-              difficulty,
-              scope,
-              provider,
-              quizMode,
-              excludeQuestions: collectExcludeQuestionTexts(themeSlug, playerId),
-            },
-            signal,
-            (done, _total, engine, stage) => {
-              setGenQuestionsDone((n) => Math.max(n, done))
-              if (engine) setGenAiSource(engine)
-              if (stage) setStatusMsg(stage)
-            },
-          )
-          if (gen.partial === true) usedPartialLot = true
-          const tierQs = await finalizeImageQs(
-            gen.questions.filter((q) => q.difficulty === difficulty),
-          )
-          if (tierQs.length === 0) {
-            lastGenError = 'Aucune question valide reçue pour ce palier.'
-            return false
-          }
-
-          if (!bank) {
-            bank = {
-              meta: {
-                theme: gen.theme,
-                themeSlug: gen.themeSlug,
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-                counts: { easy: 0, medium: 0, hard: 0 },
-                source: gen.source,
-              },
-              questions: tierQs,
-            }
-            for (const q of bank.questions) bank.meta.counts[q.difficulty]++
-          } else {
-            bank = mergeQuestionsIntoBank(bank, tierQs)
-          }
-          saveBank(bank)
-          msg =
-            gen.message ??
-            (gen.source === 'mock' ? 'Mode mock (pas de clé API)' : undefined)
-          return true
-        } catch (e) {
-          lastGenError =
-            e instanceof Error
-              ? e.message
-              : 'Thème non valide ou génération impossible'
-          return false
-        }
-      }
-
-      if (!bank) {
-        const ok = await generateAndMerge()
-        if (!ok) {
-          return {
-            error: lastGenError ?? 'Thème non valide ou génération impossible',
-          }
-        }
-      }
-
-      let hand = drawUnseen(bank!, history, difficulty, QUESTIONS_PER_TIER)
-      if (quizMode === 'image') {
-        hand = hand.filter((q) => Boolean(q.imageUrl))
-      }
-
-      // Si la banque locale ne suffit pas (palier vide ou déjà vu), 1-2 générations complémentaires max.
-      let refillTries = 0
-      while (hand.length < QUESTIONS_PER_TIER && refillTries < 2) {
-        refillTries++
-        setStatusMsg(`Complément de génération (${hand.length}/10)…`)
-        const ok = await generateAndMerge()
-        if (!ok) break
-        hand = drawUnseen(bank!, history, difficulty, QUESTIONS_PER_TIER)
+            scope,
+            provider,
+            quizMode,
+            excludeQuestions: collectExcludeQuestionTexts(themeSlug, playerId),
+          },
+          signal,
+          (done, _total, engine, stage) => {
+            setGenQuestionsDone((n) => Math.max(n, done))
+            if (engine) setGenAiSource(engine)
+            if (stage) setStatusMsg(stage)
+          },
+        )
+        let hand = await finalizeImageQs(
+          gen.questions.filter((q) => q.difficulty === difficulty),
+        )
+        hand = finalizeAudioQs(hand)
         if (quizMode === 'image') {
           hand = hand.filter((q) => Boolean(q.imageUrl))
         }
-      }
-
-      if (hand.length < QUESTIONS_PER_TIER) {
+        hand = hand.slice(0, QUESTIONS_PER_TIER)
+        if (hand.length < QUESTIONS_PER_TIER) {
+          return {
+            error:
+              quizMode === 'audio'
+                ? `Impossible de constituer 10 questions musicales (${hand.length}/10). Réessaie avec un autre style.`
+                : quizMode === 'image'
+                  ? `Impossible de constituer 10 questions illustrées (${hand.length}/10). Réessaie.`
+                  : `Impossible de constituer 10 questions pour ce palier (${hand.length}/10). Réessaie.`,
+          }
+        }
+        history = markSeen(
+          history,
+          difficulty,
+          hand.map((q) => q.id),
+          hand.map((q) => q.question),
+        )
+        saveHistory(playerId, themeSlug, history)
+        return {
+          hand,
+          msg:
+            gen.message ??
+            (gen.source === 'mock' ? 'Mode mock (pas de clé API)' : undefined),
+        }
+      } catch (e) {
         return {
           error:
-            quizMode === 'image'
-              ? `Impossible de constituer 10 questions illustrées (${hand.length}/10). Réessaie.`
-              : lastGenError ??
-                `Impossible de constituer 10 questions pour ce palier (${hand.length}/10). Réessaie.`,
+            e instanceof Error
+              ? e.message
+              : 'Thème non valide ou génération impossible',
         }
       }
-
-      hand = hand.slice(0, QUESTIONS_PER_TIER)
-      history = markSeen(
-        history,
-        difficulty,
-        hand.map((q) => q.id),
-        hand.map((q) => q.question),
-      )
-      saveHistory(playerId, themeSlug, history)
-
-      if (usedPartialLot) {
-        clearBankTier(themeSlug, difficulty)
-      }
-
-      return { hand, msg }
     },
     [],
   )
@@ -759,6 +661,105 @@ export default function App() {
     }
   }, [])
 
+  function failSoloGenerate(message: string) {
+    setError(message)
+    setStatusMsg('Génération incomplète — tu peux relancer le même thème')
+    setScreen('loading')
+  }
+
+  function completeSoloHand(
+    hand: Question[],
+    msg: string | undefined,
+    args: SoloGenArgs,
+  ) {
+    setError(null)
+    setSession((s) => ({
+      ...s,
+      currentDifficulty: args.difficulty,
+      unlocked: args.unlocked ?? s.unlocked,
+      currentHand: hand,
+      handIndex: 0,
+      status: 'playing',
+      tierAttempts: {
+        ...s.tierAttempts,
+        [args.difficulty]: {
+          correct: 0,
+          answered: 0,
+          status: 'active',
+        },
+      },
+    }))
+    setAudit([])
+    setSelectedIndex(null)
+    setPendingScored(false)
+    applyGenMsg(msg)
+    setTierSnapshot(null)
+    pushSoloTypingBoard(soloTypingScoreRef.current)
+    setScreen('play')
+  }
+
+  async function generateSoloHand(args: SoloGenArgs) {
+    soloGenArgsRef.current = args
+    setError(null)
+    setGenQuestionsDone(0)
+    setGenAiSource(null)
+    soloCancelRef.current = false
+    soloGenAbortRef.current?.abort()
+    const ac = new AbortController()
+    soloGenAbortRef.current = ac
+    const genTimeout = armSoloGenTimeout(ac)
+    setScreen('loading')
+    soloTypingScoreRef.current = 0
+
+    try {
+      const result = await ensureHand(
+        args.theme,
+        args.themeSlug,
+        args.difficulty,
+        args.scope,
+        args.provider,
+        args.quizMode,
+        ac.signal,
+      )
+      if (soloCancelRef.current) return
+      if (
+        ac.signal.aborted ||
+        ('error' in result && result.error === 'Génération annulée')
+      ) {
+        failSoloGenerate(
+          genTimeout.didTimeout()
+            ? 'La génération a pris trop de temps. Réessaie.'
+            : 'Génération interrompue. Réessaie.',
+        )
+        return
+      }
+      if ('error' in result) {
+        failSoloGenerate(result.error)
+        return
+      }
+      completeSoloHand(result.hand, result.msg, args)
+    } catch (e) {
+      if (soloCancelRef.current) return
+      failSoloGenerate(
+        ac.signal.aborted && genTimeout.didTimeout()
+          ? 'La génération a pris trop de temps. Réessaie.'
+          : e instanceof Error
+            ? e.message
+            : 'Erreur de génération',
+      )
+    } finally {
+      genTimeout.clear()
+      if (soloGenAbortRef.current === ac) soloGenAbortRef.current = null
+    }
+  }
+
+  async function retrySoloGenerate() {
+    const args = soloGenArgsRef.current
+    if (!args) return
+    setStatusMsg('Nouvelle tentative…')
+    await generateSoloHand(args)
+  }
+
   async function handleStart(
     theme: string,
     playerName: string,
@@ -776,15 +777,6 @@ export default function App() {
 
     setError(null)
     setStatusMsg(null)
-    setGenQuestionsDone(0)
-    setGenAiSource(null)
-    soloCancelRef.current = false
-    soloGenAbortRef.current?.abort()
-    const ac = new AbortController()
-    soloGenAbortRef.current = ac
-    const genTimeout = armSoloGenTimeout(ac)
-    setScreen('loading')
-    soloTypingScoreRef.current = 0
 
     const themeSlug = bankSlug(theme, scope, options.quizMode)
     const playMode = options.gameMode === 'free' ? 'manual' : 'progression'
@@ -814,6 +806,8 @@ export default function App() {
       playerName,
       playMode,
       timerEnabled: options.timerEnabled,
+      audioAutoplay:
+        options.quizMode === 'audio' ? Boolean(options.audioAutoplay) : false,
       aiProvider,
       quizMode,
       currentDifficulty: startDiff,
@@ -822,70 +816,21 @@ export default function App() {
       status: 'loading',
     }
     setSession(base)
-
-    try {
-      setStatusMsg(
-        playMode === 'progression'
-          ? 'Préparation du palier Facile (10 questions)…'
-          : `Préparation du niveau ${startDiff === 'easy' ? 'Facile' : startDiff === 'medium' ? 'Moyen' : 'Difficile'}…`,
-      )
-
-      const result = await ensureHand(
-        theme,
-        themeSlug,
-        startDiff,
-        scope,
-        aiProvider,
-        quizMode,
-        ac.signal,
-      )
-      if (ac.signal.aborted || ('error' in result && result.error === 'Génération annulée')) {
-        if (soloCancelRef.current) return
-        setError(
-          genTimeout.didTimeout()
-            ? 'La génération a pris trop de temps. Réessaie.'
-            : 'error' in result && result.error !== 'Génération annulée'
-              ? result.error
-              : 'Génération interrompue. Réessaie.',
-        )
-        setScreen('home')
-        return
-      }
-      if ('error' in result) {
-        setError(result.error)
-        setScreen('home')
-        return
-      }
-
-      setSession({
-        ...base,
-        currentHand: result.hand,
-        handIndex: 0,
-        status: 'playing',
-      })
-      setAudit([])
-      setSelectedIndex(null)
-      setPendingScored(false)
-      applyGenMsg(result.msg)
-      pushSoloTypingBoard(soloTypingScoreRef.current)
-      setScreen('play')
-    } catch (e) {
-      if (ac.signal.aborted) {
-        if (soloCancelRef.current) return
-        setError(
-          genTimeout.didTimeout()
-            ? 'La génération a pris trop de temps. Réessaie.'
-            : 'Génération interrompue. Réessaie.',
-        )
-        setScreen('home')
-        return
-      }
-      setError(e instanceof Error ? e.message : 'Erreur au démarrage')
-      setScreen('home')
-    } finally {
-      genTimeout.clear()
-      if (soloGenAbortRef.current === ac) soloGenAbortRef.current = null
-    }
+    setStatusMsg(
+      playMode === 'progression'
+        ? 'Préparation du palier Facile (10 questions)…'
+        : `Préparation du niveau ${startDiff === 'easy' ? 'Facile' : startDiff === 'medium' ? 'Moyen' : 'Difficile'}…`,
+    )
+    await generateSoloHand({
+      theme,
+      themeSlug,
+      difficulty: startDiff,
+      scope,
+      provider: aiProvider,
+      quizMode,
+      from: 'home',
+      unlocked,
+    })
   }
 
   function handleAnswer(answer: number | string) {
@@ -1026,89 +971,23 @@ export default function App() {
   }
 
   async function startSoloHand(nextDiff: Difficulty) {
-    setError(null)
-    setGenQuestionsDone(0)
-    setGenAiSource(null)
-    soloCancelRef.current = false
-    soloGenAbortRef.current?.abort()
-    const ac = new AbortController()
-    soloGenAbortRef.current = ac
-    const genTimeout = armSoloGenTimeout(ac)
-    setScreen('loading')
-    soloTypingScoreRef.current = 0
     setStatusMsg('Préparation de la manche…')
     setSession((s) => ({
       ...s,
       currentDifficulty: nextDiff,
       status: 'loading',
     }))
-
-    try {
-      const result = await ensureHand(
-        session.theme,
-        session.themeSlug,
-        nextDiff,
-        session.scope,
-        session.aiProvider ?? 'auto',
-        session.quizMode ?? 'standard',
-        ac.signal,
-      )
-      if (ac.signal.aborted) {
-        if (genTimeout.didTimeout()) {
-          setError('La génération a pris trop de temps. Réessaie.')
-          setScreen('tier-result')
-        }
-        return
-      }
-      if ('error' in result) {
-        if (result.error === 'Génération annulée' && soloCancelRef.current) return
-        setError(
-          result.error === 'Génération annulée'
-            ? 'Génération interrompue. Réessaie.'
-            : result.error,
-        )
-        setScreen('tier-result')
-        return
-      }
-
-      setSession((s) => ({
-        ...s,
-        currentDifficulty: nextDiff,
-        unlocked:
-          s.playMode === 'manual' ? [...DIFFICULTIES] : s.unlocked,
-        currentHand: result.hand,
-        handIndex: 0,
-        status: 'playing',
-        tierAttempts: {
-          ...s.tierAttempts,
-          [nextDiff]: {
-            correct: 0,
-            answered: 0,
-            status: 'active',
-          },
-        },
-      }))
-      setAudit([])
-      setSelectedIndex(null)
-      setPendingScored(false)
-      applyGenMsg(result.msg)
-      setTierSnapshot(null)
-      pushSoloTypingBoard(soloTypingScoreRef.current)
-      setScreen('play')
-    } catch (e) {
-      if (ac.signal.aborted) {
-        if (genTimeout.didTimeout()) {
-          setError('La génération a pris trop de temps. Réessaie.')
-          setScreen('tier-result')
-        }
-        return
-      }
-      setError(e instanceof Error ? e.message : 'Erreur')
-      setScreen('tier-result')
-    } finally {
-      genTimeout.clear()
-      if (soloGenAbortRef.current === ac) soloGenAbortRef.current = null
-    }
+    await generateSoloHand({
+      theme: session.theme,
+      themeSlug: session.themeSlug,
+      difficulty: nextDiff,
+      scope: session.scope,
+      provider: session.aiProvider ?? 'auto',
+      quizMode: session.quizMode ?? 'standard',
+      from: 'tier-result',
+      unlocked:
+        session.playMode === 'manual' ? [...DIFFICULTIES] : session.unlocked,
+    })
   }
 
   async function handleTierContinue() {
@@ -1131,10 +1010,6 @@ export default function App() {
       ? (outcome.nextDifficulty as Difficulty)
       : tierSnapshot.difficulty
 
-    setScreen('loading')
-    setGenQuestionsDone(0)
-    setGenAiSource(null)
-    soloTypingScoreRef.current = 0
     setStatusMsg(
       outcome.passed && outcome.nextDifficulty
         ? `Génération du palier ${DIFFICULTY_LABELS[outcome.nextDifficulty]}…`
@@ -1145,78 +1020,16 @@ export default function App() {
       currentDifficulty: nextDiff,
       status: 'loading',
     }))
-
-    soloCancelRef.current = false
-    soloGenAbortRef.current?.abort()
-    const ac = new AbortController()
-    soloGenAbortRef.current = ac
-    const genTimeout = armSoloGenTimeout(ac)
-
-    try {
-      const result = await ensureHand(
-        session.theme,
-        session.themeSlug,
-        nextDiff,
-        session.scope,
-        session.aiProvider ?? 'auto',
-        session.quizMode ?? 'standard',
-        ac.signal,
-      )
-      if (ac.signal.aborted) {
-        if (genTimeout.didTimeout()) {
-          setError('La génération a pris trop de temps. Réessaie.')
-          setScreen('tier-result')
-        }
-        return
-      }
-      if ('error' in result) {
-        if (result.error === 'Génération annulée' && soloCancelRef.current) return
-        setError(
-          result.error === 'Génération annulée'
-            ? 'Génération interrompue. Réessaie.'
-            : result.error,
-        )
-        setScreen('tier-result')
-        return
-      }
-
-      setSession((s) => ({
-        ...s,
-        currentDifficulty: nextDiff,
-        unlocked: outcome.unlocked,
-        currentHand: result.hand,
-        handIndex: 0,
-        status: 'playing',
-        tierAttempts: {
-          ...s.tierAttempts,
-          [nextDiff]: {
-            correct: 0,
-            answered: 0,
-            status: 'active',
-          },
-        },
-      }))
-      setAudit([])
-      setSelectedIndex(null)
-      setPendingScored(false)
-      applyGenMsg(result.msg)
-      setTierSnapshot(null)
-      pushSoloTypingBoard(soloTypingScoreRef.current)
-      setScreen('play')
-    } catch (e) {
-      if (ac.signal.aborted) {
-        if (genTimeout.didTimeout()) {
-          setError('La génération a pris trop de temps. Réessaie.')
-          setScreen('tier-result')
-        }
-        return
-      }
-      setError(e instanceof Error ? e.message : 'Erreur')
-      setScreen('tier-result')
-    } finally {
-      genTimeout.clear()
-      if (soloGenAbortRef.current === ac) soloGenAbortRef.current = null
-    }
+    await generateSoloHand({
+      theme: session.theme,
+      themeSlug: session.themeSlug,
+      difficulty: nextDiff,
+      scope: session.scope,
+      provider: session.aiProvider ?? 'auto',
+      quizMode: session.quizMode ?? 'standard',
+      from: 'tier-result',
+      unlocked: outcome.unlocked,
+    })
   }
 
   function resetAll() {
@@ -1375,6 +1188,10 @@ export default function App() {
           scope,
           aiProvider: options.aiProvider,
           quizMode: options.quizMode === 'audio' ? 'audio' : 'standard',
+          audioAutoplay:
+            options.quizMode === 'audio'
+              ? Boolean(options.audioAutoplay)
+              : false,
         })
         setMultiRoom(res.room)
         const mode = options.gameMode
@@ -1424,6 +1241,10 @@ export default function App() {
         difficulty: options.difficulty,
         aiProvider: options.aiProvider,
         quizMode: options.quizMode === 'audio' ? 'audio' : 'standard',
+        audioAutoplay:
+          options.quizMode === 'audio'
+            ? Boolean(options.audioAutoplay)
+            : false,
       })
       setMultiPlayerId(res.playerId!)
       setMultiRoom(res.room)
@@ -1988,10 +1809,7 @@ export default function App() {
           />
         ) : null}
 
-        {screen === 'mode' && (
-          // Ancien écran Solo/Multi — redirigé vers l’accueil thèmes
-          <AdminPanel />
-        )}
+        <AdminPanel hideGear={screen === 'home'} />
 
         {screen === 'minigames' && (
           <div className="minigames-hub">
@@ -2001,7 +1819,6 @@ export default function App() {
 
         {screen === 'home' && (
           <>
-            <AdminPanel hideGear={screen === 'home'} />
             <ThemeSelect
               onStart={handleStart}
               variant="solo"
@@ -2058,7 +1875,11 @@ export default function App() {
           <div className="loading loading--duel" role="status">
             <WaitMiniGames
               mode="solo"
-              statusLabel={statusMsg ?? 'Génération du quiz…'}
+              statusLabel={
+                error
+                  ? (statusMsg ?? 'Génération incomplète')
+                  : (statusMsg ?? 'Génération du quiz…')
+              }
               theme={session.theme || null}
               difficultyLabel={
                 session.currentDifficulty
@@ -2070,13 +1891,40 @@ export default function App() {
               questionsTotal={10}
               aiSource={genAiSource}
             />
-            <button
-              type="button"
-              className="btn btn--secondary loading__cancel"
-              onClick={handleCancelSoloGenerate}
-            >
-              Annuler la génération
-            </button>
+            {error ? (
+              <>
+                <p className="loading__error" role="alert">
+                  {error}
+                </p>
+                <div className="loading__actions">
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    onClick={() => void retrySoloGenerate()}
+                  >
+                    Réessayer
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    onClick={handleCancelSoloGenerate}
+                  >
+                    {soloGenArgsRef.current?.from === 'tier-result' ||
+                    tierSnapshot
+                      ? 'Retour'
+                      : 'Changer de thème'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="btn btn--secondary loading__cancel"
+                onClick={handleCancelSoloGenerate}
+              >
+                Annuler la génération
+              </button>
+            )}
         </div>
         )}
 
@@ -2091,6 +1939,7 @@ export default function App() {
               onContinue={handleNextAfterFeedback}
               disabled={selectedIndex !== null}
               timerEnabled={session.timerEnabled}
+              audioAutoplay={Boolean(session.audioAutoplay)}
               theme={session.theme}
             />
             <AnswerAudit

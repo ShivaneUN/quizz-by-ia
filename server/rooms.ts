@@ -68,6 +68,8 @@ export interface RoomState {
   aiProvider: 'auto' | 'groq' | 'gemini' | 'cerebras' | 'deepseek' | 'openrouter'
   /** standard = texte IA ; audio = quiz Deezer */
   quizMode?: 'standard' | 'image' | 'audio'
+  /** Deezer : lecture auto des extraits (hôte) */
+  audioAutoplay?: boolean
   /** Message si status === 'error' */
   errorMessage?: string
   players: RoomPlayer[]
@@ -102,8 +104,12 @@ export interface RoomState {
   genQuestionsDone?: number
   /** Total cible (toujours 10) */
   genQuestionsTotal?: number
-  /** Horodatage début génération — watchdog anti-blocage */
+  /** Provider IA en cours (gemini / groq / …) pendant generating */
+  genAiSource?: string
+  /** Horodatage début génération — plafond absolu anti-boucle topup */
   generatingStartedAt?: number
+  /** Dernière activité gen (runGenerate / progress) — watchdog orphelin */
+  generatingHeartbeatAt?: number
   /**
    * Questions déjà collectées pendant generating (top-up multi).
    * Jamais exposé via publicRoomView.
@@ -121,8 +127,10 @@ export const ROUND_MS = 10_000
 export const MULTI_QUESTION_COUNT = 10
 /** TTL Redis salle (inactivité) — rafraîchi à chaque save / poll */
 export const ROOM_TTL_SEC = 60 * 5
-/** Au-delà : génération orpheline (ex. kill Vercel) → status error */
-export const GENERATING_STALE_MS = 65_000
+/** Au-delà sans heartbeat : génération orpheline (ex. kill Vercel) → status error */
+export const GENERATING_STALE_MS = 70_000
+/** Plafond total depuis le 1er start (plusieurs topups HTTP) */
+export const GENERATING_ABSOLUTE_MAX_MS = 180_000
 /** Verrou runGenerate (secondes) — ≥ budget IA + marge */
 export const GEN_LOCK_TTL_SEC = 70
 
@@ -236,7 +244,9 @@ export function clearGeneratingFields(room: RoomState): void {
   delete room.genEstimateSec
   delete room.genQuestionsDone
   delete room.genQuestionsTotal
+  delete room.genAiSource
   delete room.generatingStartedAt
+  delete room.generatingHeartbeatAt
   delete room.genCollectedQuestions
   delete room.needsTopUp
 }
@@ -279,6 +289,12 @@ export async function getRoom(code: string): Promise<RoomState | null> {
   }
   if (room.playMode !== 'progression' && room.playMode !== 'free') {
     room.playMode = 'free'
+  }
+  // Compat : thème Deezer sans quizMode → audio
+  if (/^deezer\b/i.test(String(room.theme ?? '').trim())) {
+    room.quizMode = 'audio'
+  } else if (room.quizMode !== 'audio') {
+    room.quizMode = 'standard'
   }
   if (
     room.roundPhase !== 'waiting' &&
@@ -588,7 +604,14 @@ export function publicRoomView(
 
   return {
     ...(({ genCollectedQuestions: _omit, ...safe }) => safe)(room),
-    quizMode: room.quizMode === 'audio' ? 'audio' : 'standard',
+    quizMode:
+      room.quizMode === 'audio' || /^deezer\b/i.test(String(room.theme ?? '').trim())
+        ? 'audio'
+        : 'standard',
+    audioAutoplay:
+      room.quizMode === 'audio' || /^deezer\b/i.test(String(room.theme ?? '').trim())
+        ? room.audioAutoplay !== false
+        : false,
     timerStarted: Boolean(room.timerStarted),
     timerPaused: Boolean(room.timerPaused),
     roundDurationMs: duration,
@@ -718,14 +741,22 @@ export async function syncRoomRound(code: string): Promise<RoomState | null> {
 
   if (room.status === 'generating') {
     const started = room.generatingStartedAt ?? room.updatedAt
-    if (
+    const heartbeat =
+      room.generatingHeartbeatAt ?? room.generatingStartedAt ?? room.updatedAt
+    const now = Date.now()
+    const orphan =
+      typeof heartbeat === 'number' &&
+      heartbeat > 0 &&
+      now - heartbeat > GENERATING_STALE_MS
+    const absolute =
       typeof started === 'number' &&
       started > 0 &&
-      Date.now() - started > GENERATING_STALE_MS
-    ) {
+      now - started > GENERATING_ABSOLUTE_MAX_MS
+    if (orphan || absolute) {
       room.status = 'error'
-      room.errorMessage =
-        'La génération a expiré (délai serveur). Réessaie.'
+      room.errorMessage = absolute
+        ? 'La génération a pris trop de temps. Réessaie.'
+        : 'La génération a expiré (délai serveur). Réessaie.'
       clearGeneratingFields(room)
       await saveRoom(room)
       void forceReleaseGenLock(code)

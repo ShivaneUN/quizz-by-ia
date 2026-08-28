@@ -1,8 +1,9 @@
 {
-  "placementKind": "custom",
-  "theme": "Solo Leveling",
-  "customKey": "solo-leveling",
-  "groupKey": "custom/solo-leveling",
+  "placementKind": "catalog",
+  "themeId": "cinema",
+  "theme": "Cinéma",
+  "subTheme": "Solo Leveling",
+  "groupKey": "catalog/cinema/solo-leveling",
   "questions": [
     {
       "id": "cur-mt1w3plv-s46d8u",

@@ -1,5 +1,10 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { generateQuestions, normalizeThemeSlug, parseAiProvider, parseQuizContentMode } from '../server/generate.js'
+import {
+  getPartialQuestions,
+  syncPartialQuestionCache,
+  type PartialCachedQuestion,
+} from '../server/partialQuestionCache.js'
 import { matchesFreeMusicAnswer } from '../server/freeAnswer.js'
 import {
   ROUND_MS,
@@ -53,6 +58,45 @@ function parsePlayMode(raw: unknown): 'progression' | 'free' {
   return raw === 'progression' ? 'progression' : 'free'
 }
 
+/** Thème créé via l’UI Deezer (ex. « Deezer — Hits (global) »). */
+function isDeezerTheme(theme: string): boolean {
+  return /^deezer\b/i.test(String(theme ?? '').trim())
+}
+
+/** Mode contenu salle : audio si flag ou thème Deezer (filet de sécu). */
+function resolveRoomContentMode(
+  room: Pick<RoomState, 'quizMode' | 'theme'>,
+): 'audio' | 'standard' {
+  if (room.quizMode === 'audio' || isDeezerTheme(room.theme)) return 'audio'
+  return 'standard'
+}
+
+/** Empreinte multi : texte seul (IA) ; piste unique (Deezer — prompts répétés). */
+function roomQuestionFingerprint(
+  q: {
+    question: string
+    answers?: [string, string, string, string] | string[]
+    correctIndex?: number
+    deezerTrackId?: string
+    previewUrl?: string
+    revealAnswer?: string
+  },
+  mode: 'audio' | 'standard',
+): string {
+  const base = q.question.trim().toLowerCase().replace(/\s+/g, ' ')
+  if (mode !== 'audio') return base
+  const ans =
+    typeof q.correctIndex === 'number' && Array.isArray(q.answers)
+      ? String(q.answers[q.correctIndex] ?? '')
+      : ''
+  const id =
+    String(q.deezerTrackId ?? '').trim() ||
+    String(q.previewUrl ?? '').trim() ||
+    String(q.revealAnswer ?? '').trim() ||
+    ans
+  return `${base}|${ans.trim().toLowerCase()}|${id.toLowerCase()}`
+}
+
 function json(res: VercelResponse, status: number, body: unknown) {
   res.statusCode = status
   res.setHeader('Content-Type', 'application/json')
@@ -102,7 +146,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const difficulty =
         playMode === 'progression' ? 'easy' : parseDifficulty(body.difficulty)
       const aiProvider = parseAiProvider(body.aiProvider)
-      const quizMode = parseQuizContentMode(body.quizMode)
+      const quizModeRaw = parseQuizContentMode(body.quizMode)
+      const quizMode =
+        quizModeRaw === 'audio' || isDeezerTheme(theme) ? 'audio' : 'standard'
+      const audioAutoplay =
+        quizMode === 'audio' ? body.audioAutoplay !== false : false
       const hostId = newPlayerId()
       let code = makeRoomCode()
       for (let i = 0; i < 5; i++) {
@@ -121,7 +169,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         playMode,
         difficulty,
         aiProvider,
-        quizMode: quizMode === 'audio' ? 'audio' : 'standard',
+        quizMode,
+        audioAutoplay,
         players: [
           {
             id: hostId,
@@ -218,8 +267,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Marque « generating » tout de suite et rend la main (évite 504 client)
       room.status = 'generating'
       delete room.hostPickingTheme
-      // conserve quizMode (audio Deezer ou standard)
-      if (room.quizMode !== 'audio') room.quizMode = 'standard'
+      // Deezer si flag audio OU thème Deezer (évite une gen IA texte par erreur)
+      room.quizMode =
+        resolveRoomContentMode(room) === 'audio' ? 'audio' : 'standard'
       room.timerStarted = false
       room.timerPaused = false
       room.timerPausedLeftMs = undefined
@@ -233,10 +283,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       clearGeneratingFields(room)
       room.genQuestionsDone = 0
       room.genQuestionsTotal = 10
-      room.generatingStartedAt = Date.now()
+      const genStart = Date.now()
+      room.generatingStartedAt = genStart
+      room.generatingHeartbeatAt = genStart
       resetPlayersForNewGame(room)
       const eta = await getGenerationEstimateSec('multi')
       room.genEstimateSec = eta.estimateSec
+      const startProvider = parseAiProvider(room.aiProvider)
+      if (startProvider !== 'auto') room.genAiSource = startProvider
       await saveRoom(room)
       await forceReleaseGenLock(code)
       return json(res, 200, {
@@ -278,9 +332,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         room.needsTopUp = false
+        room.generatingHeartbeatAt = Date.now()
         await saveRoom(room)
 
-        const contentMode = room.quizMode === 'audio' ? 'audio' : 'standard'
+        const contentMode = resolveRoomContentMode(room)
+        room.quizMode = contentMode
         const themeSlug =
           contentMode === 'audio'
             ? `${normalizeThemeSlug(room.theme)}--${room.scope}--audio`
@@ -292,10 +348,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ...(room.genCollectedQuestions ?? []),
         ]
         const collectedFp = new Set(
-          collected.map((q) =>
-            q.question.trim().toLowerCase().replace(/\s+/g, ' '),
-          ),
+          collected.map((q) => roomQuestionFingerprint(q, contentMode)),
         )
+
+        function toCachedQuestion(q: RoomQuestion): PartialCachedQuestion {
+          return {
+            id: q.id,
+            question: q.question,
+            answers: q.answers,
+            correctIndex: q.correctIndex,
+            difficulty,
+            themeSlug,
+            createdAt: new Date().toISOString(),
+            batchId: 'partial-cache',
+            explanation: q.explanation,
+            sourceType: q.sourceType,
+            previewUrl: q.previewUrl,
+            coverUrl: q.coverUrl,
+            deezerTrackId: q.deezerTrackId,
+            revealAnswer: q.revealAnswer,
+            answerMode: q.answerMode,
+            acceptedAnswers: q.acceptedAnswers,
+            freeInputHint: q.freeInputHint,
+          }
+        }
+
+        async function persistCollectedCache(): Promise<void> {
+          await syncPartialQuestionCache(
+            themeSlug,
+            difficulty,
+            collected.map(toCachedQuestion),
+          )
+        }
 
         function ingestGenerated(
           qs: Array<{
@@ -317,7 +401,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ): void {
           for (const q of qs) {
             if (q.difficulty && q.difficulty !== difficulty) continue
-            const fp = q.question.trim().toLowerCase().replace(/\s+/g, ' ')
+            const fp = roomQuestionFingerprint(q, contentMode)
             if (!fp || collectedFp.has(fp)) continue
             collectedFp.add(fp)
             collected.push({
@@ -339,6 +423,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         }
 
+        if (collected.length === 0) {
+          const cached = await getPartialQuestions(themeSlug, difficulty)
+          ingestGenerated(cached)
+        }
+
         async function finalizePlaying(pool: RoomQuestion[]): Promise<boolean> {
           if (!room) return false
           const seen = await getSeenQuestionKeys(themeSlug)
@@ -346,6 +435,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             pool,
             seen,
             MULTI_QUESTION_COUNT,
+            (q) => roomQuestionFingerprint(q, contentMode),
           )
           const questions = selected.slice(0, MULTI_QUESTION_COUNT)
           if (questions.length < MULTI_QUESTION_COUNT) {
@@ -354,12 +444,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             room.genQuestionsDone = pool.length
             room.genQuestionsTotal = MULTI_QUESTION_COUNT
             await saveRoom(room)
+            await syncPartialQuestionCache(
+              themeSlug,
+              difficulty,
+              pool.map(toCachedQuestion),
+            )
             return false
           }
           await rememberQuestionKeys(
             themeSlug,
-            questions.map((q) => q.question),
+            questions.map((q) =>
+              contentMode === 'audio'
+                ? roomQuestionFingerprint(q, 'audio')
+                : q.question,
+            ),
           )
+          await syncPartialQuestionCache(themeSlug, difficulty, questions.map(toCachedQuestion))
           const now = Date.now()
           room.status = 'playing'
           delete room.errorMessage
@@ -385,39 +485,88 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           })
         }
 
-        const histExclude = await getSeenQuestionTexts(themeSlug)
-        const excludeQuestions = [
-          ...histExclude,
-          ...collected.map((q) => q.question),
-        ]
-
         const genStarted = Date.now()
         let lastProgDone = -1
-        let gen: Awaited<ReturnType<typeof generateQuestions>>
-        try {
-          gen = await generateQuestions(
-            room.theme,
+        const stickyRaw = room.genAiSource
+        const stickyEngine =
+          stickyRaw === 'gemini' ||
+          stickyRaw === 'groq' ||
+          stickyRaw === 'openrouter'
+            ? stickyRaw
+            : undefined
+
+        async function bumpProgress(
+          done: number,
+          total: number,
+          engine?: string,
+        ): Promise<void> {
+          if (done === lastProgDone && !engine) return
+          lastProgDone = done
+          const latest = await getRoom(code)
+          if (!latest || latest.status !== 'generating') return
+          latest.genQuestionsDone = Math.min(
+            MULTI_QUESTION_COUNT,
+            Math.max(collected.length, done),
+          )
+          latest.genQuestionsTotal = total
+          latest.generatingHeartbeatAt = Date.now()
+          if (engine) latest.genAiSource = engine
+          await saveRoom(latest)
+        }
+
+        function resolveSticky(
+          raw: string | undefined,
+        ): 'gemini' | 'groq' | 'openrouter' | undefined {
+          return raw === 'gemini' || raw === 'groq' || raw === 'openrouter'
+            ? raw
+            : undefined
+        }
+
+        async function callGenerate(
+          sticky?: 'gemini' | 'groq' | 'openrouter',
+        ) {
+          const histExclude =
+            contentMode === 'audio'
+              ? []
+              : await getSeenQuestionTexts(themeSlug)
+          const excludeQuestions =
+            contentMode === 'audio'
+              ? collected.map((q) => roomQuestionFingerprint(q, 'audio'))
+              : [...histExclude, ...collected.map((q) => q.question)]
+          const seed = collected.map(toCachedQuestion)
+          return generateQuestions(
+            room!.theme,
             themeSlug,
             'complementary',
             difficulty,
-            room.scope,
+            room!.scope,
             provider,
             contentMode,
             excludeQuestions,
-            async (done, total) => {
-              if (done === lastProgDone) return
-              lastProgDone = done
-              const latest = await getRoom(code)
-              if (!latest || latest.status !== 'generating') return
-              latest.genQuestionsDone = Math.min(
-                MULTI_QUESTION_COUNT,
-                Math.max(collected.length, done),
-              )
-              latest.genQuestionsTotal = total
-              await saveRoom(latest)
-            },
+            (done, total, engine) => bumpProgress(done, total, engine),
             true,
+            sticky,
+            seed,
           )
+        }
+
+        let gen: Awaited<ReturnType<typeof generateQuestions>>
+        try {
+          gen = await callGenerate(stickyEngine)
+          // Solo-like : 1 retry si 0 question « pas assez valides »
+          if (
+            (gen.questions?.length ?? 0) === 0 &&
+            /pas assez de questions valides/i.test(gen.error ?? '')
+          ) {
+            room = (await getRoom(code)) ?? room
+            if (room.status === 'generating') {
+              room.generatingHeartbeatAt = Date.now()
+              await saveRoom(room)
+              gen = await callGenerate(
+                stickyEngine ?? resolveSticky(room.genAiSource),
+              )
+            }
+          }
         } catch (e) {
           const message =
             e instanceof Error ? e.message : 'Erreur de génération'
@@ -429,8 +578,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             latest.genCollectedQuestions = collected
             latest.genQuestionsDone = collected.length
             latest.genQuestionsTotal = MULTI_QUESTION_COUNT
+            latest.generatingHeartbeatAt = Date.now()
             latest.needsTopUp = true
             await saveRoom(latest)
+            await persistCollectedCache()
             return json(res, 200, {
               room: publicRoomView(latest),
               message: `Lot partiel (${collected.length}/10) — complément…`,
@@ -447,6 +598,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             theme: latest.theme,
             detail: `salle ${code}`,
             path: '/api/room',
+            instead: 'Salle en status error — joueurs voient le message',
           })
           return json(res, 422, {
             error: message,
@@ -469,6 +621,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         room.genCollectedQuestions = collected
         room.genQuestionsDone = collected.length
         room.genQuestionsTotal = MULTI_QUESTION_COUNT
+        room.generatingHeartbeatAt = Date.now()
+        if (gen.source && gen.source !== 'mock' && gen.source !== 'deezer') {
+          room.genAiSource = gen.source
+        }
 
         if (collected.length === 0) {
           const err =
@@ -485,6 +641,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             theme: room.theme,
             detail: `salle ${code}`,
             path: '/api/room',
+            instead: 'Salle en status error — 0 question générée',
           })
           return json(res, 422, {
             error: err,
@@ -495,6 +652,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (collected.length < MULTI_QUESTION_COUNT) {
           room.needsTopUp = true
           await saveRoom(room)
+          await persistCollectedCache()
           return json(res, 200, {
             room: publicRoomView(room),
             message: `Lot partiel (${collected.length}/10) — complément…`,
@@ -540,6 +698,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (body.quizMode !== undefined) {
         const qm = parseQuizContentMode(body.quizMode)
         room.quizMode = qm === 'audio' ? 'audio' : 'standard'
+      }
+      // Filet : thème Deezer → toujours mode audio (jamais gen texte IA)
+      if (isDeezerTheme(theme)) room.quizMode = 'audio'
+      else if (room.quizMode !== 'audio') room.quizMode = 'standard'
+      if (body.audioAutoplay !== undefined) {
+        room.audioAutoplay =
+          room.quizMode === 'audio' ? Boolean(body.audioAutoplay) : false
+      } else if (room.quizMode !== 'audio') {
+        room.audioAutoplay = false
+      } else if (typeof room.audioAutoplay !== 'boolean') {
+        room.audioAutoplay = true
       }
       delete room.errorMessage
       delete room.hostPickingTheme

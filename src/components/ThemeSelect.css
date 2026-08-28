@@ -130,7 +130,7 @@
   align-content: center;
   justify-self: center;
   align-self: center;
-  gap: 0.38rem;
+  gap: 0.32rem;
   width: min(16.25rem, 44%);
   max-width: calc(var(--orbit-radius) * 1.28);
   text-align: center;
@@ -634,6 +634,65 @@
   font-weight: 800;
 }
 
+.subthemes__generated {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.45rem;
+  padding-top: 0.4rem;
+  border-top: 1px dashed color-mix(in srgb, #f0c14b 28%, transparent);
+}
+
+.subthemes__generated-title {
+  margin: 0;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #f0c14b;
+  text-align: center;
+}
+
+.subthemes__hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.68rem;
+  font-weight: 650;
+  color: var(--ink-muted, #9bb0cc);
+  text-align: center;
+}
+
+.subtheme-chip--custom {
+  border-style: dashed;
+  border-color: color-mix(in srgb, #f0c14b 45%, transparent);
+}
+
+.subtheme-chip--gen {
+  border-color: color-mix(in srgb, #4db8ff 40%, transparent);
+}
+
+.subtheme-chip--soon:disabled {
+  opacity: 0.78;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.1rem;
+  min-height: 2.1rem;
+  cursor: not-allowed;
+}
+
+.subtheme-chip__main {
+  line-height: 1.1;
+}
+
+.subtheme-chip__soon {
+  font-size: 0.55rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #f0c14b;
+  line-height: 1;
+}
+
 /* --- JOUER --- */
 .btn-jouer {
   display: inline-flex;
@@ -776,6 +835,25 @@
   cursor: not-allowed;
 }
 
+.theme-bubble--soon {
+  opacity: 0.82;
+}
+
+.theme-bubble--soon .theme-bubble__icon {
+  border-style: dashed;
+  filter: grayscale(0.25);
+}
+
+.theme-bubble__soon {
+  font-size: 0.5rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #f0c14b;
+  text-shadow: 0 1px 6px color-mix(in srgb, #000 65%, transparent);
+  line-height: 1;
+}
+
 .custom-theme {
   display: grid;
   gap: 0.35rem;
@@ -883,6 +961,26 @@
   font-size: 0.78rem;
   opacity: 0.72;
   line-height: 1.35;
+}
+
+.deezer-panel__hint--scope {
+  margin: 0.15rem 0 0.45rem;
+  font-size: 0.72rem;
+}
+
+.subtheme-chip.is-scope-mismatch {
+  opacity: 0.42;
+  filter: grayscale(0.55);
+}
+
+.subtheme-chip.is-scope-mismatch.is-selected {
+  opacity: 0.85;
+  filter: grayscale(0.2);
+}
+
+.subtheme-chip.is-scope-mismatch:hover:not(:disabled) {
+  opacity: 0.7;
+  filter: grayscale(0.25);
 }
 
 @keyframes stage-in {

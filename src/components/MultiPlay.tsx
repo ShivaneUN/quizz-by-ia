@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { MultiRoom } from '../lib/multiApi'
+import {
+  readDeezerAutoplayPreference,
+  writeDeezerAutoplayPreference,
+} from '../lib/deezerStyles'
 import { HostPlayersPanel } from './HostPlayersPanel'
 import { PlayersStreakBar } from './PlayersStreakBar'
 import { QuestionFeedback } from './QuestionFeedback'
 import { StreakFlame } from './StreakFlame'
 import { PreviewAudio } from './PreviewAudio'
+import { QuestionTtsBar } from './QuestionTtsBar'
 import { revealCorrectAnswer } from './AnswerAudit'
 import './MultiPlay.css'
 
@@ -50,6 +55,10 @@ export function MultiPlay({
   const hasAnswered = myAnswer !== undefined
   const isFree = q?.answerMode === 'free'
   const [freeText, setFreeText] = useState('')
+  /** Lecture auto Deezer : locale à chaque joueur (pas la préférence hôte) */
+  const [audioAutoplay, setAudioAutoplay] = useState(() =>
+    readDeezerAutoplayPreference(true),
+  )
   const timerOn = room.timerEnabled !== false
   const waiting = room.roundPhase === 'waiting'
   const revealing = room.roundPhase === 'reveal'
@@ -113,6 +122,15 @@ export function MultiPlay({
   if (!q) {
     return <p className="multi-play__empty">Chargement…</p>
   }
+
+  /** À la révélation : combien de joueurs ont choisi chaque option QCM */
+  const voteCounts = useMemo(() => {
+    const counts = [0, 0, 0, 0]
+    for (const ans of Object.values(room.currentAnswers)) {
+      if (typeof ans === 'number' && ans >= 0 && ans <= 3) counts[ans] += 1
+    }
+    return counts
+  }, [room.currentAnswers])
 
   const myCorrect =
     revealing &&
@@ -194,6 +212,14 @@ export function MultiPlay({
         </p>
       )}
 
+      {!q.previewUrl && (
+        <QuestionTtsBar
+          questionId={q.id}
+          question={q.question}
+          answers={q.answers}
+          answerMode={q.answerMode}
+        />
+      )}
       <h2 className="multi-play__question">{q.question}</h2>
 
       {q.previewUrl && (
@@ -201,6 +227,11 @@ export function MultiPlay({
           src={q.previewUrl}
           questionId={q.id}
           maxSeconds={30}
+          autoPlay={room.quizMode === 'audio' && audioAutoplay}
+          onAutoPlayChange={(on) => {
+            setAudioAutoplay(on)
+            writeDeezerAutoplayPreference(on)
+          }}
           figureClassName="multi-play__media multi-play__media--audio"
           audioClassName="multi-play__audio"
           captionClassName="multi-play__audio-caption"
@@ -280,6 +311,8 @@ export function MultiPlay({
               state = ' is-selected'
             }
 
+            const votes = revealing ? voteCounts[i] : 0
+
             return (
               <button
                 key={`${q.id}-${i}`}
@@ -291,7 +324,15 @@ export function MultiPlay({
                 <span className="multi-play__letter" aria-hidden>
                   {String.fromCharCode(65 + i)}
                 </span>
-                <span>{answer}</span>
+                <span className="multi-play__answer-text">{answer}</span>
+                {revealing && (
+                  <span
+                    className="multi-play__votes"
+                    title={`${votes} ${votes <= 1 ? 'personne' : 'personnes'}`}
+                  >
+                    {votes} pers.
+                  </span>
+                )}
                 {revealing &&
                   typeof correctIndex === 'number' &&
                   i === correctIndex && (

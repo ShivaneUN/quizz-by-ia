@@ -166,6 +166,26 @@
   min-width: min(18rem, 100%);
 }
 
+.loading__error {
+  margin: 0.5rem 0 0;
+  max-width: 28rem;
+  color: var(--danger);
+  font-weight: 600;
+  text-align: center;
+}
+
+.loading__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  justify-content: center;
+  margin-top: 0.75rem;
+}
+
+.loading__actions .btn {
+  min-width: min(12rem, 100%);
+}
+
 .loading__pulse {
   width: 2.75rem;
   height: 2.75rem;

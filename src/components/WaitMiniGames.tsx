@@ -1,3 +1,5 @@
+import type { AiProvider } from '../types'
+import { AI_PROVIDER_LABELS } from '../types'
 import { useEffect, useRef, useState } from 'react'
 import {
   clearArcadeScores,
@@ -113,7 +115,9 @@ export function WaitMiniGames({
           <p className="wait-minis__progress" aria-live="polite">
             Questions générées par{' '}
             <span className="wait-minis__ai-source">
-              {aiSource ?? '…'}
+              {aiSource
+                ? (AI_PROVIDER_LABELS[aiSource as AiProvider] ?? aiSource)
+                : '…'}
             </span>{' '}
             <span className="wait-minis__progress-num">
               {progressDone}/{questionsTotal}

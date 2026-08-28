@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import type { Question } from '../types'
 import { ROUND_MS } from '../types'
+import {
+  readDeezerAutoplayPreference,
+  writeDeezerAutoplayPreference,
+} from '../lib/deezerStyles'
 import { QuestionFeedback } from './QuestionFeedback'
 import { PreviewAudio } from './PreviewAudio'
+import { QuestionTtsBar } from './QuestionTtsBar'
 import { revealCorrectAnswer } from './AnswerAudit'
 import './QuizPlay.css'
 
@@ -19,6 +24,8 @@ interface QuizPlayProps {
   timerEnabled?: boolean
   durationMs?: number
   theme?: string
+  /** @deprecated préférence locale via localStorage */
+  audioAutoplay?: boolean
 }
 
 export function QuizPlay({
@@ -46,6 +53,9 @@ export function QuizPlay({
   const [startedAt, setStartedAt] = useState(() => Date.now())
   const [now, setNow] = useState(() => Date.now())
   const [freeText, setFreeText] = useState('')
+  const [audioAutoplay, setAudioAutoplay] = useState(() =>
+    readDeezerAutoplayPreference(true),
+  )
   const timedOutRef = useRef(false)
 
   useEffect(() => {
@@ -109,6 +119,14 @@ export function QuizPlay({
         </div>
       )}
 
+      {!question.previewUrl && (
+        <QuestionTtsBar
+          questionId={question.id}
+          question={question.question}
+          answers={question.answers}
+          answerMode={question.answerMode}
+        />
+      )}
       <h2 className="quiz-play__question">{question.question}</h2>
 
       {question.previewUrl && (
@@ -116,6 +134,11 @@ export function QuizPlay({
           src={question.previewUrl}
           questionId={question.id}
           maxSeconds={30}
+          autoPlay={audioAutoplay}
+          onAutoPlayChange={(on) => {
+            setAudioAutoplay(on)
+            writeDeezerAutoplayPreference(on)
+          }}
         />
       )}
 

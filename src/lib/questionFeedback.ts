@@ -1,6 +1,7 @@
-/** Feedback question → serveur (👍 / 👎 / vérif / à revoir) */
+/** Feedback question → serveur (👍 / 👎 / vérif / à revoir / signalement) */
 
-export type FeedbackKind = 'up' | 'down' | 'verify' | 'review'
+export type FeedbackKind = 'up' | 'down' | 'verify' | 'review' | 'report'
+export type ReportTarget = 'question' | 'answer' | 'both'
 
 export type FactVerdict = 'ok' | 'douteux' | 'faux' | 'inconnu'
 
@@ -17,6 +18,7 @@ export interface QuestionFeedbackPayload {
   mode?: 'solo' | 'multi'
   playerCorrect?: boolean
   selectedIndex?: number
+  reportTarget?: ReportTarget
   verdict?: FactVerdict
   answerVerdict?: FactVerdict
   sourceVerdict?: FactVerdict

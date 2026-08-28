@@ -5,124 +5,134 @@
  * ne fait référence à une règle contenue dans un AUTRE fragment optionnel (ex: le
  * bloc MOYEN ne dépend plus du bloc FACILE, PORTÉE ne dépend plus du bloc FACILE).
  * Ne pas reformuler ces fragments sans revérifier les références croisées.
+ *
+ * PATCH CACHING (voir conversation) :
+ * - Les blocs de règles ne contiennent plus {theme} / {sous_theme} : le préfixe
+ *   reste identique d'un thème à l'autre (même difficulté + même question_count).
+ * - {question_count} EST interpolé dans REGLES_BASE : un « 10 » figé contredisait
+ *   le rattrapage (1–6 Q). Le cache se partage entre lots de même taille, pas
+ *   entre un lot de 10 et un topup de 3 — et c'est voulu.
+ * - construirePrompt() place les règles EN PREMIER, le thème/historique EN DERNIER.
  */
 
 // ─────────────────────────────────────────────
 // REGLES_BASE — toujours incluses, quel que soit le niveau appelé
+// Pas de {theme}/{sous_theme} (fin de prompt). {question_count} oui, pour coller au lot.
 // ─────────────────────────────────────────────
 export const REGLES_BASE = `
 FIABILITÉ
-- Faits réels, vérifiables, jamais inventés. Si incertain à 100%, remplace la question.
-- 1 seule bonne réponse par question. Les 3 fausses sont plausibles mais indiscutablement fausses dans TOUT contexte — teste chacune mentalement avant validation.
-- Si une reformulation ne garantit pas une réponse unique, abandonne la question.
+- Faits réels, vérifiables, jamais inventés. Incertain à 100% → remplace la question.
+- 1 seule bonne réponse. Les 3 fausses indiscutablement fausses en TOUT contexte — teste chacune mentalement.
+- Reformulation ne garantissant pas une réponse unique → abandonne.
 
 LANGUE / PÉRIMÈTRE
-- Français naturel et fluide, comme rédigé directement par un francophone natif — jamais de traduction littérale de l'anglais, jamais de tournure calquée ou de syntaxe étrangère.
-- Relis chaque question et réponse en te demandant : "Est-ce que je dirais ça naturellement à l'oral en français ?" Si la formulation sonne traduite ou artificielle, réécris-la entièrement plutôt que de l'ajuster.
-- Vocabulaire adapté au contexte francophone, pas des termes traduits mot à mot qui n'existent pas dans l'usage courant.
-- Reste strictement dans {theme} > {sous_theme}.
+- Français naturel, fluide, natif — jamais de traduction littérale ni tournure calquée.
+- Teste chaque question/réponse : "je dirais ça à l'oral ?" Si non → réécris entièrement.
+- Vocabulaire francophone courant, pas de calque anglais.
+- Reste strictement dans le thème et le sous-thème demandés (précisés en fin de prompt).
 
 MODÉRATION
-- Sujets sensibles (histoire, religion, politique, conflits, tragédies) : factuel et neutre, zéro opinion.
-- Jamais de contenu violent, choquant, discriminatoire, sexuel — reformule ou remplace si risque de perception blessante malgré l'exactitude.
+- Sujets sensibles (histoire, religion, politique, conflits, tragédies) : factuel, neutre, zéro opinion.
+- Jamais violent, choquant, discriminatoire, sexuel — reformule/remplace si risque, même exact.
 
 EXPLICATION + SOURCE (chaque question)
-- "explication" : 1-3 phrases sur le pourquoi, compréhensible sans connaître la réponse.
-- "source" : nominative et réelle (organisme, institution, encyclopédie, site/ouvrage officiel — ex: NASA, FIFA, Larousse, encyclopédie du jeu). Pas de catégorie vague.
-- Jamais : titre d'article, date de publication, nom d'auteur/journaliste, URL — trop risqués d'être inventés.
-- Toujours fournis. Si non sourçable de façon nominative → remplace la question.
+- "explication" : 1-3 phrases, compréhensible sans connaître la réponse.
+- "source" : nominative et réelle (organisme/institution/encyclopédie/ouvrage officiel — ex: NASA, FIFA, Larousse). Jamais vague.
+- Interdit : titre d'article, date de publication, auteur/journaliste, URL (trop risqué d'invention).
+- Obligatoire. Non sourçable nominativement → remplace la question.
 
 DATATION DES FAITS ÉVOLUTIFS
-- Tout fait qui peut changer (record, poste occupé, nombre cumulatif, actualité) doit préciser sa date/période de référence dans la question elle-même.
-- "date_reference" renseigné dans le JSON (année/période, ou null si fait permanent).
-- Actualité : date obligatoire (mois + année) sur chaque question, sans exception.
-- Ne jamais inventer une date approximative — si incertain, choisis un fait non daté.
-- Consoles, sorties jeux, extensions : année exacte obligatoire (ex: portable Nintendo 2017 = Switch, pas 3DS).
+- Fait pouvant changer (record, poste, cumul, actualité) → préciser date/période dans la question.
+- "date_reference" renseigné (année/période, ou null si permanent).
+- Actualité : date (mois+année) obligatoire, sans exception.
+- Jamais de date approximative inventée — incertain → choisis un fait non daté.
+- Consoles/jeux/extensions : année exacte obligatoire (ex: portable Nintendo 2017 = Switch, pas 3DS).
 
 ANTI-PRÉMISSE FAUSSE
-- La formulation ne doit jamais présupposer une catégorie/statut/rôle erronés (ex: "quel groupe" pour un artiste solo ; "chanteuse" pour un homme).
-- Relis chaque terme catégoriel ; en cas de doute, formule de façon neutre.
+- Jamais présupposer catégorie/statut/rôle erroné (ex: "quel groupe" pour un artiste solo ; "chanteuse" pour un chanteur homme, ou l'inverse).
+- Relis chaque terme catégoriel (solo/groupe, genre) ; doute → formule neutre.
 
 ANTI-CONFUSION
-- Ne mélange jamais œuvre originale et adaptation (livre/film, jeu/série) — reste sur une seule version, précise-la si besoin.
-- Vérifie l'absence d'homonymes ambigus (personne, lieu, œuvre) ; précise un identifiant si nécessaire.
+- Ne mélange jamais œuvre originale et adaptation — reste sur une version, précise si besoin.
+- Vérifie l'absence d'homonymes ambigus ; précise un identifiant si nécessaire.
 - Chiffres approximatifs → toujours "environ", jamais présentés comme exacts.
 
 ANTI-DOUBLON
-- Aucune question ni fait redondant dans le lot de 10.
-- Aucun doublon avec un autre niveau de difficulté du même sous-thème (même reformulé — compare le FAIT testé, pas le texte).
-- Aucun doublon avec l'historique fourni ci-dessus. Si le sous-thème est trop pointu pour 10 questions inédites, élargis légèrement le périmètre plutôt que répéter.
+- Aucune question/fait redondant dans le lot de {question_count}.
+- Aucun doublon avec un autre niveau du même sous-thème (même reformulé — compare le FAIT, pas le texte).
+- Aucun doublon avec l'historique fourni. Sous-thème trop pointu → élargis le périmètre, ne répète pas.
 
-COHÉRENCE INTERNE QUESTION-RÉPONSE (anti-mélange entre questions du lot)
-- Chaque question est autonome : bonne réponse, réponses, explication et source portent EXCLUSIVEMENT sur son propre sujet — jamais sur un fait d'une autre question du lot.
-- Vigilance renforcée si plusieurs questions portent sur des sujets proches (films, pays, personnalités similaires) : reformule chaque question distinctement pour éviter d'attribuer un fait au mauvais sujet.
+COHÉRENCE INTERNE (anti-mélange entre questions du lot)
+- Chaque question autonome : réponse, explication, source portent EXCLUSIVEMENT sur son propre sujet.
+- Sujets proches (films, pays, personnalités) : vigilance renforcée, reformule distinctement.
 
-DIVERSITÉ DES BONNES RÉPONSES DANS LE LOT
-- La BONNE RÉPONSE (le contenu, pas la position A/B/C/D) ne doit jamais se répéter d'une question à l'autre dans le même lot de 10.
-- AVANT de finaliser, liste mentalement les 10 bonnes réponses du lot : si un même élément apparaît plusieurs fois, remplace l'une des questions concernées.
-- Cette règle porte uniquement sur le contenu de la bonne réponse, pas sur sa position (A/B/C/D).
+DIVERSITÉ DES BONNES RÉPONSES
+- Contenu de la bonne réponse jamais répété dans le lot de {question_count} (position A/B/C/D non concernée).
+- Avant de finaliser : liste mentalement les {question_count} bonnes réponses, remplace en cas de doublon.
 
-DIVERSITÉ DES MAUVAISES RÉPONSES DANS LE LOT
-- Limite la réutilisation d'un même élément comme mauvaise réponse à travers le lot de 10 (pas plus de 2-3 fois).
-- INTERDICTION ABSOLUE : un élément qui a servi de MAUVAISE réponse à une question ne doit jamais devenir la BONNE réponse d'une autre question du même lot (et inversement).
+DIVERSITÉ DES MAUVAISES RÉPONSES
+- Réutilisation d'un élément en mauvaise réponse limitée à 2-3 fois max dans le lot.
+- Interdit : un élément mauvaise réponse dans une question devient bonne réponse ailleurs (et inversement).
 
-PIÈGES FRÉQUENTS (logs joueurs — abandonne la question si risque)
-- Pas de tautologie : bonne réponse ≠ nom du thème / de la classe / du titre de l'œuvre testée.
-- Pas de "premier / a inventé / a popularisé" sans fait historique consensuel solide.
+PIÈGES FRÉQUENTS (abandonne la question si risque)
+- Pas de tautologie (bonne réponse = nom du thème/titre testé).
+- Pas de "premier / a inventé / a popularisé" sans fait consensuel solide.
 - Pas de "le plus célèbre / le meilleur" subjectif.
-- Fiction/jeux (Dofus, manga…) : aucun lieu, extension, monnaie ou lore inventé ; Wiki seul insuffisant → source officielle/encyclopédie du jeu, sinon abandon.
+- Fiction/jeux (Dofus, manga…) : aucun lore inventé ; Wiki seul insuffisant → source officielle, sinon abandon.
 - Co-création média : ne réduis pas à un seul nom si plusieurs créateurs.
 
 CONTRÔLE FINAL DE QUANTITÉ
-- Avant de livrer le JSON, compte exactement les questions du tableau : il doit y en avoir EXACTEMENT 10, ni plus ni moins.
+- Avant de livrer le JSON : compte le tableau — EXACTEMENT {question_count} questions.
 
 PORTÉE
-- "Français" : priorise faits France/francophonie sur thèmes pertinents (Histoire, Cinéma, Musique, Littérature, Actualité, Cuisine) ; thèmes universels restent internationaux avec ancrage français si possible.
+- "Français" : priorise France/francophonie sur thèmes pertinents (Histoire, Cinéma, Musique, Littérature, Actualité, Cuisine) ; thèmes universels restent internationaux, ancrage français si possible.
 - "International" : vivier mondial, sans priorité géographique.
-- Dans les deux cas, les critères du niveau de difficulté demandé priment — la portée ajuste le périmètre géographique des faits, jamais le niveau de difficulté lui-même.
+- La portée ajuste le périmètre géographique, jamais le niveau de difficulté.
 
 THÈME LIBRE (hors 16 thèmes prédéfinis)
-- Identifie la famille de rattachement, applique strictement les règles du niveau de difficulté demandé, de fiabilité et d'anti-doublon.
-- Si trop pointu pour 10 questions fiables et non redondantes, élargis le périmètre plutôt qu'inventer.
-- Si ambigu/mal orthographié, choisis l'interprétation la plus probable et grand public.
-- Si inapproprié ou insuffisamment documenté : ne génère rien, retourne {"erreur": "Thème non valide ou insuffisamment documenté pour générer un quiz fiable."}
+- Identifie la famille de rattachement, applique strictement niveau/fiabilité/anti-doublon.
+- Trop pointu pour 10 questions fiables → élargis, n'invente pas.
+- Ambigu/mal orthographié → interprétation la plus probable et grand public.
+- Inapproprié/mal documenté → ne génère rien, retourne {"erreur": "Thème non valide ou insuffisamment documenté pour générer un quiz fiable."}
 
-CONSIGNE DE GÉNÉRATION (pas de relecture après coup — applique chaque règle au moment où tu écris, pas en fin de liste)
-Applique TOUTES les règles ci-dessus DIRECTEMENT pendant la formulation de chaque question, une par une. Si une question que tu es en train de formuler enfreint une règle, NE L'ÉCRIS PAS et pars directement sur une formulation différente qui respecte toutes les règles dès le départ.
+CONSIGNE DE GÉNÉRATION (applique chaque règle en écrivant, pas en relecture finale)
+Applique TOUTES les règles ci-dessus pendant la formulation de chaque question, une par une. Question qui enfreint une règle → NE L'ÉCRIS PAS, reformule directement.
 `.trim()
 
 // ─────────────────────────────────────────────
 // REGLES_ANTI_INVENTION — toujours incluses, renforce FIABILITÉ côté code
+// 100% statique (inchangé — ne contenait déjà aucun placeholder)
 // ─────────────────────────────────────────────
 export const REGLES_ANTI_INVENTION = `
 INTERDICTION ABSOLUE D'INVENTION
-- Chaque fait testé doit être réel et vérifiable dans une source que tu connais avec certitude absolue.
-- "fait_verifiable" = true UNIQUEMENT si tu es certain à 100% — sinon NE PAS inclure la question.
-- "source" OBLIGATOIRE et NOMINATIVE : organisme, institution, encyclopédie ou ouvrage de référence identifiable (ex: NASA, FIFA, Wikipédia, Larousse, INSEE, BBC, Michelin).
-- INTERDIT comme source : "culture générale", "notoriété publique", "fait historique documenté", "fait scientifique établi", "connaissance commune", "source générale", ou toute catégorie vague sans référent nommé.
-- Lore fiction/jeux : n'invente aucun lieu, extension, monnaie, personnage secondaire ; si seul Wikipédia te vient et que tu n'es pas certain → abandonne.
-- Si tu ne peux pas citer une source nominative fiable → NE PAS inclure la question.
-- Mieux vaut retourner MOINS de questions que d'en fabriquer pour atteindre le quota.
-- En cas de doute sur un fait, une date, un nom ou une attribution → abandonne la question et passe à un autre fait sûr.
+- Chaque fait doit être réel, vérifiable, connu avec certitude absolue.
+- "fait_verifiable" = true UNIQUEMENT si certitude 100% — sinon exclue la question.
+- "source" OBLIGATOIRE et NOMINATIVE : organisme, institution, encyclopédie ou ouvrage identifiable (ex: NASA, FIFA, Wikipédia, Larousse, INSEE, BBC, Michelin).
+- Interdit comme source : "culture générale", "notoriété publique", "fait historique documenté", "fait scientifique établi", "connaissance commune", ou toute catégorie vague sans référent nommé.
+- Lore fiction/jeux : n'invente aucun lieu, extension, monnaie, personnage secondaire ; Wiki seul + incertitude → abandonne.
+- Pas de source nominative fiable → exclue la question.
+- Mieux vaut MOINS de questions que d'en fabriquer pour le quota.
+- Doute sur fait/date/nom/attribution → abandonne, passe à un autre fait sûr.
 `.trim()
 
 // ─────────────────────────────────────────────
 // Blocs de difficulté — un seul est inclus par appel, jamais plusieurs
 // Chacun est autonome (aucune référence à un autre bloc de difficulté)
+// Désormais 100% statiques : {sous_theme} remplacé par une formulation générique
 // ─────────────────────────────────────────────
 export const REGLES_FACILE = `
 NIVEAU FACILE — STRICT
 - Uniquement des faits "spectateur/grand public" (ce que perçoit un consommateur passif) — jamais de faits "coulisses/technique" (production, stats précises, dates exactes, pros non médiatisés).
 - INTERDIT en facile, quel que soit le thème : réalisateur, scénariste, producteur, compositeur, label, développeur, studio, architecte, inventeur/chef créateur — même si célèbre. Reclasse en moyen/difficile.
 - Le facile doit être NETTEMENT plus simple que le moyen, pas une variante légère. Priorise systématiquement le fait le PLUS connu du sujet.
-- Test de validation : une personne au hasard dans la rue, sans intérêt pour {sous_theme}, devine/connaît-elle la réponse par simple exposition culturelle (télé, école, conversations) ? Si non → reclasse.
+- Test de validation : une personne au hasard dans la rue, sans intérêt pour le sous-thème demandé, devine/connaît-elle la réponse par simple exposition culturelle (télé, école, conversations) ? Si non → reclasse.
 - En cas de doute entre deux formulations, choisis toujours la plus simple.
 `.trim()
 
 export const REGLES_MOYEN = `
 NIVEAU MOYEN — STRICT
 - Cible : personne qui suit le sujet occasionnellement (articles, documentaires, discussions) — ni novice total, ni passionné pointu.
-- Interdit de retomber en facile déguisé (test : une personne sans intérêt pour {sous_theme} ne doit pas pouvoir deviner par simple bon sens — si c'est le cas, remonte le niveau de détail) ou de monter en difficile (pas de stats ultra-précises, pas de faits réservés aux spécialistes) — zone de "curiosité qui demande un peu de réflexion", pas de mémorisation experte.
+- Interdit de retomber en facile déguisé (test : une personne sans intérêt pour le sous-thème demandé ne doit pas pouvoir deviner par simple bon sens — si c'est le cas, remonte le niveau de détail) ou de monter en difficile (pas de stats ultra-précises, pas de faits réservés aux spécialistes) — zone de "curiosité qui demande un peu de réflexion", pas de mémorisation experte.
 - Rôles de production autorisés seulement s'ils sont notoires dans leur domaine — pas de noms obscurs de crédits de fin.
 - Test : quelqu'un d'intérêt modéré répondrait en réfléchissant un peu ou en faisant un lien logique, sans certitude immédiate ni ignorance totale.
 `.trim()
@@ -132,13 +142,14 @@ NIVEAU DIFFICILE — STRICT
 - Cible : passionné/connaisseur réel, pas un expert professionnel (sauf si le sous-thème l'exige).
 - Faits précis autorisés et attendus (stats, dates exactes, détails techniques, pros peu médiatisés) mais toujours vérifiables — jamais un détail invérifiable ou quasi impossible à documenter.
 - Interdit : trivia à laquelle même un passionné aurait une chance quasi nulle de répondre, ou un fait disputé/mono-source.
-- Test : un connaisseur reconnu de {sous_theme} répondrait-il sans recherche ? Si non, remplace par un fait difficile mais accessible.
+- Test : un connaisseur reconnu du sous-thème demandé répondrait-il sans recherche ? Si non, remplace par un fait difficile mais accessible.
 `.trim()
 
 // ─────────────────────────────────────────────
 // ANCRAGE_PAR_THEME — inclus UNIQUEMENT si difficulte === "facile"
 // Dépend du vocabulaire "spectateur/coulisses" défini dans REGLES_FACILE :
 // ne JAMAIS inclure ce fragment sans REGLES_FACILE dans le même prompt.
+// 100% statique (inchangé — ne contenait déjà aucun placeholder)
 // ─────────────────────────────────────────────
 export const ANCRAGE_PAR_THEME = `
 ANCRAGE SPECTATEUR/COULISSES PAR THÈME (calibrage, non exhaustif)
@@ -148,6 +159,9 @@ Thème libre : applique le même principe spectateur/coulisses de façon autonom
 
 // ─────────────────────────────────────────────
 // Format de sortie — toujours inclus, en dernier
+// Reste variable (interpole theme/sous_theme/difficulte/portee/question_count) :
+// c'est volontaire, il reste en toute fin de prompt donc n'affecte pas le cache
+// de tout ce qui le précède.
 // ─────────────────────────────────────────────
 export const FORMAT_SORTIE = `
 FORMAT DE SORTIE — JSON strict uniquement, rien d'autre :
@@ -174,6 +188,13 @@ Génère maintenant EXACTEMENT {question_count} questions sur "{theme}" > "{sous
 
 // ─────────────────────────────────────────────
 // Fonction d'assemblage — UN SEUL prompt final, jamais plusieurs prompts envoyés
+//
+// ORDRE (patché pour le prompt caching) :
+//   1. Blocs 100% fixes (REGLES_BASE, REGLES_ANTI_INVENTION, blocDifficulte, ancrage)
+//   2. Partie variable (intro : thème/sous-thème/historique, puis FORMAT_SORTIE)
+//
+// Préfixe identique pour une même difficulté + un même question_count, quel que
+// soit le thème. Un topup (count ≠ 10) a un préfixe différent — normal.
 // ─────────────────────────────────────────────
 const BLOCS_DIFFICULTE: Record<string, string> = {
   facile: REGLES_FACILE,
@@ -223,16 +244,19 @@ Historique à ne jamais répéter (questions déjà posées, tous niveaux) : ${J
   // L'ancrage par thème n'est inclus QUE pour le niveau facile (dépendance documentée ci-dessus)
   const ancrage = difficulte === 'facile' ? ANCRAGE_PAR_THEME : ''
 
+  // Partie FIXE en premier (identique quel que soit le thème demandé, pour un même
+  // couple difficulté/ancrage), partie VARIABLE en dernier (thème, historique, format)
   const morceaux = [
-    intro,
     REGLES_BASE,
     REGLES_ANTI_INVENTION,
     blocDifficulte,
     ancrage,
+    intro,
     FORMAT_SORTIE,
   ].filter(Boolean)
 
-  // Interpolation finale des variables dans le texte assemblé
+  // {theme}/{sous_theme} ne touchent que l'intro et FORMAT_SORTIE (fin de prompt).
+  // {question_count} est aussi dans REGLES_BASE, pour que le quota du lot soit cohérent.
   return morceaux
     .join('\n\n')
     .replaceAll('{theme}', theme)

@@ -122,6 +122,8 @@ export interface GameSession {
   playMode: SoloPlayMode
   /** Chrono par question (solo) */
   timerEnabled: boolean
+  /** Deezer : lecture auto des extraits */
+  audioAutoplay?: boolean
   /** IA choisie pour la génération */
   aiProvider?: AiProvider
   /** standard = texte ; image = illustré */

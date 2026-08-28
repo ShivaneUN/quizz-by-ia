@@ -1,8 +1,7 @@
 /**
  * Banque curatée sur disque : data/curated/
- *   catalog/<themeId>/<sous-theme>.json
- *   custom/<slug>.json
- * Éditable à la main (ajouter / modifier des questions).
+ *   catalog/<themeId>/<sous-theme>.json   (officiel ou custom sous le thème)
+ *   custom/<slug>.json                    (filet Custom — orphelins)
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -88,16 +87,18 @@ function emptyPayload(
         }
       : {
           kind: 'custom' as const,
-          themeLabel: meta.theme,
-          customKey: meta.customKey || curatedFileSlug(meta.theme),
+          themeLabel: 'Custom',
+          subTheme: meta.subTheme || meta.theme,
+          customKey: meta.customKey || curatedFileSlug(meta.subTheme || meta.theme),
           rawTheme: meta.theme,
           matched: false,
+          subIsCustom: true,
         }
   return {
     placementKind: kind,
     themeId: meta.themeId,
-    theme: meta.theme,
-    subTheme: meta.subTheme,
+    theme: kind === 'custom' ? 'Custom' : meta.theme,
+    subTheme: meta.subTheme ?? (kind === 'custom' ? meta.theme : undefined),
     customKey: meta.customKey ?? placement.customKey,
     groupKey: curatedGroupKey(placement),
     questions: [],
@@ -134,8 +135,160 @@ export function pathForQuestion(q: {
   }
   const key =
     q.customKey ||
-    curatedFileSlug(q.theme || q.rawTheme || 'theme-libre')
+    curatedFileSlug(q.subTheme || q.theme || q.rawTheme || 'theme-libre')
   return customFilePath(key)
+}
+
+/**
+ * Crée le fichier thème/sous-thème (vide) si custom — n’ajoute PAS de questions.
+ * Sous-thèmes ORBIT officiels : no-op (déjà scaffold).
+ */
+export function ensureCuratedThemeSlot(meta: {
+  placementKind: 'catalog' | 'custom'
+  themeId?: string
+  theme: string
+  subTheme?: string
+  customKey?: string
+  rawTheme?: string
+  subIsCustom?: boolean
+}): { ok: boolean; path: string; created: boolean; skipped?: string } {
+  const isCustomSub =
+    meta.placementKind === 'custom' || Boolean(meta.subIsCustom)
+  if (!isCustomSub) {
+    return {
+      ok: true,
+      path: pathForQuestion({
+        placementKind: meta.placementKind,
+        themeId: meta.themeId,
+        subTheme: meta.subTheme,
+        customKey: meta.customKey,
+        theme: meta.theme,
+        rawTheme: meta.rawTheme || meta.theme,
+      }),
+      created: false,
+      skipped: 'official_catalog',
+    }
+  }
+
+  const path = pathForQuestion({
+    placementKind: meta.placementKind,
+    themeId: meta.themeId,
+    subTheme: meta.subTheme,
+    customKey: meta.customKey,
+    theme: meta.theme,
+    rawTheme: meta.rawTheme || meta.theme,
+  })
+  mkdirSync(dirname(path), { recursive: true })
+  if (existsSync(path)) {
+    return { ok: true, path, created: false }
+  }
+
+  const payload =
+    meta.placementKind === 'catalog'
+      ? emptyPayload('catalog', {
+          themeId: meta.themeId,
+          theme: meta.theme,
+          subTheme: meta.subTheme || 'Général',
+        })
+      : emptyPayload('custom', {
+          theme: 'Custom',
+          subTheme: meta.subTheme || meta.theme,
+          customKey:
+            meta.customKey ||
+            curatedFileSlug(meta.subTheme || meta.theme || 'theme-libre'),
+        })
+
+  writeFileSync(path, JSON.stringify(payload, null, 2) + '\n', 'utf8')
+  return { ok: true, path, created: true }
+}
+
+/** Liste les slots thème/sous-thème (fichiers), avec nb de questions. */
+export function listCuratedThemeSlots(): {
+  groupKey: string
+  placementKind: 'catalog' | 'custom'
+  themeId?: string
+  theme: string
+  subTheme?: string
+  customKey?: string
+  subIsCustom: boolean
+  questionCount: number
+  path: string
+}[] {
+  const root = curatedDataRoot()
+  const files = [
+    ...walkJsonFiles(join(root, 'catalog')),
+    ...walkJsonFiles(join(root, 'custom')),
+  ]
+  const out: {
+    groupKey: string
+    placementKind: 'catalog' | 'custom'
+    themeId?: string
+    theme: string
+    subTheme?: string
+    customKey?: string
+    subIsCustom: boolean
+    questionCount: number
+    path: string
+  }[] = []
+
+  for (const path of files) {
+    const payload = readPayload(path)
+    if (!payload) continue
+    const placementKind =
+      payload.placementKind === 'catalog' ? 'catalog' : 'custom'
+    const parent = payload.themeId
+      ? CATALOG.find((c) => c.id === payload.themeId)
+      : undefined
+    const sub = payload.subTheme || (placementKind === 'custom' ? payload.theme : 'Général')
+    const official = parent?.subs.includes(sub ?? '') ?? false
+    const subIsCustom =
+      placementKind === 'custom' || (Boolean(sub) && sub !== 'Général' && !official)
+    // N’exposer que custom (sous-thème libre ou filet Custom) + fichiers avec Q
+    if (!subIsCustom && (payload.questions?.length ?? 0) === 0) continue
+
+    out.push({
+      groupKey: payload.groupKey || relative(root, path).replace(/\\/g, '/'),
+      placementKind,
+      themeId: payload.themeId,
+      theme: payload.theme || parent?.label || 'Custom',
+      subTheme: sub,
+      customKey: payload.customKey,
+      subIsCustom,
+      questionCount: payload.questions?.length ?? 0,
+      path: relative(root, path).replace(/\\/g, '/'),
+    })
+  }
+
+  return out.sort((a, b) =>
+    `${a.theme} ${a.subTheme}`.localeCompare(`${b.theme} ${b.subTheme}`, 'fr'),
+  )
+}
+
+/** Sous-thèmes générés : par thème catalogue, ou orphelins → Custom. */
+export function groupBankCustomSubs(): {
+  byThemeId: Record<string, string[]>
+  orphans: string[]
+} {
+  const byThemeId: Record<string, Set<string>> = {}
+  const orphanSet = new Set<string>()
+  for (const s of listCuratedThemeSlots()) {
+    if (!s.subIsCustom) continue
+    const name = String(s.subTheme || '').trim()
+    if (!name || name === 'Général' || /^custom$/i.test(name)) continue
+    if (s.placementKind === 'catalog' && s.themeId) {
+      ;(byThemeId[s.themeId] ??= new Set()).add(name)
+    } else if (s.placementKind === 'custom') {
+      orphanSet.add(name)
+    }
+  }
+  const out: Record<string, string[]> = {}
+  for (const [id, set] of Object.entries(byThemeId)) {
+    out[id] = [...set].sort((a, b) => a.localeCompare(b, 'fr'))
+  }
+  return {
+    byThemeId: out,
+    orphans: [...orphanSet].sort((a, b) => a.localeCompare(b, 'fr')),
+  }
 }
 
 /** Crée tous les JSON catalogue (vides) + dossier custom. */
@@ -175,8 +328,11 @@ export function scaffoldCuratedFolders(): { created: number; skipped: number } {
       [
         'Banque curatée — fichiers éditables',
         '',
-        'catalog/<theme>/<sous-theme>.json  → thèmes du jeu',
-        'custom/<nom>.json                 → thèmes libres (Dofus, etc.)',
+        'catalog/<theme>/<sous-theme>.json  → thèmes du jeu (+ sous-thèmes custom)',
+        'custom/<nom>.json                 → filet Custom (thèmes orphelins)',
+        '',
+        'Ex. DOFUS → catalog/jeuxvideo/dofus.json (Jeux vidéo — DOFUS)',
+        'Ex. hors catalogue → custom/<slug>.json (Custom — <nom>)',
         '',
         'Chaque fichier :',
         '  { "theme": "...", "subTheme": "...", "questions": [ ... ] }',
@@ -297,8 +453,9 @@ export function appendQuestionToFile(q: FileCuratedQuestion & {
             subTheme: q.subTheme || 'Général',
           })
         : emptyPayload('custom', {
-            theme: q.theme,
-            customKey: q.customKey || curatedFileSlug(q.theme),
+            theme: 'Custom',
+            subTheme: q.subTheme || q.theme,
+            customKey: q.customKey || curatedFileSlug(q.subTheme || q.theme || 'theme-libre'),
           })
   }
   const dup = payload.questions.some(
@@ -331,6 +488,84 @@ export function appendQuestionToFile(q: FileCuratedQuestion & {
   })
   writeFileSync(path, JSON.stringify(payload, null, 2) + '\n', 'utf8')
   return { ok: true, path }
+}
+
+function questionFingerprint(
+  question: string,
+  correctAnswer: string,
+  difficulty: string,
+): string {
+  return `${question.trim()}||${correctAnswer.trim()}||${difficulty}`
+}
+
+/** Retire une question d’un fichier (par id ou empreinte). */
+export function removeQuestionFromFile(match: {
+  id?: string
+  question: string
+  correctAnswer: string
+  difficulty: string
+  placementKind?: 'catalog' | 'custom'
+  themeId?: string
+  subTheme?: string
+  customKey?: string
+  theme?: string
+  rawTheme?: string
+}): { ok: boolean; removed: number; path?: string } {
+  const fp = questionFingerprint(
+    match.question,
+    match.correctAnswer,
+    match.difficulty,
+  )
+  const id = String(match.id ?? '').trim()
+
+  const candidates: string[] = []
+  if (match.placementKind === 'catalog' && match.themeId) {
+    candidates.push(
+      catalogFilePath(match.themeId, match.subTheme || 'Général'),
+    )
+  } else if (match.placementKind === 'custom' || match.customKey) {
+    candidates.push(
+      customFilePath(
+        match.customKey ||
+          curatedFileSlug(match.theme || match.rawTheme || 'theme-libre'),
+      ),
+    )
+  }
+  if (candidates.length === 0) {
+    const root = curatedDataRoot()
+    candidates.push(
+      ...walkJsonFiles(join(root, 'catalog')),
+      ...walkJsonFiles(join(root, 'custom')),
+    )
+  }
+
+  let removed = 0
+  let touched: string | undefined
+  for (const path of candidates) {
+    const payload = readPayload(path)
+    if (!payload || payload.questions.length === 0) continue
+    const next = payload.questions.filter((q) => {
+      const qId = String(q.id ?? '').trim()
+      if (id && qId && qId === id) return false
+      const qFp = questionFingerprint(
+        String(q.question ?? ''),
+        String(q.correctAnswer ?? q.answers?.[q.correctIndex] ?? ''),
+        String(q.difficulty ?? ''),
+      )
+      return qFp !== fp
+    })
+    const n = payload.questions.length - next.length
+    if (n <= 0) continue
+    payload.questions = next
+    try {
+      writeFileSync(path, JSON.stringify(payload, null, 2) + '\n', 'utf8')
+      removed += n
+      touched = path
+    } catch {
+      /* FS read-only (Vercel) — Redis tombstone côté curatedBank */
+    }
+  }
+  return { ok: removed > 0, removed, path: touched }
 }
 
 /** Vide le tableau questions de tous les JSON (garde la structure dossiers). */

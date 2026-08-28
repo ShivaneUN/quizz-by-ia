@@ -98,6 +98,7 @@ export function MultiLobby({
           estimateSec={room.genEstimateSec ?? null}
           questionsDone={room.genQuestionsDone ?? 0}
           questionsTotal={room.genQuestionsTotal ?? 10}
+          aiSource={room.genAiSource ?? null}
         />
       )}
 

@@ -39,6 +39,8 @@ export interface MultiRoom {
   difficulty?: Difficulty
   aiProvider?: AiProvider
   quizMode?: QuizContentMode
+  /** Deezer : lecture auto des extraits */
+  audioAutoplay?: boolean
   /** Présent si status === 'error' */
   errorMessage?: string
   /** ETA génération (secondes) pendant generating */
@@ -46,6 +48,8 @@ export interface MultiRoom {
   /** Progression génération X/10 */
   genQuestionsDone?: number
   genQuestionsTotal?: number
+  /** IA qui génère (gemini / groq / …) */
+  genAiSource?: string
   /** Début génération (watchdog anti-blocage) */
   generatingStartedAt?: number
   /** L’hôte doit relancer runGenerate pour un complément de lot */
@@ -165,6 +169,7 @@ export async function createRoom(input: {
   playMode?: 'progression' | 'free'
   aiProvider?: AiProvider
   quizMode?: QuizContentMode
+  audioAutoplay?: boolean
 }) {
   const data = await postRoom({ action: 'create', ...input })
   return { room: data.room!, playerId: data.playerId, message: data.message }
@@ -231,6 +236,7 @@ export async function setRoomTheme(input: {
   scope: QuizScope
   aiProvider?: AiProvider
   quizMode?: QuizContentMode
+  audioAutoplay?: boolean
 }) {
   const data = await postRoom({ action: 'setTheme', ...input })
   return { room: data.room! }

@@ -1,4 +1,4 @@
-/** Client : vérification via OpenRouter uniquement (≥ 2 sources confirmantes). */
+/** Client : vérification via /api/fact-check (Wikipédia + OpenRouter). */
 
 export type FactVerdict = 'ok' | 'douteux' | 'faux' | 'inconnu'
 
@@ -19,59 +19,18 @@ export interface FactCheckResult {
   sourceNote?: string
   confirmingSources?: ConfirmingSource[]
   sourcesConfirmed?: number
-  provider?: 'openrouter'
+  provider?: 'openrouter' | 'wikipedia'
+  model?: string
+  aiFailed?: boolean
+  aiError?: string
   lang?: 'fr' | 'en'
 }
 
-async function lookupOpenRouter(input: {
-  question: string
-  correctAnswer: string
-  explanation?: string
-  sourceType?: string
-  theme?: string
-  answers?: string[]
-}): Promise<FactCheckResult | null> {
-  const res = await fetch('/api/fact-check', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
-  })
-  if (!res.ok) return null
-  const data = (await res.json()) as {
-    verdict?: FactVerdict
-    answerVerdict?: FactVerdict
-    sourceVerdict?: FactVerdict
-    title?: string
-    extract?: string
-    source?: string
-    answerNote?: string
-    sourceNote?: string
-    confirmingSources?: ConfirmingSource[]
-    sourcesConfirmed?: number
-  }
-  const extract = String(data.extract ?? '').trim()
-  if (!extract) return null
-  const confirmingSources = Array.isArray(data.confirmingSources)
-    ? data.confirmingSources.filter(
-        (s) => s && typeof s.name === 'string' && s.name.trim().length > 0,
-      )
-    : []
-  return {
-    title: String(data.title ?? input.correctAnswer).trim(),
-    extract,
-    source: String(data.source ?? '').trim() || undefined,
-    verdict: data.verdict ?? 'inconnu',
-    answerVerdict: data.answerVerdict ?? data.verdict ?? 'inconnu',
-    sourceVerdict: data.sourceVerdict ?? 'inconnu',
-    answerNote: String(data.answerNote ?? '').trim() || undefined,
-    sourceNote: String(data.sourceNote ?? '').trim() || undefined,
-    confirmingSources,
-    sourcesConfirmed: data.sourcesConfirmed ?? confirmingSources.length,
-    provider: 'openrouter',
-  }
-}
+export type FactCheckLookup =
+  | { ok: true; result: FactCheckResult }
+  | { ok: false; message: string }
 
-/** OpenRouter uniquement — pas de secours Wikipédia. */
+/** OpenRouter + fallback Wikipédia côté serveur. */
 export async function lookupFactCheck(
   question: string,
   correctAnswer: string,
@@ -79,13 +38,85 @@ export async function lookupFactCheck(
   explanation?: string,
   sourceType?: string,
   answers?: string[],
-): Promise<FactCheckResult | null> {
-  return lookupOpenRouter({
-    question,
-    correctAnswer,
-    theme,
-    explanation,
-    sourceType,
-    answers,
-  })
+): Promise<FactCheckLookup> {
+  try {
+    const res = await fetch('/api/fact-check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        question,
+        correctAnswer,
+        theme,
+        explanation,
+        sourceType,
+        answers,
+      }),
+    })
+    const data = (await res.json().catch(() => ({}))) as {
+      error?: string
+      verdict?: FactVerdict
+      answerVerdict?: FactVerdict
+      sourceVerdict?: FactVerdict
+      title?: string
+      extract?: string
+      source?: string
+      answerNote?: string
+      sourceNote?: string
+      confirmingSources?: ConfirmingSource[]
+      sourcesConfirmed?: number
+      provider?: 'openrouter' | 'wikipedia'
+      model?: string
+      aiFailed?: boolean
+      aiError?: string
+    }
+
+    if (!res.ok) {
+      return {
+        ok: false,
+        message:
+          typeof data.error === 'string' && data.error.trim()
+            ? data.error.trim()
+            : `Vérification indisponible (${res.status}).`,
+      }
+    }
+
+    const extract = String(data.extract ?? '').trim()
+    if (!extract) {
+      return {
+        ok: false,
+        message: 'Réponse de vérification vide — réessaie.',
+      }
+    }
+
+    const confirmingSources = Array.isArray(data.confirmingSources)
+      ? data.confirmingSources.filter(
+          (s) => s && typeof s.name === 'string' && s.name.trim().length > 0,
+        )
+      : []
+
+    return {
+      ok: true,
+      result: {
+        title: String(data.title ?? correctAnswer).trim(),
+        extract,
+        source: String(data.source ?? '').trim() || undefined,
+        verdict: data.verdict ?? 'inconnu',
+        answerVerdict: data.answerVerdict ?? data.verdict ?? 'inconnu',
+        sourceVerdict: data.sourceVerdict ?? 'inconnu',
+        answerNote: String(data.answerNote ?? '').trim() || undefined,
+        sourceNote: String(data.sourceNote ?? '').trim() || undefined,
+        confirmingSources,
+        sourcesConfirmed: data.sourcesConfirmed ?? confirmingSources.length,
+        provider: data.provider ?? 'openrouter',
+        model: data.model,
+        aiFailed: Boolean(data.aiFailed),
+        aiError: String(data.aiError ?? '').trim() || undefined,
+      },
+    }
+  } catch {
+    return {
+      ok: false,
+      message: 'Réseau indisponible pour la vérification.',
+    }
+  }
 }

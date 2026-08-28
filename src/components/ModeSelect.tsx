@@ -15,7 +15,7 @@ export function ModeSelect({ onSolo, onMulti, onMinigames }: ModeSelectProps) {
 
   async function handleClearCache() {
     const ok = window.confirm(
-      'Vider le cache des questions ?\n\n• Solo : questions générées + historique sur cet appareil\n• Multi : historique serveur des questions déjà posées\n\nLe classement mini-jeux local n’est pas touché.\nLes salles en cours ne sont pas fermées.',
+      'Vider l’historique anti-doublon ?\n\n• Solo : questions déjà vues sur cet appareil\n• Multi : historique serveur des questions déjà posées\n\nLe classement mini-jeux local n’est pas touché.\nLes salles en cours ne sont pas fermées.',
     )
     if (!ok) return
 
@@ -24,12 +24,11 @@ export function ModeSelect({ onSolo, onMulti, onMinigames }: ModeSelectProps) {
     try {
       const local = clearLocalQuizCache()
       const remote = await clearMultiQuestionCache()
-      const localN = local.banks + local.histories
       const multiN = remote.multiHistoriesCleared
       setCacheMsg(
-        localN + multiN === 0
-          ? 'Cache déjà vide.'
-          : `Cache vidé — solo : ${local.banks} banque(s), ${local.histories} historique(s) · multi : ${multiN} thème(s).`,
+        local.histories + multiN === 0
+          ? 'Historique déjà vide.'
+          : `Historique vidé — solo : ${local.histories} · multi : ${multiN} thème(s).`,
       )
     } catch (e) {
       setCacheMsg(

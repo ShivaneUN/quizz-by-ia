@@ -9,9 +9,25 @@ import { construirePrompt } from './quizPromptFragments.js'
 import {
   enginesWithKeys,
   listApiKeys,
+  pickAiForEngine,
   pickAiForGeneration,
   releaseAiSlot,
+  type RotateEngine,
 } from './aiRotate.js'
+import { recordAiGeneration, recordAiModelError, classifyAiError, setConfiguredAiModels, isModelDayTokenCapped } from './aiGenStats.js'
+import {
+  getPartialQuestions,
+  syncPartialQuestionCache,
+} from './partialQuestionCache.js'
+
+/** Réponse brute LLM + tokens (si l’API les expose). */
+interface LlmCallResult {
+  text: string
+  tokensIn: number
+  tokensOut: number
+  /** Tokens de la partie input servis depuis le cache provider (Groq/Gemini). 0 si absent ou non caché. */
+  tokensCached: number
+}
 
 export function normalizeThemeSlug(theme: string): string {
   return theme
@@ -43,6 +59,7 @@ export type GenerateSource =
   | 'openrouter'
   | 'deezer'
   | 'mock'
+  | 'bank'
 
 export interface GeneratedQuestion {
   id: string
@@ -77,10 +94,15 @@ const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard']
 
 type LlmEngine = Exclude<AiProvider, 'auto'>
 
-/** Modèles Groq actifs (août 2026). Pas de qwen3.6 (thinking → pas de JSON). */
+/**
+ * Modèles Groq — gpt-oss d’abord (JSON long fiable).
+ * Compound tronque souvent le JSON à 10 Q (agentique / max_tokens).
+ */
 const GROQ_MODELS = [
   'openai/gpt-oss-20b',
   'openai/gpt-oss-120b',
+  'groq/compound-mini',
+  'groq/compound',
 ] as const
 
 /** Fallback si le listing live échoue — jamais gemini-2.5-flash (404 new users). */
@@ -88,17 +110,28 @@ const GEMINI_MODELS = [
   'gemini-flash-lite-latest',
   'gemini-flash-latest',
   'gemini-3.5-flash',
+  'gemini-3.1-flash-lite',
 ] as const
 
 const CEREBRAS_MODELS = ['gemma-4-31b', 'gpt-oss-120b', 'zai-glm-4.7'] as const
 const DEEPSEEK_MODELS = ['deepseek-chat'] as const
-/** OpenRouter free — priorité aux modèles légers/rapides (août 2026). */
+/** OpenRouter free — IDs vérifiés live (août 2026). nano-9b-v2 retiré (404). */
 const OPENROUTER_MODELS = [
+  'google/gemma-4-31b-it:free',
+  'nvidia/nemotron-3-super-120b-a12b:free',
   'nvidia/nemotron-3.5-lightning:free',
-  'nvidia/nemotron-nano-9b-v2:free',
-  'liquid/lfm-2.5-2.6b:free',
   'google/gemma-4-26b-a4b-it:free',
+  'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
+  'z-ai/glm-5.2:free',
+  'liquid/lfm-2.5-2.6b:free',
+  'openrouter/free',
 ] as const
+
+setConfiguredAiModels([
+  ...GEMINI_MODELS.map((model) => ({ engine: 'gemini' as const, model })),
+  ...GROQ_MODELS.map((model) => ({ engine: 'groq' as const, model })),
+  ...OPENROUTER_MODELS.map((model) => ({ engine: 'openrouter' as const, model })),
+])
 
 /** System prompt minimal — renforce l'interdiction d'inventer des faits. */
 const AI_SYSTEM_MINIMAL = `Tu es un générateur de quiz factuel. Réponds UNIQUEMENT en JSON valide. Pas de texte avant ni après. N'invente jamais de faits, noms, dates ou sources. Si tu n'es pas certain à 100%, n'inclus pas la question.`
@@ -111,8 +144,11 @@ const ROUTE_PRIORITY: Array<{ engine: LlmEngine; model: string }> = [
   { engine: 'gemini', model: 'gemini-flash-lite-latest' },
   { engine: 'gemini', model: 'gemini-flash-latest' },
   { engine: 'gemini', model: 'gemini-3.5-flash' },
+  { engine: 'gemini', model: 'gemini-3.1-flash-lite' },
   { engine: 'groq', model: 'openai/gpt-oss-20b' },
   { engine: 'groq', model: 'openai/gpt-oss-120b' },
+  { engine: 'groq', model: 'groq/compound-mini' },
+  { engine: 'groq', model: 'groq/compound' },
 ]
 
 interface GenerationRoute {
@@ -150,20 +186,38 @@ function routeSortKey(route: GenerationRoute): number {
   return 100 + (engineIdx >= 0 ? engineIdx : 50) + route.keyIndex * 0.1
 }
 
+/** primary = IA réservée ; fallback = autres IA seulement après erreur. */
+type RouteEngineScope = 'all' | 'primary' | 'fallback'
+
 async function buildGenerationRoutes(
   provider: AiProvider,
   contentMode: QuizContentMode,
   pickedSlot?: string,
+  engineScope: RouteEngineScope = 'all',
 ): Promise<GenerationRoute[]> {
-  const engines: LlmEngine[] =
+  let engines: LlmEngine[] =
     provider === 'auto'
       ? ((enginesWithKeys().length > 0
           ? enginesWithKeys()
           : AUTO_FREE_ENGINES) as LlmEngine[])
       : enginesForProvider(provider)
 
-  const routes: GenerationRoute[] = []
+  // Slot RR (ex. groq#0) : rester sur cette IA tant qu’il n’y a pas d’erreur.
   const slot = pickedSlot
+  if (provider === 'auto' && slot) {
+    const primary = slot.split('#')[0] as LlmEngine
+    if (engines.includes(primary)) {
+      if (engineScope === 'primary') {
+        engines = [primary]
+      } else if (engineScope === 'fallback') {
+        engines = engines.filter((e) => e !== primary)
+      } else {
+        engines = [primary, ...engines.filter((e) => e !== primary)]
+      }
+    }
+  }
+
+  const routes: GenerationRoute[] = []
 
   for (const engine of engines) {
     const allKeys = keysForEngine(engine)
@@ -190,6 +244,11 @@ async function buildGenerationRoutes(
     }
   }
 
+  const engineRank = (engine: LlmEngine) => {
+    const i = engines.indexOf(engine)
+    return i >= 0 ? i : 99
+  }
+
   const seen = new Set<string>()
   return routes
     .filter((r) => {
@@ -198,7 +257,11 @@ async function buildGenerationRoutes(
       seen.add(k)
       return true
     })
-    .sort((a, b) => routeSortKey(a) - routeSortKey(b))
+    .sort((a, b) => {
+      const er = engineRank(a.engine) - engineRank(b.engine)
+      if (er !== 0) return er
+      return routeSortKey(a) - routeSortKey(b)
+    })
 }
 
 export function parseAiProvider(raw: unknown): AiProvider {
@@ -323,7 +386,7 @@ async function geminiModelsForKey(apiKey: string): Promise<string[]> {
           ),
       )
     ids.sort((a, b) => rankGeminiModel(a) - rankGeminiModel(b) || a.localeCompare(b))
-    const picked = ids.slice(0, 3)
+    const picked = ids.slice(0, 4)
     if (picked.length > 0) {
       geminiLiveCache = { at: Date.now(), ids: picked }
       console.info('[gemini] modèles live:', picked.join(', '))
@@ -720,6 +783,150 @@ function isFactVerifiable(raw: RawQuestion, sourceType?: string): boolean {
   return Boolean(sourceType && !isVagueSource(sourceType))
 }
 
+function normalizeForMatch(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+}
+
+/** Mots vides français ignorés pour la comparaison de similarité de questions. */
+const FRENCH_STOPWORDS = new Set([
+  'le','la','les','un','une','des','de','du','au','aux','et','ou','est','sont',
+  'a','en','dans','sur','par','pour','que','qui','quel','quelle','quels','quelles',
+  'ce','cet','cette','ces','son','sa','ses','leur','leurs','avec','sans','ne','pas',
+  'se','on','il','elle','ils','elles','vous','nous','je','tu','plus','tres','fut',
+  'etait','dont','comme','entre','sous','vers','depuis','apres','avant','the',
+])
+
+/** Ensemble de mots-clés significatifs (≥3 lettres, hors mots vides) d'une question. */
+function questionKeywordSet(questionText: string): Set<string> {
+  const norm = normalizeForMatch(questionText).replace(/[^a-z0-9\s]/g, ' ')
+  const words = norm
+    .split(/\s+/)
+    .filter((w) => w.length >= 3 && !FRENCH_STOPWORDS.has(w))
+  return new Set(words)
+}
+
+function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0
+  let inter = 0
+  for (const w of a) if (b.has(w)) inter++
+  const union = a.size + b.size - inter
+  return union === 0 ? 0 : inter / union
+}
+
+/**
+ * Seuil de similarité au-delà duquel deux questions sont considérées comme
+ * portant sur le même fait, même reformulées différemment.
+ * Best-effort par recouvrement de mots-clés — pas une comparaison sémantique
+ * réelle, donc volontairement prudent (seuil assez haut) pour limiter les
+ * faux positifs sur des questions différentes qui partagent juste du
+ * vocabulaire courant du thème.
+ */
+const NEAR_DUPLICATE_THRESHOLD = 0.62
+
+function isNearDuplicateQuestion(
+  candidate: Set<string>,
+  existing: Set<string>[],
+): boolean {
+  if (candidate.size < 3) return false // trop court pour être fiable
+  return existing.some(
+    (other) => jaccardSimilarity(candidate, other) >= NEAR_DUPLICATE_THRESHOLD,
+  )
+}
+
+/**
+ * Paires catégorie-demandée / signal-contradictoire.
+ * Heuristique best-effort : ne couvre pas tous les cas de prémisse fausse,
+ * mais bloque les incohérences les plus visibles et les plus fréquentes
+ * (ex: "quel animal…" avec une réponse humaine).
+ * Volontairement limité à des signaux à faible taux de faux positif —
+ * les cas plus fins (accord de genre chanteur/chanteuse, etc.) restent
+ * gérés au niveau du prompt (ANTI-PRÉMISSE FAUSSE) car trop bruités pour
+ * être fiables en heuristique automatique.
+ */
+const CATEGORY_MISMATCH_PAIRS: Array<{
+  label: string
+  askedPattern: RegExp
+  conflictPattern: RegExp
+}> = [
+  {
+    label: 'animal attendu / réponse humaine',
+    askedPattern:
+      /\bquel(?:le|s|les)?\s+(?:animal|espece|mammifere|oiseau|reptile|insecte|poisson)\b/i,
+    conflictPattern:
+      /\b(humain|humaine|un homme|une femme|un garcon|une fille|etre humain)\b/i,
+  },
+  {
+    label: 'groupe attendu / artiste solo en réponse',
+    askedPattern: /\bquel\s+groupe\b/i,
+    conflictPattern:
+      /\b(artiste solo|chanteur solo|chanteuse solo|carriere solo|en solo)\b/i,
+  },
+  {
+    label: 'artiste solo attendu / groupe en réponse',
+    askedPattern: /\b(artiste solo|carriere solo|en solo)\b/i,
+    conflictPattern: /\b(membre du groupe|fait partie du groupe|groupe de musique)\b/i,
+  },
+]
+
+/**
+ * Détecte une contradiction entre la catégorie demandée dans la question
+ * et la nature de la bonne réponse (texte de la réponse + explication).
+ */
+function hasCategoryMismatch(
+  questionText: string,
+  correctAnswerText: string,
+  explanation: string,
+): boolean {
+  const q = normalizeForMatch(questionText)
+  const context = normalizeForMatch(`${correctAnswerText} ${explanation}`)
+  return CATEGORY_MISMATCH_PAIRS.some(
+    (pair) => pair.askedPattern.test(q) && pair.conflictPattern.test(context),
+  )
+}
+
+/**
+ * Signal probable d'inversion bonne/mauvaise réponse : l'explication cite
+ * explicitement une MAUVAISE réponse (terme assez spécifique, ≥4 caractères)
+ * sans jamais mentionner la bonne réponse déclarée. Best-effort : ne se
+ * déclenche que quand le signal est net, pour limiter les faux positifs
+ * (beaucoup d'explications valides ne répètent pas la réponse mot pour mot).
+ */
+function possibleAnswerInversion(
+  answers: string[],
+  correctIndex: number,
+  explanation: string,
+): boolean {
+  const exp = normalizeForMatch(explanation)
+  const correct = normalizeForMatch(answers[correctIndex] ?? '')
+  if (correct.length < 4) return false
+  if (exp.includes(correct)) return false // bonne réponse bien citée → pas d'alerte
+
+  return answers.some((a, i) => {
+    if (i === correctIndex) return false
+    const wrong = normalizeForMatch(a)
+    return wrong.length >= 4 && exp.includes(wrong)
+  })
+}
+
+/**
+ * Tautologie grossière : la bonne réponse ne doit pas être simplement le
+ * nom du thème (ex: thème "Cinéma" avec bonne réponse "cinéma").
+ */
+function isTautologicalAnswer(
+  correctAnswerText: string,
+  themeSlug: string,
+): boolean {
+  const norm = normalizeForMatch(correctAnswerText)
+  const themeCore = normalizeForMatch(
+    themeSlug.split('--')[0]?.replace(/-/g, ' ') ?? '',
+  )
+  return themeCore.length >= 4 && norm === themeCore
+}
+
 function parseAndCap(
   text: string,
   themeSlug: string,
@@ -739,9 +946,27 @@ function parseAndCap(
   if (!extracted?.questions?.length) return { kind: 'invalid' }
 
   const questions: GeneratedQuestion[] = []
+  // Diversité intra-lot : une bonne réponse ne doit apparaître qu'une fois,
+  // et un élément mauvaise réponse ailleurs ne doit jamais devenir la bonne
+  // réponse d'une autre question du même lot (et inversement).
+  const usedCorrectAnswers = new Set<string>()
+  const usedWrongAnswers = new Set<string>()
+  // Quasi-doublons intra-lot : questions reformulées portant sur le même fait
+  const acceptedKeywordSets: Set<string>[] = []
+
+  // Compteurs de rejet par motif — loggés en résumé à la fin du lot.
+  const rejected: Record<string, number> = {}
+  const reject = (reason: string): true => {
+    rejected[reason] = (rejected[reason] ?? 0) + 1
+    return true
+  }
+
   for (const raw of extracted.questions) {
     const answers = normalizeRawAnswers(raw)
-    if (!answers || !raw.question) continue
+    if (!answers || !raw.question) {
+      reject('champsManquants')
+      continue
+    }
     const correctIndex = clampIndex(normalizeRawIndex(raw))
     const questionText =
       contentMode === 'image'
@@ -753,26 +978,86 @@ function parseAndCap(
       contentMode === 'standard' &&
       questionLeaksAnswer(questionText, answers, correctIndex)
     ) {
+      reject('reponseDansEnonce')
       continue
     }
 
     // Doublons / quasi-doublons = plusieurs réponses potentiellement correctes
-    if (hasDuplicateOrNearDuplicateAnswers(answers)) continue
+    if (hasDuplicateOrNearDuplicateAnswers(answers)) {
+      reject('reponsesDupliquees')
+      continue
+    }
+
+    // Quasi-doublon de question (même fait, reformulé) déjà accepté dans ce lot
+    const keywordSet = questionKeywordSet(questionText)
+    if (isNearDuplicateQuestion(keywordSet, acceptedKeywordSets)) {
+      reject('quasiDoublonQuestion')
+      continue
+    }
 
     const explanation = String(
       raw.explication ?? raw.explanation ?? '',
     ).trim()
-    if (explanation.length < 12) continue
-    if (explanationSuggestsMultipleCorrect(explanation)) continue
+    if (explanation.length < 12) {
+      reject('explicationTropCourte')
+      continue
+    }
+    if (explanationSuggestsMultipleCorrect(explanation)) {
+      reject('plusieursReponsesPossibles')
+      continue
+    }
 
     const sourceType = normalizeSourceType(
       String(raw.source ?? raw.type_source ?? raw.sourceType ?? ''),
     )
     // Source nominative obligatoire — pas de fallback générique
-    if (!sourceType) continue
+    if (!sourceType) {
+      reject('sourceManquanteOuVague')
+      continue
+    }
 
     // Anti-hallucination : rejeter si le modèle nie le fait ou source trop vague
-    if (!isFactVerifiable(raw, sourceType)) continue
+    if (!isFactVerifiable(raw, sourceType)) {
+      reject('faitNonVerifiable')
+      continue
+    }
+
+    // Cohérence question/réponse : catégorie contredite (ex: "quel animal" → réponse humaine)
+    const correctAnswerText = answers[correctIndex] ?? ''
+    if (hasCategoryMismatch(questionText, correctAnswerText, explanation)) {
+      reject('categorieContredite')
+      continue
+    }
+
+    // Indice d'inversion bonne/mauvaise réponse (explication citant une mauvaise réponse)
+    if (possibleAnswerInversion(answers, correctIndex, explanation)) {
+      reject('inversionProbable')
+      continue
+    }
+
+    // Tautologie grossière (bonne réponse = nom du thème)
+    if (isTautologicalAnswer(correctAnswerText, themeSlug)) {
+      reject('tautologie')
+      continue
+    }
+
+    // Diversité intra-lot des bonnes/mauvaises réponses
+    const correctNorm = normalizeForMatch(correctAnswerText)
+    const wrongNorms = answers
+      .filter((_, i) => i !== correctIndex)
+      .map(normalizeForMatch)
+    if (usedCorrectAnswers.has(correctNorm)) {
+      reject('bonneReponseDupliquee')
+      continue
+    }
+    if (usedWrongAnswers.has(correctNorm)) {
+      reject('mauvaiseReponseDevenueBonne')
+      continue
+    }
+    if (wrongNorms.some((w) => usedCorrectAnswers.has(w))) {
+      reject('bonneReponseDevenueMauvaise')
+      continue
+    }
 
     const rawDate = raw.date_reference ?? raw.dateReference
     const dateReference =
@@ -788,6 +1073,12 @@ function parseAndCap(
       contentMode === 'image'
         ? parseImageKind(raw.type_image ?? raw.imageKind) ?? 'sujet_entier'
         : undefined
+
+    // Enregistrement pour les vérifications de diversité des questions suivantes
+    usedCorrectAnswers.add(correctNorm)
+    wrongNorms.forEach((w) => usedWrongAnswers.add(w))
+    acceptedKeywordSets.push(keywordSet)
+
     questions.push(
       shuffleReponses({
         id: newId(),
@@ -809,6 +1100,11 @@ function parseAndCap(
   }
 
   const capped = questions.slice(0, maxQuestions)
+  const totalRejected = Object.values(rejected).reduce((a, b) => a + b, 0)
+  console.log(
+    `[parseAndCap] theme=${themeSlug} difficulte=${difficulty} recues=${extracted.questions.length} acceptees=${capped.length} rejetees=${totalRejected} detail=${JSON.stringify(rejected)}`,
+  )
+
   return capped.length > 0
     ? { kind: 'ok', questions: capped }
     : { kind: 'invalid' }
@@ -915,18 +1211,43 @@ async function generateOneTier(
     ),
   )
   const tierDeadline = Date.now() + budgetMsClamped
-  const routes = await buildGenerationRoutes(provider, contentMode, pickedSlot)
+  const stickToPicked = provider === 'auto' && Boolean(pickedSlot)
+  const primaryRoutes = await buildGenerationRoutes(
+    provider,
+    contentMode,
+    pickedSlot,
+    stickToPicked ? 'primary' : 'all',
+  )
   const saturatedEngines = new Set<LlmEngine>()
+  const tokenCappedModels = new Set<string>()
   let lastEngine: LlmEngine | undefined
 
-  if (routes.length === 0) {
+  // Précharge les plafonds tokens / jour pour éviter les appels saturés.
+  for (const r of primaryRoutes) {
+    const key = `${r.engine}/${r.model}`
+    if (tokenCappedModels.has(key)) continue
+    try {
+      if (await isModelDayTokenCapped(r.engine, r.model)) {
+        tokenCappedModels.add(key)
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (primaryRoutes.length === 0) {
     return { error: 'Aucun provider IA disponible (clés API manquantes).' }
   }
 
-  try {
+  type TierOk = { questions: GeneratedQuestion[]; source: LlmEngine; model: string }
+  type TierFail = { error: string; themeInvalid?: boolean }
+
+  async function tryRoutes(routes: GenerationRoute[]): Promise<TierOk | TierFail | null> {
     for (const route of routes) {
       if (Date.now() >= tierDeadline) break
       if (saturatedEngines.has(route.engine)) continue
+      const modelKey = `${route.engine}/${route.model}`
+      if (tokenCappedModels.has(modelKey)) continue
 
       if (route.engine !== lastEngine) {
         onEngineSelected?.(route.engine)
@@ -937,27 +1258,44 @@ async function generateOneTier(
       // Moins de 8s = appel quasi inutile (provoquait "Délai dépassé (3s)" au rattrapage)
       if (leftMs < 8_000) break
 
+      // Compound tronque souvent 10 Q → demander max 5 (le rattrapage complète).
+      const routeAsk = /compound/i.test(route.model)
+        ? Math.min(5, questionCount)
+        : questionCount
+      const routePrompt =
+        routeAsk === questionCount
+          ? prompt
+          : buildPrompt(
+              theme,
+              difficulty,
+              scope,
+              contentMode,
+              excludeQuestions,
+              routeAsk,
+              promptMode,
+            )
+
       try {
-        const text = await withAiRetry(() =>
+        const llm = await withAiRetry(() =>
           route.engine === 'gemini'
-            ? callGemini(route.apiKey, route.model, prompt, questionCount, leftMs)
+            ? callGemini(route.apiKey, route.model, routePrompt, routeAsk, leftMs)
             : callOpenAiCompatible(
                 route.engine as Exclude<LlmEngine, 'gemini'>,
                 route.apiKey,
                 route.model,
-                prompt,
-                questionCount,
+                routePrompt,
+                routeAsk,
                 leftMs,
               ),
         )
         const parsed = parseAndCap(
-          text,
+          llm.text,
           themeSlug,
           difficulty,
           batchId,
           now,
           contentMode,
-          questionCount,
+          routeAsk,
         )
         if (parsed.kind === 'ok') {
           const questions =
@@ -965,26 +1303,52 @@ async function generateOneTier(
               ? await enrichWithCommonsImages(parsed.questions)
               : parsed.questions
           if (questions.length === 0) {
-            errors.push(
-              `${route.engine}/${route.model}: aucune question valide (filtrées)`,
-            )
+            const msg = `${route.engine}/${route.model}: aucune question valide (filtrées)`
+            errors.push(msg)
+            void recordAiModelError({
+              engine: route.engine,
+              model: route.model,
+              kind: 'filtered',
+              message: msg,
+            })
             continue
           }
+          void recordAiGeneration({
+            engine: route.engine,
+            model: route.model,
+            mode: promptMode,
+            tokensIn: llm.tokensIn,
+            tokensOut: llm.tokensOut,
+            questions: questions.length,
+          })
           rememberWorkingRoute(route.engine, route.model)
           return { questions, source: route.engine, model: route.model }
         }
         if (parsed.kind === 'theme_error') {
           return { error: parsed.message, themeInvalid: true }
         }
-        errors.push(
-          `${route.engine}/${route.model}: JSON invalide · ${text
+        {
+          const msg = `${route.engine}/${route.model}: JSON invalide · ${llm.text
             .slice(0, 140)
-            .replace(/\s+/g, ' ')}`,
-        )
+            .replace(/\s+/g, ' ')}`
+          errors.push(msg)
+          void recordAiModelError({
+            engine: route.engine,
+            model: route.model,
+            kind: 'json_invalid',
+            message: msg,
+          })
+        }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         errors.push(msg)
         console.warn(`[${route.engine}] ${route.model}:`, msg.slice(0, 200))
+        void recordAiModelError({
+          engine: route.engine,
+          model: route.model,
+          kind: classifyAiError(msg),
+          message: `${route.engine}/${route.model}: ${msg}`,
+        })
         // 429 quota org/clé → abandonner tout le provider
         if (isRateLimitError(msg) && !/high demand/i.test(msg)) {
           saturatedEngines.add(route.engine)
@@ -1003,6 +1367,37 @@ async function generateOneTier(
         if (isTimeoutLikeError(msg)) {
           continue
         }
+      }
+    }
+    return null
+  }
+
+  try {
+    const primaryHit = await tryRoutes(primaryRoutes)
+    if (primaryHit) return primaryHit
+
+    // Autre IA seulement si l’IA réservée a échoué (erreur / filtre / timeout…).
+    if (stickToPicked && Date.now() < tierDeadline) {
+      const fallbackRoutes = await buildGenerationRoutes(
+        provider,
+        contentMode,
+        pickedSlot,
+        'fallback',
+      )
+      for (const r of fallbackRoutes) {
+        const key = `${r.engine}/${r.model}`
+        if (tokenCappedModels.has(key)) continue
+        try {
+          if (await isModelDayTokenCapped(r.engine, r.model)) {
+            tokenCappedModels.add(key)
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      if (fallbackRoutes.length > 0) {
+        const fbHit = await tryRoutes(fallbackRoutes)
+        if (fbHit) return fbHit
       }
     }
   } finally {
@@ -1083,6 +1478,7 @@ export type GenerateQuestionsResult = {
  * Un seul palier par appel. provider: auto | groq | gemini | cerebras | deepseek | openrouter.
  * Lots de 3 + garde-fou 50s (sous le kill Vercel 60s).
  * allowPartial: si true, un lot 1–9 est renvoyé sans error (partial/received/target).
+ * seedQuestions: lot incomplet déjà validé (cache 5 min) — on ne régénère que les manquantes.
  */
 export async function generateQuestions(
   theme: string,
@@ -1095,6 +1491,9 @@ export async function generateQuestions(
   excludeQuestions: string[] = [],
   onProgress?: GenProgressCb,
   allowPartial = false,
+  /** Multi topup : garder la même IA qu’au lot précédent (sauf erreur). */
+  stickyEngine?: RotateEngine,
+  seedQuestions: GeneratedQuestion[] = [],
 ): Promise<GenerateQuestionsResult> {
   const HARD_MS = 58_000
   const TARGET = 10
@@ -1133,6 +1532,8 @@ export async function generateQuestions(
         HARD_MS,
         collected,
         allowPartial,
+        stickyEngine,
+        seedQuestions,
       ),
       new Promise<GenerateQuestionsResult>((resolve) => {
         setTimeout(() => {
@@ -1151,6 +1552,44 @@ export async function generateQuestions(
   }
 }
 
+/**
+ * Comme generateQuestions, plus lecture/écriture du cache 5 min (lots 1–9).
+ * Utilisé par les API solo. Le multi passe le seed lui-même (salle + cache).
+ */
+export async function generateQuestionsWithPartialCache(
+  theme: string,
+  themeSlug: string,
+  mode: 'initial' | 'complementary',
+  difficulty?: Difficulty,
+  scope: 'fr' | 'international' = 'fr',
+  provider: AiProvider = 'auto',
+  contentMode: QuizContentMode = 'standard',
+  excludeQuestions: string[] = [],
+  onProgress?: GenProgressCb,
+  allowPartial = false,
+  stickyEngine?: RotateEngine,
+): Promise<GenerateQuestionsResult> {
+  const tier: Difficulty =
+    difficulty === 'medium' || difficulty === 'hard' ? difficulty : 'easy'
+  const seed = (await getPartialQuestions(themeSlug, tier)) as GeneratedQuestion[]
+  const result = await generateQuestions(
+    theme,
+    themeSlug,
+    mode,
+    difficulty,
+    scope,
+    provider,
+    contentMode,
+    excludeQuestions,
+    onProgress,
+    allowPartial,
+    stickyEngine,
+    seed,
+  )
+  await syncPartialQuestionCache(themeSlug, tier, result.questions)
+  return result
+}
+
 async function generateQuestionsInner(
   theme: string,
   themeSlug: string,
@@ -1164,6 +1603,8 @@ async function generateQuestionsInner(
   hardMs: number,
   collected: GeneratedQuestion[],
   allowPartial: boolean,
+  stickyEngine?: RotateEngine,
+  seedQuestions: GeneratedQuestion[] = [],
 ): Promise<GenerateQuestionsResult> {
   void mode
   const batchId = newId()
@@ -1188,56 +1629,6 @@ async function generateQuestionsInner(
     }
   }
 
-  // report initial envoyé plus bas avec engine
-
-  // Quiz musical Deezer — pas d’IA, API publique
-  if (contentMode === 'audio') {
-    const deezer = await buildDeezerQuiz({
-      theme,
-      themeSlug,
-      difficulty: tier,
-      scope,
-      excludeQuestions,
-      count: 10,
-    })
-    if ('error' in deezer) {
-      return { questions: [], source: 'deezer', error: deezer.error }
-    }
-    await report(TARGET)
-    return {
-      questions: deezer.questions,
-      source: 'deezer',
-      message: deezer.message,
-    }
-  }
-
-  const hasKey = AUTO_FREE_ENGINES.some((e) => keysForEngine(e).length > 0)
-
-  // Pré-réserver le slot IA et signaler le provider IMMÉDIATEMENT (avant tout appel IA)
-  let prePickedSlot: import('./aiRotate.js').PickedAi | undefined
-  if (hasKey && provider === 'auto') {
-    const picked = await pickAiForGeneration()
-    if (picked) {
-      prePickedSlot = picked
-      reportedEngine = picked.engine
-      await report(0, picked.engine, 'Connexion IA')
-    }
-  } else if (hasKey && provider !== 'auto') {
-    reportedEngine = provider
-    await report(0, provider, 'Connexion IA')
-  }
-
-  if (!hasKey) {
-    const mock = buildMockQuestions(theme, themeSlug, 'complementary', tier)
-    await report(TARGET)
-    return {
-      questions: mock,
-      source: 'mock',
-      message:
-        'Aucune clé API free — questions mock. Ajoute GROQ_API_KEY ou GEMINI_API_KEY.',
-    }
-  }
-
   // Garde une marge avant le timeout global + réserve pour un vrai rattrapage.
   const TOPUP_RESERVE_MS = 16_000
   const TOPUP_MIN_MS = 12_000
@@ -1250,19 +1641,178 @@ async function generateQuestionsInner(
   let lastSource: LlmEngine | null = null
   let lastModel = ''
   let lastError: string | undefined
+  // Cross-appel (lot principal + topups) : diversité des bonnes réponses et
+  // quasi-doublons de question (même fait, reformulé) déjà collectés.
+  const collectedCorrectAnswers = new Set<string>()
+  const collectedKeywordSets: Set<string>[] = []
+  // Compteurs de rejet cross-appel — loggés en résumé en fin de génération.
+  const ingestRejected: Record<string, number> = {}
+  let ingestAccepted = 0
 
   function ingest(qs: GeneratedQuestion[]): void {
     for (const q of qs) {
       if (q.difficulty !== tier) continue
       if (contentMode === 'image' && !q.imageUrl && !q.imageSubject) continue
+      if (contentMode === 'audio' && !q.previewUrl) continue
       const key = questionKey(q)
-      if (seen.has(key) || excluded.has(key)) continue
+      if (seen.has(key) || excluded.has(key)) {
+        ingestRejected.doublonExact = (ingestRejected.doublonExact ?? 0) + 1
+        continue
+      }
+
+      const correctAnswerNorm = normalizeForMatch(q.answers[q.correctIndex] ?? '')
+      if (collectedCorrectAnswers.has(correctAnswerNorm)) {
+        ingestRejected.bonneReponseDupliqueeCrossAppel =
+          (ingestRejected.bonneReponseDupliqueeCrossAppel ?? 0) + 1
+        continue
+      }
+
+      const keywordSet = questionKeywordSet(q.question)
+      if (isNearDuplicateQuestion(keywordSet, collectedKeywordSets)) {
+        ingestRejected.quasiDoublonCrossAppel =
+          (ingestRejected.quasiDoublonCrossAppel ?? 0) + 1
+        continue
+      }
+
       seen.add(key)
       excluded.add(key)
+      collectedCorrectAnswers.add(correctAnswerNorm)
+      collectedKeywordSets.push(keywordSet)
       collected.push(q)
       excludeLive.push(q.question)
+      ingestAccepted += 1
       if (collected.length >= TARGET) break
     }
+  }
+
+  if (seedQuestions.length > 0) {
+    ingest(seedQuestions)
+    await report(
+      collected.length,
+      undefined,
+      collected.length >= TARGET
+        ? 'Terminé'
+        : `Reprise (${collected.length}/10)`,
+    )
+    if (collected.length >= TARGET) {
+      const strict = assertExactBatch(collected, TARGET)
+      if (strict) {
+        return {
+          questions: strict,
+          source: 'bank',
+          message: 'Complété depuis le cache (5 min)',
+        }
+      }
+    }
+  }
+
+  // Quiz musical Deezer — pas d’IA, API publique
+  if (contentMode === 'audio') {
+    const missing = Math.max(0, TARGET - collected.length)
+    if (missing === 0) {
+      await report(TARGET)
+      return {
+        questions: collected.slice(0, TARGET),
+        source: 'deezer',
+        message: 'Complété depuis le cache (5 min)',
+      }
+    }
+    const deezer = await buildDeezerQuiz({
+      theme,
+      themeSlug,
+      difficulty: tier,
+      scope,
+      excludeQuestions: [
+        ...excludeQuestions,
+        ...collected.flatMap((q) =>
+          [q.question, q.deezerTrackId, q.previewUrl].filter(
+            (x): x is string => Boolean(x),
+          ),
+        ),
+      ],
+      count: missing,
+    })
+    if ('error' in deezer) {
+      if (allowPartial && collected.length > 0) {
+        return {
+          questions: collected.slice(),
+          source: 'deezer',
+          partial: true,
+          received: collected.length,
+          target: TARGET,
+        }
+      }
+      return { questions: [], source: 'deezer', error: deezer.error }
+    }
+    ingest(deezer.questions)
+    if (collected.length < TARGET) {
+      if (allowPartial && collected.length > 0) {
+        return {
+          questions: collected.slice(),
+          source: 'deezer',
+          partial: true,
+          received: collected.length,
+          target: TARGET,
+        }
+      }
+      return {
+        questions: [],
+        source: 'deezer',
+        error: `Pas assez de questions musicales (${collected.length}/${TARGET}). Réessaie.`,
+      }
+    }
+    await report(TARGET)
+    return {
+      questions: collected.slice(0, TARGET),
+      source: 'deezer',
+      message: deezer.message,
+    }
+  }
+
+  const hasKey = AUTO_FREE_ENGINES.some((e) => keysForEngine(e).length > 0)
+
+  // Pré-réserver le slot IA et signaler le provider IMMÉDIATEMENT (avant tout appel IA)
+  let prePickedSlot: import('./aiRotate.js').PickedAi | undefined
+  if (hasKey && provider === 'auto') {
+    const picked = stickyEngine
+      ? ((await pickAiForEngine(stickyEngine)) ??
+        (await pickAiForGeneration()))
+      : await pickAiForGeneration()
+    if (picked) {
+      prePickedSlot = picked
+      reportedEngine = picked.engine
+      await report(collected.length, picked.engine, 'Connexion IA')
+    }
+  } else if (hasKey && provider !== 'auto') {
+    reportedEngine = provider
+    await report(collected.length, provider, 'Connexion IA')
+  }
+
+  if (!hasKey) {
+    if (allowPartial && collected.length > 0) {
+      return {
+        questions: collected.slice(),
+        source: 'mock',
+        partial: true,
+        received: collected.length,
+        target: TARGET,
+      }
+    }
+    const mock = buildMockQuestions(theme, themeSlug, 'complementary', tier)
+    await report(TARGET)
+    return {
+      questions: mock,
+      source: 'mock',
+      message:
+        'Aucune clé API free — questions mock. Ajoute GROQ_API_KEY ou GEMINI_API_KEY.',
+    }
+  }
+
+  function logIngestSummary(): void {
+    const totalRejected = Object.values(ingestRejected).reduce((a, b) => a + b, 0)
+    console.log(
+      `[ingest] theme=${themeSlug} tier=${tier} acceptees=${ingestAccepted} rejetees=${totalRejected} detail=${JSON.stringify(ingestRejected)}`,
+    )
   }
 
   async function runBatch(
@@ -1308,18 +1858,29 @@ async function generateQuestionsInner(
   }
 
   // Appel principal: réserve du temps pour un rattrapage utile (≥12s).
+  // Si le cache a déjà des Q, on ne demande que les manquantes (mode topup).
+  const missingMain = TARGET - collected.length
   const leftForMain = Math.max(
     8_000,
     deadline - Date.now() - TOPUP_RESERVE_MS,
   )
-  await report(0, reportedEngine, 'Génération en cours')
-  const single = await runBatch(
-    TARGET,
-    Math.min(30_000, leftForMain),
-    prePickedSlot,
-  )
-  if (single.themeInvalid && lastError) {
-    return { questions: [], source: 'mock', error: lastError }
+  if (missingMain > 0) {
+    await report(
+      collected.length,
+      reportedEngine,
+      collected.length > 0
+        ? `Rattrapage IA (${missingMain} manquantes)`
+        : 'Génération en cours',
+    )
+    const single = await runBatch(
+      missingMain,
+      Math.min(30_000, leftForMain),
+      prePickedSlot,
+      collected.length > 0 ? 'topup' : 'full',
+    )
+    if (single.themeInvalid && lastError) {
+      return { questions: [], source: 'mock', error: lastError }
+    }
   }
 
   await report(collected.length, reportedEngine, 'Validation des questions')
@@ -1335,10 +1896,23 @@ async function generateQuestionsInner(
         `Rattrapage IA (${missing} manquantes)`,
       )
       const topUpErrorBefore = lastError
+      let topUpSlot: import('./aiRotate.js').PickedAi | undefined
+      if (provider === 'auto') {
+        const sticky: RotateEngine | undefined =
+          reportedEngine === 'gemini' ||
+          reportedEngine === 'groq' ||
+          reportedEngine === 'openrouter'
+            ? reportedEngine
+            : prePickedSlot?.engine
+        // Même IA que le lot principal (pas de rotation en rattrapage sans erreur).
+        if (sticky) {
+          topUpSlot = (await pickAiForEngine(sticky)) ?? undefined
+        }
+      }
       const topUp = await runBatch(
         missing,
         Math.min(TOPUP_RESERVE_MS, leftAfterMain),
-        undefined,
+        topUpSlot,
         'topup',
       )
       if (topUp.themeInvalid && lastError) {
@@ -1359,6 +1933,8 @@ async function generateQuestionsInner(
       )
     }
   }
+
+  logIngestSummary()
 
   if (collected.length < TARGET) {
     if (allowPartial && collected.length > 0) {
@@ -1425,7 +2001,7 @@ async function callOpenAiCompatible(
   prompt: string,
   questionCount = 10,
   timeoutBudgetMs = 11_000,
-): Promise<string> {
+): Promise<LlmCallResult> {
   const endpoints: Record<Exclude<LlmEngine, 'gemini'>, string> = {
     groq: 'https://api.groq.com/openai/v1/chat/completions',
     cerebras: 'https://api.cerebras.ai/v1/chat/completions',
@@ -1441,22 +2017,36 @@ async function callOpenAiCompatible(
     headers['X-Title'] = 'Quizz By IA'
   }
 
-  const maxTokens = /gpt-oss/i.test(model)
-    ? questionCount <= 2
-      ? 2500
-      : questionCount <= 3
-        ? 2500
-        : 3500
-    : questionCount <= 2
-      ? 1400
-      : questionCount <= 3
-        ? 1400
-        : questionCount <= 5
-          ? 2000
-          : 2800
+  // Compound partage le budget avec outils/raisonnement → JSON 10 Q souvent coupé sous 4k.
+  const maxTokens = /compound/i.test(model)
+    ? questionCount <= 5
+      ? 6_000
+      : 8_192
+    : /gpt-oss/i.test(model)
+      ? questionCount <= 3
+        ? 2_500
+        : 4_000
+      : questionCount <= 2
+        ? 1_400
+        : questionCount <= 3
+          ? 1_400
+          : questionCount <= 5
+            ? 2_000
+            : 2_800
   const timeoutMs = Math.max(
     2_500,
-    Math.min(questionCount <= 2 ? 12_000 : questionCount <= 5 ? 14_000 : 18_000, timeoutBudgetMs),
+    Math.min(
+      /compound/i.test(model)
+        ? questionCount <= 5
+          ? 22_000
+          : 28_000
+        : questionCount <= 2
+          ? 12_000
+          : questionCount <= 5
+            ? 14_000
+            : 18_000,
+      timeoutBudgetMs,
+    ),
   )
 
   // Groq gpt-oss + json_object → 400 "Failed to validate JSON"
@@ -1464,7 +2054,7 @@ async function callOpenAiCompatible(
   const useJsonObject =
     engine !== 'groq' && !/gpt-oss/i.test(model)
 
-  async function once(withJsonObject: boolean): Promise<string> {
+  async function once(withJsonObject: boolean): Promise<LlmCallResult> {
     const payload: Record<string, unknown> = {
       model,
       temperature: 0.15,
@@ -1502,6 +2092,13 @@ async function callOpenAiCompatible(
       choices?: Array<{
         message?: { content?: string; reasoning?: string }
       }>
+      usage?: {
+        prompt_tokens?: number
+        completion_tokens?: number
+        prompt_tokens_details?: {
+          cached_tokens?: number
+        }
+      }
     }
     const msg = data.choices?.[0]?.message
     const content = String(msg?.content ?? '').trim()
@@ -1510,7 +2107,20 @@ async function callOpenAiCompatible(
       [content, reasoning].find((t) => t.includes('{') && t.includes('questions')) ??
       [content, reasoning].find((t) => t.includes('{')) ??
       content
-    if (jsonish) return jsonish
+    if (jsonish) {
+      const tokensIn = data.usage?.prompt_tokens ?? 0
+      const tokensCached = data.usage?.prompt_tokens_details?.cached_tokens ?? 0
+      // Log de vérification cache — à retirer/passer en debug une fois le comportement confirmé.
+      console.log(
+        `[cache] ${engine}/${model}: tokensIn=${tokensIn} cached=${tokensCached} (${tokensIn > 0 ? Math.round((tokensCached / tokensIn) * 100) : 0}%)`,
+      )
+      return {
+        text: jsonish,
+        tokensIn,
+        tokensOut: data.usage?.completion_tokens ?? 0,
+        tokensCached,
+      }
+    }
     throw new Error(`${engine}/${model}: réponse vide`)
   }
 
@@ -1532,7 +2142,7 @@ async function callGemini(
   prompt: string,
   questionCount = 10,
   timeoutBudgetMs = 11_000,
-): Promise<string> {
+): Promise<LlmCallResult> {
   const key = apiKey.trim()
   const maxTokens = questionCount <= 2 ? 1400 : questionCount <= 3 ? 1400 : questionCount <= 5 ? 2000 : 2800
   const timeoutMs = Math.max(
@@ -1575,17 +2185,80 @@ async function callGemini(
     candidates?: Array<{
       content?: { parts?: Array<{ text?: string }> }
     }>
+    usageMetadata?: {
+      promptTokenCount?: number
+      candidatesTokenCount?: number
+      cachedContentTokenCount?: number
+    }
   }
-  return (
+  const text =
     data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('\n') ??
     ''
+  const tokensIn = data.usageMetadata?.promptTokenCount ?? 0
+  const tokensCached = data.usageMetadata?.cachedContentTokenCount ?? 0
+  // Log de vérification cache — à retirer/passer en debug une fois le comportement confirmé.
+  console.log(
+    `[cache] gemini/${model}: tokensIn=${tokensIn} cached=${tokensCached} (${tokensIn > 0 ? Math.round((tokensCached / tokensIn) * 100) : 0}%)`,
   )
+  return {
+    text,
+    tokensIn,
+    tokensOut: data.usageMetadata?.candidatesTokenCount ?? 0,
+    tokensCached,
+  }
 }
 
 function clampIndex(n: number): 0 | 1 | 2 | 3 {
   const i = Number(n)
   if (i === 1 || i === 2 || i === 3) return i
   return 0
+}
+
+/**
+ * Récupère les objets JSON complets d’un tableau tronqué
+ * (ex. coupure mid-champ après max_tokens).
+ */
+function salvageCompleteJsonObjects(text: string): RawQuestion[] {
+  const start = text.indexOf('[')
+  if (start < 0) return []
+  const out: RawQuestion[] = []
+  let i = start + 1
+  while (i < text.length) {
+    while (i < text.length && /[\s,]/.test(text[i]!)) i++
+    if (i >= text.length || text[i] === ']') break
+    if (text[i] !== '{') break
+    let depth = 0
+    let inStr = false
+    let esc = false
+    let j = i
+    for (; j < text.length; j++) {
+      const c = text[j]!
+      if (inStr) {
+        if (esc) esc = false
+        else if (c === '\\') esc = true
+        else if (c === '"') inStr = false
+        continue
+      }
+      if (c === '"') inStr = true
+      else if (c === '{') depth++
+      else if (c === '}') {
+        depth--
+        if (depth === 0) {
+          j++
+          break
+        }
+      }
+    }
+    if (depth !== 0) break
+    try {
+      const obj = JSON.parse(text.slice(i, j)) as RawQuestion
+      if (obj && typeof obj === 'object') out.push(obj)
+    } catch {
+      break
+    }
+    i = j
+  }
+  return out
 }
 
 function extractJson(text: string): {
@@ -1637,9 +2310,11 @@ function extractJson(text: string): {
       try {
         return normalize(JSON.parse(candidate.slice(arrStart, arrEnd + 1)))
       } catch {
-        return null
+        /* truncated — salvage below */
       }
     }
+    const salvaged = salvageCompleteJsonObjects(candidate)
+    if (salvaged.length > 0) return { questions: salvaged }
     return null
   }
 }
