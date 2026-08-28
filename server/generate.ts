@@ -12,6 +12,7 @@ import {
   pickAiForEngine,
   pickAiForGeneration,
   releaseAiSlot,
+  type PickedAi,
   type RotateEngine,
 } from './aiRotate.js'
 import { recordAiGeneration, recordAiModelError, classifyAiError, setConfiguredAiModels, isModelDayTokenCapped } from './aiGenStats.js'
@@ -165,6 +166,36 @@ const ROUTE_MEMORY_MS = 30 * 60 * 1000
 
 function rememberWorkingRoute(engine: LlmEngine, model: string): void {
   lastWorkingRoute = { engine, model, at: Date.now() }
+}
+
+function isRotateEngine(v: string | undefined): v is RotateEngine {
+  return v === 'gemini' || v === 'groq' || v === 'openrouter'
+}
+
+/**
+ * Lot incomplet Groq → Gemini (puis OpenRouter) pour les manquantes.
+ * Les autres IA restent collées à elles-mêmes.
+ */
+async function pickRattrapageSlot(
+  provider: AiProvider,
+  currentEngine: string | undefined,
+  alreadyHave: number,
+): Promise<PickedAi | undefined> {
+  if (provider !== 'auto' || alreadyHave <= 0) return undefined
+  if (currentEngine === 'groq') {
+    const next =
+      (await pickAiForEngine('gemini')) ?? (await pickAiForEngine('openrouter'))
+    if (next) {
+      console.log(
+        `[topup] groq incomplet (${alreadyHave}/10) → bascule ${next.engine}`,
+      )
+    }
+    return next ?? undefined
+  }
+  if (isRotateEngine(currentEngine)) {
+    return (await pickAiForEngine(currentEngine)) ?? undefined
+  }
+  return undefined
 }
 
 function getPreferredRoute(): { engine: LlmEngine; model: string } | null {
@@ -1865,17 +1896,27 @@ async function generateQuestionsInner(
     deadline - Date.now() - TOPUP_RESERVE_MS,
   )
   if (missingMain > 0) {
+    const currentEngine = reportedEngine ?? prePickedSlot?.engine ?? stickyEngine
+    const rattrapSlot = await pickRattrapageSlot(
+      provider,
+      currentEngine,
+      collected.length,
+    )
+    const mainSlot = rattrapSlot ?? prePickedSlot
+    if (rattrapSlot) {
+      reportedEngine = rattrapSlot.engine
+    }
     await report(
       collected.length,
       reportedEngine,
       collected.length > 0
-        ? `Rattrapage IA (${missingMain} manquantes)`
+        ? `Rattrapage ${reportedEngine ?? 'IA'} (${missingMain} manquantes)`
         : 'Génération en cours',
     )
     const single = await runBatch(
       missingMain,
       Math.min(30_000, leftForMain),
-      prePickedSlot,
+      mainSlot,
       collected.length > 0 ? 'topup' : 'full',
     )
     if (single.themeInvalid && lastError) {
@@ -1893,21 +1934,21 @@ async function generateQuestionsInner(
       await report(
         collected.length,
         reportedEngine,
-        `Rattrapage IA (${missing} manquantes)`,
+        `Rattrapage ${reportedEngine ?? 'IA'} (${missing} manquantes)`,
       )
       const topUpErrorBefore = lastError
-      let topUpSlot: import('./aiRotate.js').PickedAi | undefined
-      if (provider === 'auto') {
-        const sticky: RotateEngine | undefined =
-          reportedEngine === 'gemini' ||
-          reportedEngine === 'groq' ||
-          reportedEngine === 'openrouter'
-            ? reportedEngine
-            : prePickedSlot?.engine
-        // Même IA que le lot principal (pas de rotation en rattrapage sans erreur).
-        if (sticky) {
-          topUpSlot = (await pickAiForEngine(sticky)) ?? undefined
-        }
+      const topUpSlot = await pickRattrapageSlot(
+        provider,
+        reportedEngine ?? prePickedSlot?.engine ?? stickyEngine,
+        collected.length,
+      )
+      if (topUpSlot) {
+        reportedEngine = topUpSlot.engine
+        await report(
+          collected.length,
+          reportedEngine,
+          `Rattrapage ${reportedEngine} (${missing} manquantes)`,
+        )
       }
       const topUp = await runBatch(
         missing,
@@ -2024,8 +2065,10 @@ async function callOpenAiCompatible(
       : 8_192
     : /gpt-oss/i.test(model)
       ? questionCount <= 3
-        ? 2_500
-        : 4_000
+        ? 4_000
+        : questionCount <= 5
+          ? 6_000
+          : 8_000
       : questionCount <= 2
         ? 1_400
         : questionCount <= 3
@@ -2040,6 +2083,10 @@ async function callOpenAiCompatible(
         ? questionCount <= 5
           ? 22_000
           : 28_000
+        : /gpt-oss/i.test(model)
+          ? questionCount <= 5
+            ? 16_000
+            : 22_000
         : questionCount <= 2
           ? 12_000
           : questionCount <= 5
@@ -2058,17 +2105,19 @@ async function callOpenAiCompatible(
     const payload: Record<string, unknown> = {
       model,
       temperature: 0.15,
-      max_tokens: maxTokens,
       messages: [
         { role: 'system', content: AI_SYSTEM_MINIMAL },
         { role: 'user', content: prompt },
       ],
     }
+    if (/gpt-oss/i.test(model)) {
+      payload.reasoning_effort = 'low'
+      payload.max_completion_tokens = maxTokens
+    } else {
+      payload.max_tokens = maxTokens
+    }
     if (withJsonObject) {
       payload.response_format = { type: 'json_object' }
-    }
-    if (/gpt-oss/i.test(model)) {
-      payload.reasoning_effort = 'medium'
     }
 
     const res = await fetchWithTimeout(

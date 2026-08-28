@@ -522,6 +522,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             : undefined
         }
 
+        /** Lot Groq incomplet → Gemini pour les manquantes (pas le même Groq). */
+        function stickyForCollected(
+          preferred?: 'gemini' | 'groq' | 'openrouter',
+        ): 'gemini' | 'groq' | 'openrouter' | undefined {
+          const raw = preferred ?? stickyEngine
+          if (
+            collected.length > 0 &&
+            collected.length < MULTI_QUESTION_COUNT &&
+            (raw === 'groq' || stickyRaw === 'groq')
+          ) {
+            return 'gemini'
+          }
+          return raw
+        }
+
         async function callGenerate(
           sticky?: 'gemini' | 'groq' | 'openrouter',
         ) {
@@ -552,7 +567,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         let gen: Awaited<ReturnType<typeof generateQuestions>>
         try {
-          gen = await callGenerate(stickyEngine)
+          gen = await callGenerate(stickyForCollected())
           // Solo-like : 1 retry si 0 question « pas assez valides »
           if (
             (gen.questions?.length ?? 0) === 0 &&
@@ -563,7 +578,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               room.generatingHeartbeatAt = Date.now()
               await saveRoom(room)
               gen = await callGenerate(
-                stickyEngine ?? resolveSticky(room.genAiSource),
+                stickyForCollected(resolveSticky(room.genAiSource)),
               )
             }
           }
