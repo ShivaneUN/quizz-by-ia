@@ -5,13 +5,20 @@
   "functions": {
     "api/generate-questions.ts": {
       "maxDuration": 60,
-      "includeFiles": "data/curated/**"
+      "includeFiles": "{data/curated/**,public/drapeaux/drapeaux.json}"
     },
     "api/fact-check.ts": {
       "maxDuration": 60
     },
     "api/room.ts": {
-      "maxDuration": 60
+      "maxDuration": 60,
+      "includeFiles": "public/drapeaux/drapeaux.json"
+    },
+    "api/morpion.ts": {
+      "maxDuration": 10
+    },
+    "api/pendu-words.ts": {
+      "maxDuration": 15
     },
     "api/curated-bank.ts": {
       "includeFiles": "data/curated/**"
@@ -25,5 +32,6 @@
   },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" }
-  ]
+  ],
+  "installCommand": "npm install"
 }

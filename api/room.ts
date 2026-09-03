@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { generateQuestions, normalizeThemeSlug, parseAiProvider, parseQuizContentMode } from '../server/generate.js'
+import { buildFlagQuiz, clampFlagCount, isFlagTheme, parseFlagDifficulty } from '../server/flagQuiz.js'
 import {
   getPartialQuestions,
   syncPartialQuestionCache,
@@ -41,6 +42,22 @@ import {
   recordGenerationMs,
 } from '../server/genStats.js'
 import { logError } from '../server/errorLog.js'
+import { resolveQuizScope } from '../server/quizScope.js'
+import { fillPenduWords } from '../server/penduAi.js'
+import {
+  parsePenduWordSource,
+  continuePendu,
+  createDuoGame,
+  createMultiGame,
+  guessLetter,
+  guessWord,
+  isPenduMyTurn,
+  penduScoresByPlayerId,
+  SOLO_DUO_WORDS,
+  useHintEliminate,
+  useHintReveal,
+  type PenduGame,
+} from '../server/penduShared.js'
 
 export const config = {
   maxDuration: 60,
@@ -66,9 +83,28 @@ function isDeezerTheme(theme: string): boolean {
 /** Mode contenu salle : audio si flag ou thème Deezer (filet de sécu). */
 function resolveRoomContentMode(
   room: Pick<RoomState, 'quizMode' | 'theme'>,
-): 'audio' | 'standard' {
+): 'audio' | 'standard' | 'pendu' {
+  if (isPenduRoom(room)) return 'pendu'
   if (room.quizMode === 'audio' || isDeezerTheme(room.theme)) return 'audio'
   return 'standard'
+}
+
+function isPenduRoom(room: Pick<RoomState, 'quizMode' | 'theme'>): boolean {
+  return (
+    room.quizMode === 'pendu' || /^pendu\b/i.test(String(room.theme ?? '').trim())
+  )
+}
+
+function parsePenduVariant(raw: unknown): 'duo' | 'multi' {
+  return raw === 'duo' ? 'duo' : 'multi'
+}
+
+function applyPenduScores(room: RoomState, game: PenduGame) {
+  const scores = penduScoresByPlayerId(game)
+  for (const row of scores) {
+    const p = room.players.find((x) => x.id === row.id)
+    if (p) p.score = row.score
+  }
 }
 
 /** Empreinte multi : texte seul (IA) ; piste unique (Deezer — prompts répétés). */
@@ -137,18 +173,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (hostName.length < 2) {
         return json(res, 400, { error: 'Pseudo obligatoire (2 caractères min.)' })
       }
-      const theme = String(body.theme ?? '').trim()
-      const scope = parseScope(body.scope)
+      const themeRaw = String(body.theme ?? '').trim()
+      const pendu =
+        body.quizMode === 'pendu' || /^pendu\b/i.test(themeRaw)
+      const theme = pendu ? (themeRaw || 'Pendu') : themeRaw
+      const scopeRaw = parseScope(body.scope)
       if (!theme) return json(res, 400, { error: 'thème requis' })
 
       const timerEnabled = Boolean(body.timerEnabled)
-      const playMode = parsePlayMode(body.playMode)
+      const playMode = isFlagTheme(theme) ? 'free' : parsePlayMode(body.playMode)
       const difficulty =
         playMode === 'progression' ? 'easy' : parseDifficulty(body.difficulty)
       const aiProvider = parseAiProvider(body.aiProvider)
-      const quizModeRaw = parseQuizContentMode(body.quizMode)
-      const quizMode =
-        quizModeRaw === 'audio' || isDeezerTheme(theme) ? 'audio' : 'standard'
+      const quizMode = pendu
+        ? 'pendu'
+        : parseQuizContentMode(body.quizMode) === 'audio' || isDeezerTheme(theme)
+          ? 'audio'
+          : 'standard'
+      const penduVariant = pendu ? parsePenduVariant(body.penduVariant) : undefined
+      const penduWordSource = pendu
+        ? parsePenduWordSource(body.penduWordSource)
+        : undefined
+      const scope =
+        quizMode === 'audio' ? scopeRaw : resolveQuizScope(theme, scopeRaw)
       const audioAutoplay =
         quizMode === 'audio' ? body.audioAutoplay !== false : false
       const hostId = newPlayerId()
@@ -170,7 +217,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         difficulty,
         aiProvider,
         quizMode,
+        penduVariant,
+        penduWordSource,
         audioAutoplay,
+        flagDifficulty: isFlagTheme(theme)
+          ? parseFlagDifficulty(body.flagDifficulty)
+          : undefined,
+        flagCount: isFlagTheme(theme)
+          ? clampFlagCount(
+              parseFlagDifficulty(body.flagDifficulty),
+              Number(body.flagCount) || 10,
+            )
+          : undefined,
         players: [
           {
             id: hostId,
@@ -211,10 +269,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       let room = await getRoom(code)
       if (!room) return json(res, 404, { error: 'Salle introuvable' })
-      // Lobby, génération, partie en cours ou finished — le code suffit
-      if (room.players.length >= 8) {
-        return json(res, 400, { error: 'Salle pleine (max 8)' })
-      }
 
       // Même nom déjà dans la salle → réutilise l’id (reconnexion simple)
       const existing = room.players.find(
@@ -225,6 +279,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           playerId: existing.id,
           room: publicRoomView(room),
         })
+      }
+      // Lobby, génération, partie en cours ou finished — le code suffit
+      if (
+        room.quizMode === 'pendu' &&
+        room.penduVariant === 'duo' &&
+        room.players.length >= 2
+      ) {
+        return json(res, 400, { error: 'Duo : 2 joueurs maximum' })
+      }
+      if (room.players.length >= 8) {
+        return json(res, 400, { error: 'Salle pleine (max 8)' })
       }
 
       const playerId = newPlayerId()
@@ -264,6 +329,61 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return json(res, 400, { error: 'Pas assez de joueurs' })
       }
 
+      if (isPenduRoom(room)) {
+        const n = room.players.length
+        const variant = room.penduVariant === 'duo' ? 'duo' : 'multi'
+        if (variant === 'duo' && n !== 2) {
+          return json(res, 400, {
+            error:
+              n > 2
+                ? 'Duo : 2 joueurs seulement — passe en Multi ou fais sortir des joueurs'
+                : 'Duo : il faut 2 joueurs',
+          })
+        }
+        if (variant === 'multi' && (n < 2 || n > 8)) {
+          return json(res, 400, { error: 'Pendu multi : 2 à 8 joueurs' })
+        }
+        const diff =
+          room.difficulty === 'medium' || room.difficulty === 'hard'
+            ? room.difficulty
+            : 'easy'
+        const seats = room.players.map((p) => ({ id: p.id, name: p.name }))
+        const filled = await fillPenduWords({
+          count: SOLO_DUO_WORDS,
+          difficulty: diff,
+          exclude: room.penduPlayedWords ?? [],
+          mode: variant,
+          allowAi: room.penduWordSource === 'ai',
+        })
+        const game =
+          variant === 'duo'
+            ? createDuoGame(seats, diff, filled.words)
+            : createMultiGame(seats, diff, filled.words)
+        room.quizMode = 'pendu'
+        room.penduVariant = variant
+        room.penduGame = game
+        const played = [
+          ...(room.penduPlayedWords ?? []),
+          ...filled.words,
+        ].slice(-500)
+        room.penduPlayedWords = played
+        room.status = 'playing'
+        delete room.hostPickingTheme
+        delete room.errorMessage
+        room.timerStarted = false
+        room.timerPaused = false
+        room.roundDeadlineAt = 0
+        room.questions = []
+        room.questionIndex = 0
+        clearGeneratingFields(room)
+        resetPlayersForNewGame(room)
+        await saveRoom(room)
+        return json(res, 200, {
+          room: publicRoomView(room),
+          message: 'Pendu lancé',
+        })
+      }
+
       // Marque « generating » tout de suite et rend la main (évite 504 client)
       room.status = 'generating'
       delete room.hostPickingTheme
@@ -282,7 +402,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       room.roundStartedAt = 0
       clearGeneratingFields(room)
       room.genQuestionsDone = 0
-      room.genQuestionsTotal = 10
+      room.genQuestionsTotal = isFlagTheme(room.theme)
+        ? clampFlagCount(
+            parseFlagDifficulty(room.flagDifficulty),
+            room.flagCount ?? 10,
+          )
+        : 10
       const genStart = Date.now()
       room.generatingStartedAt = genStart
       room.generatingHeartbeatAt = genStart
@@ -335,10 +460,56 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         room.generatingHeartbeatAt = Date.now()
         await saveRoom(room)
 
+        if (isFlagTheme(room.theme)) {
+          const flagDiff = parseFlagDifficulty(room.flagDifficulty)
+          const count = clampFlagCount(flagDiff, room.flagCount ?? 10)
+          const themeSlug = `${normalizeThemeSlug(room.theme)}--${room.scope}--flags`
+          const qs = buildFlagQuiz({
+            difficulty: flagDiff,
+            count,
+            themeSlug,
+          })
+          if (qs.length < count) {
+            room.status = 'error'
+            room.errorMessage = `Impossible de constituer ${count} questions drapeaux (${qs.length}/${count}).`
+            clearGeneratingFields(room)
+            await saveRoom(room)
+            return json(res, 200, {
+              room: publicRoomView(room),
+              message: room.errorMessage,
+            })
+          }
+          const now = Date.now()
+          room.status = 'playing'
+          delete room.errorMessage
+          clearGeneratingFields(room)
+          room.questions = qs.map((q) => ({
+            id: q.id,
+            question: q.question,
+            answers: q.answers,
+            correctIndex: q.correctIndex,
+            explanation: q.explanation,
+            sourceType: q.sourceType,
+            imageUrl: q.imageUrl,
+            revealAnswer: q.revealAnswer,
+          }))
+          room.questionIndex = 0
+          prepareRound(room, now)
+          await saveRoom(room)
+          return json(res, 200, {
+            room: publicRoomView(room),
+            message: 'Questions prêtes',
+          })
+        }
+
         const contentMode = resolveRoomContentMode(room)
-        room.quizMode = contentMode
+        if (contentMode === 'pendu') {
+          return json(res, 400, { error: 'Pendu : pas de génération de questions' })
+        }
+        const genMode: 'audio' | 'standard' = contentMode
+        room.quizMode = genMode
         const themeSlug =
-          contentMode === 'audio'
+          genMode === 'audio'
             ? `${normalizeThemeSlug(room.theme)}--${room.scope}--audio`
             : `${normalizeThemeSlug(room.theme)}--${room.scope}`
         const difficulty = parseDifficulty(room.difficulty)
@@ -348,7 +519,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ...(room.genCollectedQuestions ?? []),
         ]
         const collectedFp = new Set(
-          collected.map((q) => roomQuestionFingerprint(q, contentMode)),
+          collected.map((q) => roomQuestionFingerprint(q, genMode)),
         )
 
         function toCachedQuestion(q: RoomQuestion): PartialCachedQuestion {
@@ -363,6 +534,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             batchId: 'partial-cache',
             explanation: q.explanation,
             sourceType: q.sourceType,
+            imageUrl: q.imageUrl,
             previewUrl: q.previewUrl,
             coverUrl: q.coverUrl,
             deezerTrackId: q.deezerTrackId,
@@ -385,10 +557,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           qs: Array<{
             id: string
             question: string
-            answers: [string, string, string, string]
-            correctIndex: 0 | 1 | 2 | 3
+            answers: string[]
+            correctIndex: number
             explanation?: string
             sourceType?: string
+            imageUrl?: string
             previewUrl?: string
             coverUrl?: string
             deezerTrackId?: string
@@ -401,7 +574,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ): void {
           for (const q of qs) {
             if (q.difficulty && q.difficulty !== difficulty) continue
-            const fp = roomQuestionFingerprint(q, contentMode)
+            const fp = roomQuestionFingerprint(q, genMode)
             if (!fp || collectedFp.has(fp)) continue
             collectedFp.add(fp)
             collected.push({
@@ -411,6 +584,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               correctIndex: q.correctIndex,
               explanation: q.explanation,
               sourceType: q.sourceType,
+              imageUrl: q.imageUrl,
               previewUrl: q.previewUrl,
               coverUrl: q.coverUrl,
               deezerTrackId: q.deezerTrackId,
@@ -435,7 +609,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             pool,
             seen,
             MULTI_QUESTION_COUNT,
-            (q) => roomQuestionFingerprint(q, contentMode),
+            (q) => roomQuestionFingerprint(q, genMode),
           )
           const questions = selected.slice(0, MULTI_QUESTION_COUNT)
           if (questions.length < MULTI_QUESTION_COUNT) {
@@ -454,7 +628,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           await rememberQuestionKeys(
             themeSlug,
             questions.map((q) =>
-              contentMode === 'audio'
+              genMode === 'audio'
                 ? roomQuestionFingerprint(q, 'audio')
                 : q.question,
             ),
@@ -541,11 +715,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           sticky?: 'gemini' | 'groq' | 'openrouter',
         ) {
           const histExclude =
-            contentMode === 'audio'
+            genMode === 'audio'
               ? []
               : await getSeenQuestionTexts(themeSlug)
           const excludeQuestions =
-            contentMode === 'audio'
+            genMode === 'audio'
               ? collected.map((q) => roomQuestionFingerprint(q, 'audio'))
               : [...histExclude, ...collected.map((q) => q.question)]
           const seed = collected.map(toCachedQuestion)
@@ -556,13 +730,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             difficulty,
             room!.scope,
             provider,
-            contentMode,
+            genMode,
             excludeQuestions,
             (done, total, engine) => bumpProgress(done, total, engine),
             true,
             sticky,
             seed,
           )
+        }
+
+        // Progress UI : Deezer ≠ provider IA
+        if (genMode === 'audio') {
+          await bumpProgress(collected.length, MULTI_QUESTION_COUNT, 'deezer')
         }
 
         let gen: Awaited<ReturnType<typeof generateQuestions>>
@@ -694,7 +873,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const code = String(body.code ?? '').trim().toUpperCase()
       const playerId = String(body.playerId ?? '')
       const theme = String(body.theme ?? '').trim()
-      const scope = parseScope(body.scope)
+      const scopeRaw = parseScope(body.scope)
       let room = await getRoom(code)
       if (!room) return json(res, 404, { error: 'Salle introuvable' })
       if (playerId !== room.hostId) {
@@ -706,17 +885,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!theme) return json(res, 400, { error: 'thème requis' })
 
       room.theme = theme
-      room.scope = scope
       if (body.aiProvider !== undefined) {
         room.aiProvider = parseAiProvider(body.aiProvider)
       }
-      if (body.quizMode !== undefined) {
+      const wantPendu =
+        body.quizMode === 'pendu' || /^pendu\b/i.test(theme)
+      if (wantPendu) {
+        room.quizMode = 'pendu'
+        room.penduVariant = parsePenduVariant(body.penduVariant)
+        room.penduWordSource = parsePenduWordSource(body.penduWordSource)
+        room.penduGame = undefined
+        room.playMode = 'free'
+        room.timerEnabled = false
+        if (body.difficulty !== undefined) {
+          room.difficulty = parseDifficulty(body.difficulty)
+        }
+      } else if (body.quizMode !== undefined) {
         const qm = parseQuizContentMode(body.quizMode)
         room.quizMode = qm === 'audio' ? 'audio' : 'standard'
+        delete room.penduVariant
+        delete room.penduWordSource
+        delete room.penduGame
       }
       // Filet : thème Deezer → toujours mode audio (jamais gen texte IA)
-      if (isDeezerTheme(theme)) room.quizMode = 'audio'
-      else if (room.quizMode !== 'audio') room.quizMode = 'standard'
+      if (isDeezerTheme(theme)) {
+        room.quizMode = 'audio'
+        delete room.penduVariant
+        delete room.penduWordSource
+        delete room.penduGame
+      } else if (!wantPendu && room.quizMode !== 'audio') {
+        room.quizMode = 'standard'
+        delete room.penduVariant
+        delete room.penduWordSource
+        delete room.penduGame
+      }
+      room.scope =
+        room.quizMode === 'audio'
+          ? scopeRaw
+          : resolveQuizScope(theme, scopeRaw)
       if (body.audioAutoplay !== undefined) {
         room.audioAutoplay =
           room.quizMode === 'audio' ? Boolean(body.audioAutoplay) : false
@@ -728,6 +934,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       delete room.errorMessage
       delete room.hostPickingTheme
       room.status = 'lobby'
+      if (isFlagTheme(theme)) {
+        room.flagDifficulty = parseFlagDifficulty(body.flagDifficulty)
+        room.flagCount = clampFlagCount(
+          room.flagDifficulty,
+          Number(body.flagCount) || 10,
+        )
+        room.playMode = 'free'
+        room.quizMode = 'standard'
+      } else {
+        delete room.flagDifficulty
+        delete room.flagCount
+      }
       room.timerStarted = false
       room.timerPaused = false
       room.timerPausedLeftMs = undefined
@@ -813,6 +1031,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         typingScore: 0,
       }))
       room.scoresFinalized = false
+      delete room.penduGame
       if (pickingTheme) room.hostPickingTheme = true
       else delete room.hostPickingTheme
       await saveRoom(room)
@@ -958,10 +1177,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         )
         storedAnswer = ok ? currentQ.correctIndex : -1
       } else {
+        const maxIndex = Math.max(0, (currentQ?.answers?.length ?? 4) - 1)
         if (
           !Number.isInteger(answerIndex) ||
           answerIndex < 0 ||
-          answerIndex > 3
+          answerIndex > maxIndex
         ) {
           return json(res, 400, { error: 'Réponse invalide' })
         }
@@ -1167,6 +1387,57 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const code = String(body.code ?? '').trim().toUpperCase()
       const room = await syncRoomRound(code)
       if (!room) return json(res, 404, { error: 'Salle introuvable' })
+      return json(res, 200, { room: publicRoomView(room) })
+    }
+
+    if (action === 'pendu') {
+      const code = String(body.code ?? '').trim().toUpperCase()
+      const playerId = String(body.playerId ?? '')
+      const kind = String(body.kind ?? '')
+      let room = await getRoom(code)
+      if (!room) return json(res, 404, { error: 'Salle introuvable' })
+      if (!isPenduRoom(room) || !room.penduGame) {
+        return json(res, 400, { error: 'Pas une partie pendu' })
+      }
+      if (room.status !== 'playing') {
+        return json(res, 400, { error: 'Partie non en cours' })
+      }
+      if (!room.players.some((p) => p.id === playerId)) {
+        return json(res, 403, { error: 'Pas dans la salle' })
+      }
+      let game = room.penduGame as PenduGame
+      const isMultiParallel = game.mode === 'multi'
+      if (!isMultiParallel && kind !== 'continue' && !isPenduMyTurn(game, playerId)) {
+        return json(res, 400, { error: 'Pas ton tour' })
+      }
+      if (isMultiParallel && kind !== 'continue' && !isPenduMyTurn(game, playerId)) {
+        // En multi parallèle, on vérifie que CE joueur n'a pas déjà terminé
+        return json(res, 400, { error: 'Tu as déjà terminé ce mot' })
+      }
+      if (kind === 'letter') {
+        game = guessLetter(game, String(body.letter ?? ''), isMultiParallel ? playerId : undefined)
+      } else if (kind === 'word') {
+        game = guessWord(game, String(body.word ?? ''), isMultiParallel ? playerId : undefined)
+      } else if (kind === 'hintEliminate') {
+        game = useHintEliminate(game)
+      } else if (kind === 'hintReveal') {
+        game = useHintReveal(game)
+      } else if (kind === 'continue') {
+        if (game.status !== 'wordOver' && game.status !== 'gameOver') {
+          return json(res, 400, { error: 'Rien à continuer' })
+        }
+        game = continuePendu(game)
+      } else {
+        return json(res, 400, { error: 'action pendu inconnue' })
+      }
+      room.penduGame = game
+      applyPenduScores(room, game)
+      if (game.status === 'gameOver') {
+        room.status = 'finished'
+        room.scoresFinalized = true
+      }
+      room.updatedAt = Date.now()
+      await saveRoom(room)
       return json(res, 200, { room: publicRoomView(room) })
     }
 

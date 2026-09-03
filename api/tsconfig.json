@@ -1,0 +1,7 @@
+{
+  "extends": "../tsconfig.api.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "../node_modules/.tmp/tsconfig.api-functions.tsbuildinfo"
+  },
+  "include": ["./**/*.ts", "../server/**/*.ts", "../src/lib/pendu.ts", "../src/lib/penduWords.ts", "../src/lib/penduFill.ts", "../src/lib/flagQuiz.ts", "../src/lib/shuffle.ts", "../src/types/index.ts", "../src/types/audit.ts"]
+}
