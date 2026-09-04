@@ -242,7 +242,7 @@ function makePlayers(input: Array<string | PenduSeat>): PenduPlayer[] {
   const slice = seats.slice(0, n)
   while (slice.length < n) slice.push({ name: '' })
   return slice.map((s, i) => ({
-    id: s.id, name: s.name.trim() || defaultPlayerName(i),
+    id: (typeof s.id === 'string' && s.id.trim()) ? s.id.trim() : `seat-${i}`, name: s.name.trim() || defaultPlayerName(i),
     strokes: 0, points: 0, eliminated: false, hintSpent: 0,
   }))
 }
@@ -271,7 +271,7 @@ export function createDuoGame(seats?: Array<string | PenduSeat>, difficulty: Dif
   const g = emptyGame('duo', words && words.length > 0 ? words : drawPenduWords(SOLO_DUO_WORDS, difficulty))
   if (seats && seats.length >= 2) {
     g.players = asSeats(seats).slice(0, 2).map((s, i) => ({
-      id: s.id, name: s.name.trim() || defaultPlayerName(i),
+      id: (typeof s.id === 'string' && s.id.trim()) ? s.id.trim() : `seat-${i}`, name: s.name.trim() || defaultPlayerName(i),
       strokes: 0, points: 0, eliminated: false, hintSpent: 0,
     }))
   }
@@ -391,7 +391,7 @@ function advanceMultiWord(game: PenduGame): PenduGame {
 
 function applyMultiLetter(game: PenduGame, actorId: string, L: string): PenduGame {
   if (game.status !== 'playing') return game
-  const actorIdx = game.players.findIndex((p) => p.id === actorId)
+  const actorIdx = game.players.findIndex((p) => p.id && p.id === actorId)
   if (actorIdx === -1) return game
   const p = game.players[actorIdx]!
   const mr = p.multiRound
@@ -425,7 +425,7 @@ function applyMultiLetter(game: PenduGame, actorId: string, L: string): PenduGam
 
 function applyMultiWord(game: PenduGame, actorId: string, guess: string): PenduGame {
   if (game.status !== 'playing') return game
-  const actorIdx = game.players.findIndex((p) => p.id === actorId)
+  const actorIdx = game.players.findIndex((p) => p.id && p.id === actorId)
   if (actorIdx === -1) return game
   const p = game.players[actorIdx]!
   const mr = p.multiRound

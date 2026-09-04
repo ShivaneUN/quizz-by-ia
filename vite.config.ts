@@ -7,20 +7,22 @@ import {
   parseQuizContentMode,
   type Difficulty,
 } from './server/generate.ts'
+import { isFlagTheme } from './server/flagQuiz.ts'
 import {
   getGenerationEstimateSec,
   recordGenerationMs,
 } from './server/genStats.ts'
 import roomHandler from './api/room.ts'
-import genEtaHandler from './api/gen-eta.ts'
+import morpionHandler from './api/morpion.ts'
+import genStatusHandler from './api/gen-status.ts'
 import calibStatsHandler from './api/calib-stats.ts'
 import questionFeedbackHandler from './api/question-feedback.ts'
 import factCheckHandler from './api/fact-check.ts'
 import curatedBankHandler from './api/curated-bank.ts'
 import chatHandler from './api/chat.ts'
 import aiCapacityHandler from './api/ai-capacity.ts'
+import penduWordsHandler from './api/pendu-words.ts'
 import {
-  getGenProgress,
   isValidProgressId,
   setGenProgress,
 } from './server/genProgress.ts'
@@ -59,6 +61,8 @@ function localApiPlugin(): Plugin {
               quizMode: rawQuizMode,
               excludeQuestions: rawExclude,
               progressId: rawProgressId,
+              flagCount: rawFlagCount,
+              flagDifficulty: rawFlagDifficulty,
             } = body
             const scope = rawScope === 'international' ? 'international' : 'fr'
             const provider = parseAiProvider(rawProvider)
@@ -83,7 +87,7 @@ function localApiPlugin(): Plugin {
               )
               return
             }
-            if (mode === 'complementary') {
+            if (mode === 'complementary' && !isFlagTheme(theme)) {
               const ok =
                 difficulty === 'easy' ||
                 difficulty === 'medium' ||
@@ -127,6 +131,9 @@ function localApiPlugin(): Plugin {
                   }
                 : undefined,
               true,
+              undefined,
+              typeof rawFlagCount === 'number' ? rawFlagCount : Number(rawFlagCount) || undefined,
+              typeof rawFlagDifficulty === 'string' ? rawFlagDifficulty : undefined,
             )
             const generationMs = Date.now() - started
             const qCount = Array.isArray(result.questions)
@@ -199,43 +206,7 @@ function localApiPlugin(): Plugin {
         })()
       })
 
-      server.middlewares.use('/api/gen-progress', (req, res) => {
-        void (async () => {
-          try {
-            const url = new URL(req.url || '/', 'http://local')
-            const id = String(url.searchParams.get('id') ?? '').trim()
-            if (!isValidProgressId(id)) {
-              res.statusCode = 400
-              res.setHeader('Content-Type', 'application/json')
-              res.setHeader('Cache-Control', 'no-store')
-              res.end(JSON.stringify({ error: 'id invalide' }))
-              return
-            }
-            const prog = await getGenProgress(id)
-            res.statusCode = 200
-            res.setHeader('Content-Type', 'application/json')
-            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
-            res.end(
-              JSON.stringify({
-                done: prog?.done ?? 0,
-                total: prog?.total ?? 10,
-                engine: prog?.engine ?? null,
-                stage: prog?.stage ?? null,
-              }),
-            )
-          } catch (e) {
-            res.statusCode = 500
-            res.setHeader('Content-Type', 'application/json')
-            res.end(
-              JSON.stringify({
-                error: e instanceof Error ? e.message : 'Erreur serveur',
-              }),
-            )
-          }
-        })()
-      })
-
-      server.middlewares.use('/api/gen-eta', (req, res) => {
+      server.middlewares.use('/api/gen-status', (req, res) => {
         void (async () => {
           try {
             const url = new URL(req.url || '/', 'http://local')
@@ -271,7 +242,7 @@ function localApiPlugin(): Plugin {
                 return this
               },
             }
-            await genEtaHandler(fakeReq as never, fakeRes as never)
+            await genStatusHandler(fakeReq as never, fakeRes as never)
           } catch (e) {
             const message = e instanceof Error ? e.message : 'Erreur serveur'
             res.statusCode = 500
@@ -690,6 +661,110 @@ function localApiPlugin(): Plugin {
           }
         })()
       })
+
+      server.middlewares.use('/api/morpion', (req, res) => {
+        void (async () => {
+          try {
+            const url = new URL(req.url || '/', 'http://local')
+            const raw =
+              req.method === 'GET' || req.method === 'HEAD'
+                ? '{}'
+                : await readBody(req)
+            const body = JSON.parse(raw || '{}')
+            const fakeReq = {
+              method: req.method,
+              body,
+              query: Object.fromEntries(url.searchParams.entries()),
+            }
+            const fakeRes = {
+              statusCode: 200,
+              headers: {} as Record<string, string>,
+              setHeader(k: string, v: string) {
+                this.headers[k] = v
+              },
+              status(code: number) {
+                this.statusCode = code
+                return this
+              },
+              json(payload: unknown) {
+                res.statusCode = this.statusCode
+                for (const [k, v] of Object.entries(this.headers)) {
+                  res.setHeader(k, v)
+                }
+                if (!res.getHeader('Content-Type')) {
+                  res.setHeader('Content-Type', 'application/json')
+                }
+                res.end(JSON.stringify(payload))
+                return this
+              },
+              end() {
+                res.statusCode = this.statusCode
+                res.end()
+                return this
+              },
+            }
+            await morpionHandler(fakeReq as never, fakeRes as never)
+          } catch (e) {
+            const message = e instanceof Error ? e.message : 'Erreur serveur'
+            console.error('[local morpion]', message)
+            res.statusCode = 500
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ error: message }))
+          }
+        })()
+      })
+
+      server.middlewares.use('/api/pendu-words', (req, res) => {
+        void (async () => {
+          try {
+            const url = new URL(req.url || '/', 'http://local')
+            const raw =
+              req.method === 'GET' || req.method === 'HEAD'
+                ? '{}'
+                : await readBody(req)
+            const body = JSON.parse(raw || '{}')
+            const fakeReq = {
+              method: req.method,
+              body,
+              query: Object.fromEntries(url.searchParams.entries()),
+              headers: req.headers,
+            }
+            const fakeRes = {
+              statusCode: 200,
+              headers: {} as Record<string, string>,
+              setHeader(k: string, v: string) {
+                this.headers[k] = v
+              },
+              status(code: number) {
+                this.statusCode = code
+                return this
+              },
+              json(payload: unknown) {
+                res.statusCode = this.statusCode
+                for (const [k, v] of Object.entries(this.headers)) {
+                  res.setHeader(k, v)
+                }
+                if (!res.getHeader('Content-Type')) {
+                  res.setHeader('Content-Type', 'application/json')
+                }
+                res.end(JSON.stringify(payload))
+                return this
+              },
+              end() {
+                res.statusCode = this.statusCode
+                res.end()
+                return this
+              },
+            }
+            await penduWordsHandler(fakeReq as never, fakeRes as never)
+          } catch (e) {
+            const message = e instanceof Error ? e.message : 'Erreur serveur'
+            res.statusCode = 500
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ error: message }))
+          }
+        })()
+      })
     },
   }
 }
@@ -719,6 +794,7 @@ export default defineConfig(({ mode }) => {
   if (env.KV_REST_API_TOKEN)
     process.env.KV_REST_API_TOKEN = env.KV_REST_API_TOKEN
   if (env.KV_URL) process.env.KV_URL = env.KV_URL
+  if (env.REDIS_MAX_MB) process.env.REDIS_MAX_MB = env.REDIS_MAX_MB
   if (env.CALIB_STATS_SECRET)
     process.env.CALIB_STATS_SECRET = env.CALIB_STATS_SECRET
 

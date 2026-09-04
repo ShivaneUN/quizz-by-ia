@@ -9,8 +9,8 @@ export interface QuestionFeedbackPayload {
   kind: FeedbackKind
   questionId: string
   question: string
-  answers: [string, string, string, string]
-  correctIndex: 0 | 1 | 2 | 3
+  answers: string[]
+  correctIndex: number
   explanation?: string
   sourceType?: string
   theme?: string

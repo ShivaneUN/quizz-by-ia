@@ -5,12 +5,14 @@ const ARCADE_KEY = 'quizz:arcade:scores'
 export interface ArcadeScores {
   typingBest: number
   flappyBest: number
+  penduBest: number
   updatedAt: number
 }
 
 const EMPTY: ArcadeScores = {
   typingBest: 0,
   flappyBest: 0,
+  penduBest: 0,
   updatedAt: 0,
 }
 
@@ -22,6 +24,7 @@ export function loadArcadeScores(): ArcadeScores {
     return {
       typingBest: Math.max(0, Math.floor(Number(data.typingBest) || 0)),
       flappyBest: Math.max(0, Math.floor(Number(data.flappyBest) || 0)),
+      penduBest: Math.max(0, Math.floor(Number(data.penduBest) || 0)),
       updatedAt: Number(data.updatedAt) || 0,
     }
   } catch {
@@ -31,12 +34,17 @@ export function loadArcadeScores(): ArcadeScores {
 
 /** Enregistre un record si meilleur — ne touche pas aux banques IA. */
 export function recordArcadeBest(
-  game: 'typing' | 'flappy',
+  game: 'typing' | 'flappy' | 'pendu',
   score: number,
 ): ArcadeScores {
   const n = Math.max(0, Math.floor(score))
   const cur = loadArcadeScores()
-  const key = game === 'typing' ? 'typingBest' : 'flappyBest'
+  const key =
+    game === 'typing'
+      ? 'typingBest'
+      : game === 'flappy'
+        ? 'flappyBest'
+        : 'penduBest'
   if (n <= cur[key]) return cur
   const next: ArcadeScores = {
     ...cur,

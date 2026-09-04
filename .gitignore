@@ -27,8 +27,5 @@ dist-ssr
 *.sw?
 
 .vercel
-
-.env*
-
-.vercel
-.env*
+logs.txt
+scripts/reverify-results.json

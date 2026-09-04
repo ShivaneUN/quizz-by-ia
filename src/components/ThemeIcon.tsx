@@ -165,6 +165,46 @@ export function ThemeIcon({ id }: { id: string }) {
           <path fill="none" stroke={stroke} strokeWidth="2.5" d="M16 18h16M16 24h16M16 30h10" />
         </svg>
       )
+    case 'langues':
+      return (
+        <svg viewBox="0 0 48 48" aria-hidden>
+          <circle cx="24" cy="24" r="16" fill="none" stroke={stroke} strokeWidth="3" />
+          <path
+            fill="none"
+            stroke={stroke}
+            strokeWidth="2.5"
+            d="M8 24h32M24 8c-5 6-5 26 0 32M24 8c5 6 5 26 0 32"
+          />
+        </svg>
+      )
+    case 'drapeaux':
+      return (
+        <svg viewBox="0 0 48 48" aria-hidden>
+          <path
+            fill="none"
+            stroke={stroke}
+            strokeWidth="3"
+            strokeLinecap="round"
+            d="M10 8v32"
+          />
+          <path
+            fill={stroke}
+            d="M12 10h22l-4 7 4 7H12V10z"
+            opacity="0.9"
+          />
+        </svg>
+      )
+    case 'aleatoire':
+      return (
+        <svg viewBox="0 0 48 48" aria-hidden>
+          <rect x="8" y="8" width="32" height="32" rx="6" fill="none" stroke={stroke} strokeWidth="3" />
+          <circle cx="17" cy="17" r="2.5" fill={stroke} />
+          <circle cx="31" cy="17" r="2.5" fill={stroke} />
+          <circle cx="24" cy="24" r="2.5" fill={stroke} />
+          <circle cx="17" cy="31" r="2.5" fill={stroke} />
+          <circle cx="31" cy="31" r="2.5" fill={stroke} />
+        </svg>
+      )
     case 'custom':
       return (
         <svg viewBox="0 0 48 48" aria-hidden>

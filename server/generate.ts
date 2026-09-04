@@ -6,6 +6,8 @@
 import { fetchCommonsImageUrl } from './wikimedia.js'
 import { buildDeezerQuiz } from './deezerQuiz.js'
 import { construirePrompt } from './quizPromptFragments.js'
+import { resolveQuizScope } from './quizScope.js'
+import { buildFlagQuiz, isFlagTheme } from './flagQuiz.js'
 import {
   enginesWithKeys,
   listApiKeys,
@@ -59,14 +61,15 @@ export type GenerateSource =
   | 'deepseek'
   | 'openrouter'
   | 'deezer'
+  | 'flags'
   | 'mock'
   | 'bank'
 
 export interface GeneratedQuestion {
   id: string
   question: string
-  answers: [string, string, string, string]
-  correctIndex: 0 | 1 | 2 | 3
+  answers: string[]
+  correctIndex: number
   difficulty: Difficulty
   themeSlug: string
   createdAt: string
@@ -609,14 +612,19 @@ const SPOILER_STOPWORDS = new Set([
 ])
 
 function normalizeQuizText(s: string): string {
-  return s
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/['’]/g, ' ')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+  return (
+    s
+      .toLowerCase()
+      // Accents latins uniquement (é→e) ; autres écritures recomposées intactes
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .normalize('NFC')
+      .replace(/['’]/g, ' ')
+      // Lettres + chiffres + marques (voyelles khmer, harakat, etc.)
+      .replace(/[^\p{L}\p{N}\p{M}]+/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  )
 }
 
 function significantTokens(s: string): string[] {
@@ -743,7 +751,8 @@ export function buildPrompt(
 ): string {
   const { theme, sousTheme } = splitThemeParts(themeFull)
   const difficulte = DIFFICULTY_FR[difficulty]
-  const portee = SCOPE_FR[scope]
+  const effectiveScope = resolveQuizScope(themeFull, scope)
+  const portee = SCOPE_FR[effectiveScope]
   return construirePrompt({
     theme,
     sousTheme,
@@ -822,6 +831,118 @@ function normalizeForMatch(s: string): string {
     .trim()
 }
 
+/** Thème Langues (slug banque ou libellé). */
+function isLanguesThemeSlug(themeSlug: string): boolean {
+  const s = themeSlug
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+  return s.startsWith('langues') || s.includes('langues--') || /(^|--)langues(-|$)/.test(s)
+}
+
+/**
+ * Écriture hors latin de base (CJK, arabe, cyrillique, grec, hébreu, khmer…).
+ * Ces réponses doivent porter une transcription latine pour rester lisibles.
+ */
+function answerNeedsLatinTranscription(answer: string): boolean {
+  const t = answer.trim()
+  if (!t) return false
+  return /[^\u0000-\u024f\u1e00-\u1eff\s\d!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~«»…’‘“”–—]/.test(
+    t,
+  )
+}
+
+/** Transcription latine entre parenthèses (un ou plusieurs mots), ex. `你好 (ni hao)`. */
+function isLatinTranscriptionGloss(raw: string): boolean {
+  const t = raw.trim()
+  if (!t) return false
+  if (
+    !/^[A-Za-zĀāĒēĪīŌōŪūÂâÊêÎîÔôÛûÄäËëÏïÖöÜüŸÿ'\-\s]+$/.test(t)
+  ) {
+    return false
+  }
+  if (/[àâäéèêëïîôùûüçœæ]/i.test(t) && !/[āēīōū]/.test(t)) return false
+  const frWords = new Set([
+    'bonjour',
+    'bonsoir',
+    'salut',
+    'merci',
+    'oui',
+    'non',
+    'chat',
+    'chien',
+    'maison',
+    'eau',
+    'pain',
+    'homme',
+    'femme',
+    'amour',
+    'pardon',
+    'desole',
+    'bienvenue',
+    'matinal',
+    'aurevoir',
+  ])
+  const words = t
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .split(/\s+/)
+    .filter(Boolean)
+  if (words.some((w) => frWords.has(w))) return false
+  return true
+}
+
+function answerHasLatinTranscription(answer: string): boolean {
+  const groups = [...answer.matchAll(/\(([^)]+)\)/g)].map((m) =>
+    (m[1] ?? '').trim(),
+  )
+  if (groups.length !== 1) return false
+  return isLatinTranscriptionGloss(groups[0]!)
+}
+
+/** Sens FR spoiler dans une option (ex. `(bonjour)` ou 2e parenthèse). */
+function answerHasFrenchSpoilerGloss(
+  answer: string,
+  question: string,
+): boolean {
+  const groups = [...answer.matchAll(/\(([^)]+)\)/g)].map((m) =>
+    (m[1] ?? '').trim(),
+  )
+  if (groups.length >= 2) return true
+  if (groups.length !== 1) return false
+  const g = groups[0]!
+  // Transcription latine valide → pas un spoiler FR
+  if (isLatinTranscriptionGloss(g)) {
+    const nq = question
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[«»"'']/g, '')
+    const ng = g
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+    // Ex. (bonjour) classé FR via liste → déjà false isLatinTranscription
+    // Si la glose est citée telle quelle dans la question et courte → spoiler
+    if (
+      ng.length >= 3 &&
+      ng.length <= 12 &&
+      !ng.includes(' ') &&
+      (nq.includes(`«${ng}»`) || nq.includes(`"${ng}"`))
+    ) {
+      return true
+    }
+    return false
+  }
+  return true
+}
+
+/** Retire la glose finale `(…)` pour les contrôles anti-fuite / inversion. */
+function stripTrailingGloss(answer: string): string {
+  return answer.replace(/\s*\([^)]*\)\s*$/u, '').trim()
+}
+
 /** Mots vides français ignorés pour la comparaison de similarité de questions. */
 const FRENCH_STOPWORDS = new Set([
   'le','la','les','un','une','des','de','du','au','aux','et','ou','est','sont',
@@ -833,7 +954,7 @@ const FRENCH_STOPWORDS = new Set([
 
 /** Ensemble de mots-clés significatifs (≥3 lettres, hors mots vides) d'une question. */
 function questionKeywordSet(questionText: string): Set<string> {
-  const norm = normalizeForMatch(questionText).replace(/[^a-z0-9\s]/g, ' ')
+  const norm = normalizeForMatch(questionText).replace(/[^\p{L}\p{N}\s]/gu, ' ')
   const words = norm
     .split(/\s+/)
     .filter((w) => w.length >= 3 && !FRENCH_STOPWORDS.has(w))
@@ -1004,10 +1125,14 @@ function parseAndCap(
         ? normalizeImageQuestionText(String(raw.question))
         : String(raw.question).trim()
 
-    // Mode texte : écarte les Q où la réponse est déjà dans l’énoncé
+    // Mode texte : écarte les Q où la réponse est déjà dans l’énoncé.
+    // Langues : ignorer la glose FR `(chat)` sinon « Comment dit-on chat… ? » / « 猫 (chat) » = faux positif.
+    const leakAnswers = isLanguesThemeSlug(themeSlug)
+      ? answers.map(stripTrailingGloss)
+      : answers
     if (
       contentMode === 'standard' &&
-      questionLeaksAnswer(questionText, answers, correctIndex)
+      questionLeaksAnswer(questionText, leakAnswers, correctIndex)
     ) {
       reject('reponseDansEnonce')
       continue
@@ -1019,9 +1144,29 @@ function parseAndCap(
       continue
     }
 
-    // Quasi-doublon de question (même fait, reformulé) déjà accepté dans ce lot
+    // Langues : pas de sens FR dans les options ; écriture non latine → transcription latine
+    if (isLanguesThemeSlug(themeSlug)) {
+      if (answers.some((a) => answerHasFrenchSpoilerGloss(a, questionText))) {
+        reject('langueSpoilerFr')
+        continue
+      }
+      const missingRoma = answers.some(
+        (a) =>
+          answerNeedsLatinTranscription(a) && !answerHasLatinTranscription(a),
+      )
+      if (missingRoma) {
+        reject('langueSansTranscription')
+        continue
+      }
+    }
+
+    // Quasi-doublon de question (même fait, reformulé) déjà accepté dans ce lot.
+    // Langues : énoncés souvent du même moule (« Comment dit-on X… ») → ne pas massacrer le lot.
     const keywordSet = questionKeywordSet(questionText)
-    if (isNearDuplicateQuestion(keywordSet, acceptedKeywordSets)) {
+    if (
+      !isLanguesThemeSlug(themeSlug) &&
+      isNearDuplicateQuestion(keywordSet, acceptedKeywordSets)
+    ) {
       reject('quasiDoublonQuestion')
       continue
     }
@@ -1033,7 +1178,11 @@ function parseAndCap(
       reject('explicationTropCourte')
       continue
     }
-    if (explanationSuggestsMultipleCorrect(explanation)) {
+    // Langues : formulations du type « peut aussi se dire… » / synonymes fréquents
+    if (
+      !isLanguesThemeSlug(themeSlug) &&
+      explanationSuggestsMultipleCorrect(explanation)
+    ) {
       reject('plusieursReponsesPossibles')
       continue
     }
@@ -1047,8 +1196,12 @@ function parseAndCap(
       continue
     }
 
-    // Anti-hallucination : rejeter si le modèle nie le fait ou source trop vague
-    if (!isFactVerifiable(raw, sourceType)) {
+    // Anti-hallucination : rejeter si le modèle nie le fait ou source trop vague.
+    // Langues : traductions courantes + source dico → accepter même si fait_verifiable omis/false.
+    if (
+      !isFactVerifiable(raw, sourceType) &&
+      !(isLanguesThemeSlug(themeSlug) && !isVagueSource(sourceType))
+    ) {
       reject('faitNonVerifiable')
       continue
     }
@@ -1061,7 +1214,10 @@ function parseAndCap(
     }
 
     // Indice d'inversion bonne/mauvaise réponse (explication citant une mauvaise réponse)
-    if (possibleAnswerInversion(answers, correctIndex, explanation)) {
+    const inversionAnswers = isLanguesThemeSlug(themeSlug)
+      ? answers.map(stripTrailingGloss)
+      : answers
+    if (possibleAnswerInversion(inversionAnswers, correctIndex, explanation)) {
       reject('inversionProbable')
       continue
     }
@@ -1525,7 +1681,34 @@ export async function generateQuestions(
   /** Multi topup : garder la même IA qu’au lot précédent (sauf erreur). */
   stickyEngine?: RotateEngine,
   seedQuestions: GeneratedQuestion[] = [],
+  flagCount?: number,
+  flagDifficulty?: string,
 ): Promise<GenerateQuestionsResult> {
+  if (isFlagTheme(theme)) {
+    try {
+      const questions = buildFlagQuiz({
+        difficulty: flagDifficulty ?? difficulty ?? 'easy',
+        count: flagCount ?? 10,
+        themeSlug,
+      }) as GeneratedQuestion[]
+      if (questions.length < 1) {
+        return {
+          questions: [],
+          source: 'flags',
+          error: 'Impossible de constituer le quiz drapeaux.',
+        }
+      }
+      if (onProgress) await onProgress(questions.length, questions.length, 'flags', 'Drapeaux')
+      return { questions, source: 'flags' }
+    } catch (e) {
+      return {
+        questions: [],
+        source: 'flags',
+        error: e instanceof Error ? e.message : 'Erreur quiz drapeaux',
+      }
+    }
+  }
+
   const HARD_MS = 58_000
   const TARGET = 10
   /** Partagé avec Inner : lisible si le timeout gagne la race. */
@@ -1599,7 +1782,27 @@ export async function generateQuestionsWithPartialCache(
   onProgress?: GenProgressCb,
   allowPartial = false,
   stickyEngine?: RotateEngine,
+  flagCount?: number,
+  flagDifficulty?: string,
 ): Promise<GenerateQuestionsResult> {
+  if (isFlagTheme(theme)) {
+    return generateQuestions(
+      theme,
+      themeSlug,
+      mode,
+      difficulty,
+      scope,
+      provider,
+      contentMode,
+      excludeQuestions,
+      onProgress,
+      allowPartial,
+      stickyEngine,
+      [],
+      flagCount,
+      flagDifficulty,
+    )
+  }
   const tier: Difficulty =
     difficulty === 'medium' || difficulty === 'hard' ? difficulty : 'easy'
   const seed = (await getPartialQuestions(themeSlug, tier)) as GeneratedQuestion[]
@@ -1680,12 +1883,23 @@ async function generateQuestionsInner(
   const ingestRejected: Record<string, number> = {}
   let ingestAccepted = 0
 
+  function ingestKey(q: GeneratedQuestion): string {
+    // Deezer : dédup par piste — les énoncés se ressemblent (mêmes gabarits)
+    if (contentMode === 'audio') {
+      const trackId = String(q.deezerTrackId ?? '').trim()
+      if (trackId) return `dz:${trackId}`
+      const preview = String(q.previewUrl ?? '').trim()
+      if (preview) return `pv:${preview}`
+    }
+    return questionKey(q)
+  }
+
   function ingest(qs: GeneratedQuestion[]): void {
     for (const q of qs) {
       if (q.difficulty !== tier) continue
       if (contentMode === 'image' && !q.imageUrl && !q.imageSubject) continue
       if (contentMode === 'audio' && !q.previewUrl) continue
-      const key = questionKey(q)
+      const key = ingestKey(q)
       if (seen.has(key) || excluded.has(key)) {
         ingestRejected.doublonExact = (ingestRejected.doublonExact ?? 0) + 1
         continue
@@ -1698,19 +1912,26 @@ async function generateQuestionsInner(
         continue
       }
 
-      const keywordSet = questionKeywordSet(q.question)
-      if (isNearDuplicateQuestion(keywordSet, collectedKeywordSets)) {
-        ingestRejected.quasiDoublonCrossAppel =
-          (ingestRejected.quasiDoublonCrossAppel ?? 0) + 1
-        continue
+      // Anti-quasi-doublon = logique IA (même fait reformulé). Inutile / nocif pour Deezer.
+      if (contentMode !== 'audio') {
+        const keywordSet = questionKeywordSet(q.question)
+        if (isNearDuplicateQuestion(keywordSet, collectedKeywordSets)) {
+          ingestRejected.quasiDoublonCrossAppel =
+            (ingestRejected.quasiDoublonCrossAppel ?? 0) + 1
+          continue
+        }
+        collectedKeywordSets.push(keywordSet)
       }
 
       seen.add(key)
       excluded.add(key)
       collectedCorrectAnswers.add(correctAnswerNorm)
-      collectedKeywordSets.push(keywordSet)
       collected.push(q)
-      excludeLive.push(q.question)
+      excludeLive.push(
+        contentMode === 'audio' && q.deezerTrackId
+          ? String(q.deezerTrackId)
+          : q.question,
+      )
       ingestAccepted += 1
       if (collected.length >= TARGET) break
     }
@@ -1737,11 +1958,13 @@ async function generateQuestionsInner(
     }
   }
 
-  // Quiz musical Deezer — pas d’IA, API publique
+  // Quiz musical Deezer — parcours 100 % séparé (jamais d’appel IA)
   if (contentMode === 'audio') {
+    reportedEngine = 'deezer'
+    await report(collected.length, 'deezer', 'Tirage Deezer…')
     const missing = Math.max(0, TARGET - collected.length)
     if (missing === 0) {
-      await report(TARGET)
+      await report(TARGET, 'deezer', 'Terminé')
       return {
         questions: collected.slice(0, TARGET),
         source: 'deezer',
@@ -1756,7 +1979,7 @@ async function generateQuestionsInner(
       excludeQuestions: [
         ...excludeQuestions,
         ...collected.flatMap((q) =>
-          [q.question, q.deezerTrackId, q.previewUrl].filter(
+          [q.deezerTrackId, q.previewUrl, q.question].filter(
             (x): x is string => Boolean(x),
           ),
         ),
@@ -1792,7 +2015,7 @@ async function generateQuestionsInner(
         error: `Pas assez de questions musicales (${collected.length}/${TARGET}). Réessaie.`,
       }
     }
-    await report(TARGET)
+    await report(TARGET, 'deezer', 'Terminé')
     return {
       questions: collected.slice(0, TARGET),
       source: 'deezer',

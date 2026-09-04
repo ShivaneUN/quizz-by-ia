@@ -11,6 +11,16 @@ import {
 import { createEmptyTierAttempts, resolveTierOutcome } from './lib/progression'
 import { reportCalibHand } from './lib/calibTelemetry'
 import { bankSlug } from './lib/themeSlug'
+import { resolveQuizScope } from './lib/quizScope'
+import {
+  clampFlagCount,
+  generateFlagQuiz,
+  isFlagTheme,
+  loadFlagCountriesFromPublic,
+  flagDifficultyToQuestionDifficulty,
+  parseFlagDifficulty,
+  type FlagDifficulty,
+} from './lib/flagQuiz'
 import { matchesFreeMusicAnswer } from './lib/freeAnswer'
 import {
   answerRoom,
@@ -31,6 +41,7 @@ import {
   setRoomTimer,
   startRoom,
   runRoomGenerate,
+  penduRoomMove,
   reportTypingScore,
   cancelRoomGenerate,
   backRoomToLobby,
@@ -42,8 +53,26 @@ import {
   saveLastMultiRoom,
   saveMultiSession,
 } from './lib/multiSession'
+import {
+  leaveMorpionRoom,
+  moveMorpionCell,
+  pollMorpionRoom,
+  replayMorpionRoom,
+  type MorpionRoom,
+} from './lib/morpionApi'
+import {
+  clearMorpionSession,
+  loadMorpionSession,
+  saveMorpionSession,
+} from './lib/morpionSession'
+import { loadDisplayName, saveDisplayName } from './lib/displayName'
+import { recordArcadeBest } from './lib/arcadeStorage'
+import { isPenduMyTurn, SOLO_DUO_WORDS } from './lib/pendu'
+import { remainingPenduCount, takePenduWords } from './lib/penduFill'
 import { AnswerAudit } from './components/AnswerAudit'
 import { WaitMiniGames } from './components/WaitMiniGames'
+import { MorpionPlay } from './components/MorpionPlay'
+import { PenduPlay } from './components/PenduPlay'
 import {
   TypingScorePopup,
   type TypingScoreEntry,
@@ -58,7 +87,7 @@ import { MultiScoreboard } from './components/MultiScoreboard'
 import { ProgressBar } from './components/ProgressBar'
 import { QuizPlay } from './components/QuizPlay'
 import { Results } from './components/Results'
-import { ThemeSelect, type ThemeStartOptions } from './components/ThemeSelect'
+import { ThemeSelect, type PenduStartPayload, type ThemeStartOptions } from './components/ThemeSelect'
 import { TierResult } from './components/TierResult'
 import type { AuditEntry } from './types/audit'
 import type {
@@ -80,6 +109,8 @@ type Screen =
   | 'tier-result'
   | 'finished'
   | 'minigames'
+  | 'pendu'
+  | 'morpion-play'
   | 'multi-gate'
   | 'multi-theme'
   | 'multi-lobby'
@@ -103,6 +134,8 @@ type SoloGenArgs = {
   scope: QuizScope
   provider: AiProvider
   quizMode: QuizContentMode
+  flagCount?: number
+  flagDifficulty?: 'easy' | 'medium' | 'hard' | 'expert'
   from: 'home' | 'tier-result'
   unlocked?: Difficulty[]
 }
@@ -159,6 +192,10 @@ const initialSession = (): GameSession => ({
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>('home')
+  const [penduLaunch, setPenduLaunch] = useState<
+    (PenduStartPayload & { from: 'home' | 'multi-theme' }) | null
+  >(null)
+  const [penduFilling, setPenduFilling] = useState(false)
   const [session, setSession] = useState<GameSession>(initialSession)
   const [error, setError] = useState<string | null>(null)
   const [statusMsg, setStatusMsg] = useState<string | null>(null)
@@ -198,6 +235,16 @@ export default function App() {
   const [multiPlayerId, setMultiPlayerId] = useState<string | null>(null)
   const [multiRoom, setMultiRoom] = useState<MultiRoom | null>(null)
   const [multiBusy, setMultiBusy] = useState(false)
+  const [morpionName, setMorpionName] = useState('')
+  const [morpionPlayerId, setMorpionPlayerId] = useState<string | null>(null)
+  const [morpionRoom, setMorpionRoom] = useState<MorpionRoom | null>(null)
+  const [morpionBusy, setMorpionBusy] = useState(false)
+  const [morpionError, setMorpionError] = useState<string | null>(null)
+  const morpionSeatRef = useRef({ code: '', playerId: '' })
+  morpionSeatRef.current = {
+    code: morpionRoom?.code ?? '',
+    playerId: morpionPlayerId ?? '',
+  }
   /** Popup scores duel de frappe (fin de génération) */
   const [typingBoard, setTypingBoard] = useState<{
     kind: 'solo' | 'multi'
@@ -264,6 +311,7 @@ export default function App() {
         setMultiName(saved.playerName)
         setMultiPlayerId(saved.playerId)
         setMultiRoom(room)
+        saveDisplayName(saved.playerName)
         setScreen(multiScreenForStatus(room.status))
         saveMultiSession({
           code: saved.code,
@@ -278,6 +326,88 @@ export default function App() {
       cancelled = true
     }
   }, [])
+
+  // Reconnexion morpion après refresh
+  useEffect(() => {
+    const saved = loadMorpionSession()
+    if (!saved) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { room } = await pollMorpionRoom(saved.code, saved.playerId)
+        if (cancelled) return
+        if (!room.players.some((p) => p.id === saved.playerId)) {
+          clearMorpionSession()
+          return
+        }
+        setMorpionName(saved.playerName)
+        setMorpionPlayerId(saved.playerId)
+        setMorpionRoom(room)
+        saveDisplayName(saved.playerName)
+        saveMorpionSession({
+          code: saved.code,
+          playerId: saved.playerId,
+          playerName: saved.playerName,
+        })
+        if (!loadMultiSession()) setScreen('morpion-play')
+      } catch {
+        if (!cancelled) clearMorpionSession()
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Poll salle morpion (même hors écran — Accueil ne doit pas expirer le lastSeen)
+  useEffect(() => {
+    if (!morpionRoom || !morpionPlayerId) return
+    let cancelled = false
+    const tick = async () => {
+      try {
+        const { room } = await pollMorpionRoom(
+          morpionRoom.code,
+          morpionPlayerId,
+        )
+        if (cancelled) return
+        if (!room.players.some((p) => p.id === morpionPlayerId)) {
+          clearMorpionSession()
+          setMorpionName('')
+          setMorpionPlayerId(null)
+          setMorpionRoom(null)
+          if (screenRef.current === 'morpion-play') {
+            setMorpionError('Tu as quitté la salle')
+            setScreen('minigames')
+          }
+          return
+        }
+        setMorpionRoom((prev) => {
+          if (!prev) return room
+          if ((room.updatedAt ?? 0) >= (prev.updatedAt ?? 0)) return room
+          return prev
+        })
+      } catch (e) {
+        if (cancelled) return
+        const msg = e instanceof Error ? e.message : ''
+        if (msg.toLowerCase().includes('introuvable')) {
+          clearMorpionSession()
+          setMorpionName('')
+          setMorpionPlayerId(null)
+          setMorpionRoom(null)
+          if (screenRef.current === 'morpion-play') {
+            setMorpionError('La salle a été fermée')
+            setScreen('minigames')
+          }
+        }
+      }
+    }
+    const id = window.setInterval(tick, 500)
+    void tick()
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [morpionRoom?.code, morpionPlayerId])
 
   const ensureHand = useCallback(
     async (
@@ -511,6 +641,21 @@ export default function App() {
     const prev = multiPrevStatusRef.current
     multiPrevStatusRef.current = status
     if (!multiRoom || !multiPlayerId) return
+    if (prev === 'generating' && status !== 'generating' && status != null) {
+      const seat = morpionSeatRef.current
+      if (seat.code && seat.playerId) {
+        void leaveMorpionRoom({
+          code: seat.code,
+          playerId: seat.playerId,
+        }).catch(() => {
+          /* salle déjà fermée */
+        })
+        clearMorpionSession()
+        setMorpionName('')
+        setMorpionPlayerId(null)
+        setMorpionRoom(null)
+      }
+    }
     if (prev === 'generating' && status === 'playing') {
       // Flush le dernier score local avant d’afficher le classement
       if (typingReportTimer.current) {
@@ -576,6 +721,25 @@ export default function App() {
     multiRoom?.timerEnabled,
     multiRoom?.roundPhase,
   ])
+
+  const prevScreenRef = useRef(screen)
+  useEffect(() => {
+    const prev = prevScreenRef.current
+    prevScreenRef.current = screen
+    if (prev !== 'loading' || screen === 'loading') return
+    const seat = morpionSeatRef.current
+    if (!seat.code || !seat.playerId) return
+    void leaveMorpionRoom({
+      code: seat.code,
+      playerId: seat.playerId,
+    }).catch(() => {
+      /* déjà fermée */
+    })
+    clearMorpionSession()
+    setMorpionName('')
+    setMorpionPlayerId(null)
+    setMorpionRoom(null)
+  }, [screen])
 
   // Rafraîchit le classement multi pendant que le popup est ouvert
   useEffect(() => {
@@ -702,9 +866,46 @@ export default function App() {
     soloGenArgsRef.current = args
     setError(null)
     setGenQuestionsDone(0)
-    setGenAiSource(null)
+    setGenAiSource(
+      args.quizMode === 'audio'
+        ? 'deezer'
+        : isFlagTheme(args.theme)
+          ? 'flags'
+          : null,
+    )
     soloCancelRef.current = false
     soloGenAbortRef.current?.abort()
+
+    if (isFlagTheme(args.theme)) {
+      setScreen('loading')
+      setStatusMsg('Préparation des drapeaux…')
+      soloTypingScoreRef.current = 0
+      try {
+        const countries = await loadFlagCountriesFromPublic()
+        const flagDiff = parseFlagDifficulty(args.flagDifficulty)
+        const count = clampFlagCount(flagDiff, args.flagCount ?? 10)
+        const hand = generateFlagQuiz(countries, {
+          difficulty: flagDiff,
+          count,
+          themeSlug: args.themeSlug,
+        })
+        if (soloCancelRef.current) return
+        if (hand.length < count) {
+          failSoloGenerate(
+            `Impossible de constituer ${count} questions drapeaux (${hand.length}/${count}).`,
+          )
+          return
+        }
+        completeSoloHand(hand, undefined, args)
+      } catch (e) {
+        if (soloCancelRef.current) return
+        failSoloGenerate(
+          e instanceof Error ? e.message : 'Erreur quiz drapeaux',
+        )
+      }
+      return
+    }
+
     const ac = new AbortController()
     soloGenAbortRef.current = ac
     const genTimeout = armSoloGenTimeout(ac)
@@ -718,7 +919,7 @@ export default function App() {
         args.difficulty,
         args.scope,
         args.provider,
-        args.quizMode,
+        args.quizMode === 'pendu' ? 'standard' : args.quizMode,
         ac.signal,
       )
       if (soloCancelRef.current) return
@@ -778,7 +979,9 @@ export default function App() {
     setError(null)
     setStatusMsg(null)
 
-    const themeSlug = bankSlug(theme, scope, options.quizMode)
+    const effectiveScope =
+      options.quizMode === 'audio' ? scope : resolveQuizScope(theme, scope)
+    const themeSlug = bankSlug(theme, effectiveScope, options.quizMode)
     const playMode = options.gameMode === 'free' ? 'manual' : 'progression'
     const startDiff: Difficulty =
       playMode === 'manual' ? options.difficulty : 'easy'
@@ -786,6 +989,12 @@ export default function App() {
       playMode === 'manual' ? [...DIFFICULTIES] : ['easy']
     const aiProvider = options.aiProvider ?? 'auto'
     const quizMode = options.quizMode === 'audio' ? 'audio' : 'standard'
+    const flagDifficulty = isFlagTheme(theme)
+      ? parseFlagDifficulty(options.flagDifficulty)
+      : undefined
+    const flagCount = isFlagTheme(theme)
+      ? clampFlagCount(flagDifficulty ?? 'easy', options.flagCount ?? 10)
+      : undefined
 
     const attempts = createEmptyTierAttempts()
     if (playMode === 'manual') {
@@ -802,7 +1011,7 @@ export default function App() {
       ...initialSession(),
       theme,
       themeSlug,
-      scope,
+      scope: effectiveScope,
       playerName,
       playMode,
       timerEnabled: options.timerEnabled,
@@ -810,6 +1019,8 @@ export default function App() {
         options.quizMode === 'audio' ? Boolean(options.audioAutoplay) : false,
       aiProvider,
       quizMode,
+      flagCount,
+      flagDifficulty,
       currentDifficulty: startDiff,
       unlocked,
       tierAttempts: attempts,
@@ -817,17 +1028,23 @@ export default function App() {
     }
     setSession(base)
     setStatusMsg(
-      playMode === 'progression'
-        ? 'Préparation du palier Facile (10 questions)…'
-        : `Préparation du niveau ${startDiff === 'easy' ? 'Facile' : startDiff === 'medium' ? 'Moyen' : 'Difficile'}…`,
+      quizMode === 'audio'
+        ? 'Tirage des extraits Deezer…'
+        : isFlagTheme(theme)
+          ? `Préparation de ${flagCount ?? 10} drapeaux…`
+          : playMode === 'progression'
+            ? 'Préparation du palier Facile (10 questions)…'
+            : `Préparation du niveau ${startDiff === 'easy' ? 'Facile' : startDiff === 'medium' ? 'Moyen' : 'Difficile'}…`,
     )
     await generateSoloHand({
       theme,
       themeSlug,
       difficulty: startDiff,
-      scope,
+      scope: effectiveScope,
       provider: aiProvider,
       quizMode,
+      flagCount,
+      flagDifficulty,
       from: 'home',
       unlocked,
     })
@@ -1053,6 +1270,69 @@ export default function App() {
     setScreen('home')
   }
 
+  async function replayFlagsQuiz(input: {
+    flagDifficulty: FlagDifficulty
+    flagCount: number
+  }) {
+    if (!isFlagTheme(session.theme)) return
+
+    const theme = session.theme
+    const themeSlug = session.themeSlug
+    const scope = session.scope
+    const provider = session.aiProvider ?? 'auto'
+    const quizMode = session.quizMode ?? 'standard'
+
+    const nextFlagDifficulty = input.flagDifficulty
+    const nextFlagCount = clampFlagCount(nextFlagDifficulty, input.flagCount)
+    const nextDifficulty: Difficulty = flagDifficultyToQuestionDifficulty(
+      nextFlagDifficulty,
+    )
+
+    const attempts = createEmptyTierAttempts()
+    for (const d of DIFFICULTIES) {
+      attempts[d] = {
+        correct: 0,
+        answered: 0,
+        status: d === nextDifficulty ? 'active' : 'locked',
+      }
+    }
+
+    setError(null)
+    setTierSnapshot(null)
+    setAudit([])
+    setSelectedIndex(null)
+    setPendingScored(false)
+    setStatusMsg(null)
+
+    // Important : `generateSoloHand()` ne remet pas `totalScore` à zéro.
+    // On le fait ici pour que "Rejouer" redémarre une manche propre.
+    setSession((s) => ({
+      ...s,
+      status: 'loading',
+      totalScore: 0,
+      currentDifficulty: nextDifficulty,
+      unlocked: [...DIFFICULTIES],
+      flagDifficulty: nextFlagDifficulty,
+      flagCount: nextFlagCount,
+      tierAttempts: attempts,
+      currentHand: [],
+      handIndex: 0,
+    }))
+
+    await generateSoloHand({
+      theme,
+      themeSlug,
+      difficulty: nextDifficulty,
+      scope,
+      provider,
+      quizMode,
+      flagDifficulty: nextFlagDifficulty,
+      flagCount: nextFlagCount,
+      from: 'home',
+      unlocked: [...DIFFICULTIES],
+    })
+  }
+
   /** Accueil : reset solo uniquement — ne quitte JAMAIS la salle multi. */
   function goHomeKeepRoom() {
     soloCancelRef.current = true
@@ -1066,6 +1346,7 @@ export default function App() {
     setError(null)
     setStatusMsg(null)
     setTypingBoard(null)
+    setPenduLaunch(null)
     setScreen('home')
   }
 
@@ -1135,9 +1416,95 @@ export default function App() {
     }
   }
 
+  function handleMorpionEnter(payload: {
+    room: MorpionRoom
+    playerId: string
+    playerName: string
+  }) {
+    setMorpionError(null)
+    setMorpionName(payload.playerName)
+    setMorpionPlayerId(payload.playerId)
+    setMorpionRoom(payload.room)
+    saveDisplayName(payload.playerName)
+    saveMorpionSession({
+      code: payload.room.code,
+      playerId: payload.playerId,
+      playerName: payload.playerName,
+    })
+    const embed =
+      screenRef.current === 'multi-lobby' || screenRef.current === 'loading'
+    if (!embed) setScreen('morpion-play')
+  }
+
+  function resumeMorpionGame() {
+    if (!morpionRoom || !morpionPlayerId) return
+    setMorpionError(null)
+    setScreen('morpion-play')
+  }
+
+  async function handleMorpionMove(cell: number) {
+    if (!morpionRoom || !morpionPlayerId) return
+    setMorpionBusy(true)
+    setMorpionError(null)
+    try {
+      const { room } = await moveMorpionCell({
+        code: morpionRoom.code,
+        playerId: morpionPlayerId,
+        cell,
+      })
+      setMorpionRoom(room)
+    } catch (e) {
+      setMorpionError(e instanceof Error ? e.message : 'Erreur')
+    } finally {
+      setMorpionBusy(false)
+    }
+  }
+
+  async function handleMorpionReplay() {
+    if (!morpionRoom || !morpionPlayerId) return
+    setMorpionBusy(true)
+    setMorpionError(null)
+    try {
+      const { room } = await replayMorpionRoom({
+        code: morpionRoom.code,
+        playerId: morpionPlayerId,
+      })
+      setMorpionRoom(room)
+    } catch (e) {
+      setMorpionError(e instanceof Error ? e.message : 'Erreur')
+    } finally {
+      setMorpionBusy(false)
+    }
+  }
+
+  async function abandonMorpionSeat() {
+    const code = morpionRoom?.code || morpionSeatRef.current.code
+    const pid = morpionPlayerId || morpionSeatRef.current.playerId
+    if (code && pid) {
+      try {
+        await leaveMorpionRoom({ code, playerId: pid })
+      } catch {
+        /* déjà fermée */
+      }
+    }
+    clearMorpionSession()
+    setMorpionName('')
+    setMorpionPlayerId(null)
+    setMorpionRoom(null)
+    setMorpionBusy(false)
+    setMorpionError(null)
+  }
+
+  async function handleMorpionLeave() {
+    const fromHub = screenRef.current === 'morpion-play'
+    await abandonMorpionSeat()
+    if (fromHub) setScreen('minigames')
+  }
+
   // —— Multi handlers ——
   function handleMultiCreateName(playerName: string) {
     setMultiName(playerName)
+    saveDisplayName(playerName)
     setError(null)
     setScreen('multi-theme')
   }
@@ -1150,6 +1517,7 @@ export default function App() {
       setMultiName(playerName)
       setMultiPlayerId(res.playerId!)
       setMultiRoom(res.room)
+      saveDisplayName(playerName)
       saveMultiSession({
         code: res.room.code,
         playerId: res.playerId!,
@@ -1177,6 +1545,9 @@ export default function App() {
     setMultiBusy(true)
     setError(null)
 
+    const effectiveScope =
+      options.quizMode === 'audio' ? scope : resolveQuizScope(theme, scope)
+
     // Changement de thème dans une salle existante (garde les joueurs)
     if (multiRoom && multiPlayerId) {
       setStatusMsg('Mise à jour du thème…')
@@ -1185,38 +1556,53 @@ export default function App() {
           code: multiRoom.code,
           playerId: multiPlayerId,
           theme,
-          scope,
+          scope: effectiveScope,
           aiProvider: options.aiProvider,
-          quizMode: options.quizMode === 'audio' ? 'audio' : 'standard',
+          quizMode:
+            options.quizMode === 'pendu'
+              ? 'pendu'
+              : options.quizMode === 'audio'
+                ? 'audio'
+                : 'standard',
+          penduVariant: options.penduVariant,
+          penduWordSource: options.penduWordSource,
+          difficulty: options.difficulty,
           audioAutoplay:
             options.quizMode === 'audio'
               ? Boolean(options.audioAutoplay)
               : false,
+          flagCount: options.flagCount,
+          flagDifficulty: options.flagDifficulty,
         })
         setMultiRoom(res.room)
-        const mode = options.gameMode
-        const withMode = await setRoomPlayMode({
-          code: res.room.code,
-          playerId: multiPlayerId,
-          playMode: mode,
-        })
-        setMultiRoom(withMode.room)
-        const withTimer = await setRoomTimer({
-          code: withMode.room.code,
-          playerId: multiPlayerId,
-          timerEnabled: options.timerEnabled,
-        })
-        setMultiRoom(withTimer.room)
-        if (mode === 'free') {
-          const withDiff = await setRoomDifficulty({
-            code: withTimer.room.code,
+        if (options.quizMode === 'pendu') {
+          setStatusMsg(null)
+          setScreen('multi-lobby')
+        } else {
+          const mode = options.gameMode
+          const withMode = await setRoomPlayMode({
+            code: res.room.code,
             playerId: multiPlayerId,
-            difficulty: options.difficulty,
+            playMode: mode,
           })
-          setMultiRoom(withDiff.room)
+          setMultiRoom(withMode.room)
+          const withTimer = await setRoomTimer({
+            code: withMode.room.code,
+            playerId: multiPlayerId,
+            timerEnabled: options.timerEnabled,
+          })
+          setMultiRoom(withTimer.room)
+          if (mode === 'free') {
+            const withDiff = await setRoomDifficulty({
+              code: withTimer.room.code,
+              playerId: multiPlayerId,
+              difficulty: options.difficulty,
+            })
+            setMultiRoom(withDiff.room)
+          }
+          setStatusMsg(null)
+          setScreen('multi-lobby')
         }
-        setStatusMsg(null)
-        setScreen('multi-lobby')
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Erreur')
       } finally {
@@ -1235,16 +1621,25 @@ export default function App() {
       const res = await createRoom({
         playerName: multiName.trim(),
         theme,
-        scope,
+        scope: effectiveScope,
         timerEnabled: options.timerEnabled,
         playMode: options.gameMode,
         difficulty: options.difficulty,
         aiProvider: options.aiProvider,
-        quizMode: options.quizMode === 'audio' ? 'audio' : 'standard',
+        quizMode:
+          options.quizMode === 'pendu'
+            ? 'pendu'
+            : options.quizMode === 'audio'
+              ? 'audio'
+              : 'standard',
+        penduVariant: options.penduVariant,
+        penduWordSource: options.penduWordSource,
         audioAutoplay:
           options.quizMode === 'audio'
             ? Boolean(options.audioAutoplay)
             : false,
+        flagCount: options.flagCount,
+        flagDifficulty: options.flagDifficulty,
       })
       setMultiPlayerId(res.playerId!)
       setMultiRoom(res.room)
@@ -1290,9 +1685,32 @@ export default function App() {
     if (!multiRoom || !multiPlayerId) return
     const code = multiRoom.code
     const playerId = multiPlayerId
+
+    if (multiRoom.quizMode === 'pendu') {
+      setMultiBusy(true)
+      setError(null)
+      setStatusMsg('Lancement du pendu…')
+      try {
+        const started = await startRoom({ code, playerId })
+        setMultiRoom(started.room)
+        setStatusMsg(null)
+        setScreen(multiScreenForStatus(started.room.status))
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Erreur')
+        setScreen('multi-lobby')
+      } finally {
+        setMultiBusy(false)
+      }
+      return
+    }
+
     setMultiBusy(true)
     setError(null)
-    setStatusMsg('Génération des questions…')
+    setStatusMsg(
+      multiRoom.quizMode === 'audio'
+        ? 'Tirage des extraits Deezer…'
+        : 'Génération des questions…',
+    )
     setAudit([])
     multiAuditKeysRef.current = new Set()
     // Même flux que le lancement initial : tout le monde voit « generating » via le poll
@@ -1525,6 +1943,28 @@ export default function App() {
     }
   }
 
+  async function handlePenduMove(input: {
+    kind: 'letter' | 'hintEliminate' | 'hintReveal' | 'continue'
+    letter?: string
+  }) {
+    if (!multiRoom || !multiPlayerId) return
+    setMultiBusy(true)
+    setError(null)
+    try {
+      const res = await penduRoomMove({
+        code: multiRoom.code,
+        playerId: multiPlayerId,
+        ...input,
+      })
+      setMultiRoom(res.room)
+      setScreen(multiScreenForStatus(res.room.status))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erreur')
+    } finally {
+      setMultiBusy(false)
+    }
+  }
+
   async function handleMultiStart() {
     await runSharedMultiStart()
   }
@@ -1737,7 +2177,7 @@ export default function App() {
 
   return (
     <div
-      className={`app${isHomeLike ? ' app--home' : ''}${screen === 'minigames' ? ' app--center' : ''}`}
+      className={`app${isHomeLike ? ' app--home' : ''}${screen === 'minigames' || screen === 'pendu' || screen === 'morpion-play' ? ' app--center' : ''}`}
     >
       <div className="app__atmosphere" aria-hidden />
       {typingBoard && (
@@ -1750,11 +2190,14 @@ export default function App() {
       {(() => {
         const chatId = multiPlayerId ?? getOrCreatePlayerId()
         const preferred =
-          multiName.trim().length >= 2
-            ? multiName.trim()
-            : session.playerName.trim().length >= 2
-              ? session.playerName.trim()
-              : ''
+          [
+            multiName,
+            morpionName,
+            session.playerName,
+            loadDisplayName(),
+          ]
+            .map((s) => s.trim())
+            .find((s) => s.length >= 2) ?? ''
         const inRoom = Boolean(multiRoom && multiPlayerId)
         return (
           <MultiChat
@@ -1809,12 +2252,60 @@ export default function App() {
           />
         ) : null}
 
-        <AdminPanel hideGear={screen === 'home'} />
+        <AdminPanel hideGear />
 
         {screen === 'minigames' && (
           <div className="minigames-hub">
-            <WaitMiniGames freePlay mode="solo" />
-        </div>
+            <WaitMiniGames
+              freePlay
+              mode="solo"
+              onMorpionEnter={handleMorpionEnter}
+              morpionResume={
+                morpionRoom && morpionPlayerId
+                  ? {
+                      room: morpionRoom,
+                      playerId: morpionPlayerId,
+                      playerName: morpionName,
+                    }
+                  : null
+              }
+              onMorpionResume={resumeMorpionGame}
+            />
+          </div>
+        )}
+
+        {screen === 'morpion-play' && morpionRoom && morpionPlayerId && (
+          <MorpionPlay
+            room={morpionRoom}
+            playerId={morpionPlayerId}
+            busy={morpionBusy}
+            error={morpionError}
+            onMove={(cell) => void handleMorpionMove(cell)}
+            onReplay={() => void handleMorpionReplay()}
+            onLeave={() => void handleMorpionLeave()}
+          />
+        )}
+
+        {screen === 'pendu' && penduLaunch && (
+          <div className="minigames-hub pendu-hub">
+            <PenduPlay
+              key={`${penduLaunch.mode}-${penduLaunch.difficulty ?? 'medium'}-${(penduLaunch.words ?? []).join('|')}-${(penduLaunch.names ?? []).join('|')}`}
+              startMode={penduLaunch.mode}
+              startNames={penduLaunch.names}
+              startDifficulty={penduLaunch.difficulty ?? 'medium'}
+              startWords={penduLaunch.words}
+              startWordSource={penduLaunch.wordSource ?? 'bank'}
+              onScoreChange={(s) => {
+                recordArcadeBest('pendu', s)
+              }}
+              onExit={() => {
+                setPenduLaunch(null)
+                setScreen(
+                  penduLaunch.from === 'multi-theme' ? 'multi-theme' : 'home',
+                )
+              }}
+            />
+          </div>
         )}
 
         {screen === 'home' && (
@@ -1822,7 +2313,7 @@ export default function App() {
             <ThemeSelect
               onStart={handleStart}
               variant="solo"
-              busy={false}
+              busy={penduFilling}
               error={error}
               soloLocked={Boolean(multiRoom && multiPlayerId)}
               soloLockHint={
@@ -1843,6 +2334,45 @@ export default function App() {
                   onReturnToRoom={returnToActiveRoom}
                 />
               }
+              onPendu={(payload) => {
+                void (async () => {
+                  setError(null)
+                  const difficulty = payload.difficulty ?? 'medium'
+                  const wordSource = payload.wordSource ?? 'bank'
+                  const need =
+                    payload.mode === 'multi' ? 1 : SOLO_DUO_WORDS
+                  const mustFill =
+                    wordSource === 'ai' &&
+                    remainingPenduCount(difficulty) < need
+                  if (mustFill) setPenduFilling(true)
+                  try {
+                    const words = await takePenduWords(
+                      need,
+                      difficulty,
+                      payload.mode === 'duo'
+                        ? 'duo'
+                        : payload.mode === 'multi'
+                          ? 'multi'
+                          : 'solo',
+                      wordSource,
+                    )
+                    setPenduLaunch({
+                      ...payload,
+                      difficulty,
+                      wordSource,
+                      words,
+                      from: 'home',
+                    })
+                    setScreen('pendu')
+                  } catch (e) {
+                    setError(
+                      e instanceof Error ? e.message : 'Pendu indisponible',
+                    )
+                  } finally {
+                    setPenduFilling(false)
+                  }
+                })()
+              }}
             />
           </>
         )}
@@ -1868,6 +2398,7 @@ export default function App() {
             backLabel={
               multiRoom ? '← Retour à la salle' : '← Retour'
             }
+            playerCount={multiRoom?.players.length ?? 1}
           />
         )}
 
@@ -1890,6 +2421,22 @@ export default function App() {
               questionsDone={genQuestionsDone}
               questionsTotal={10}
               aiSource={genAiSource}
+              onMorpionEnter={handleMorpionEnter}
+              morpionResume={
+                morpionRoom && morpionPlayerId
+                  ? {
+                      room: morpionRoom,
+                      playerId: morpionPlayerId,
+                      playerName: morpionName || session.playerName,
+                    }
+                  : null
+              }
+              onMorpionMove={(cell) => void handleMorpionMove(cell)}
+              onMorpionReplay={() => void handleMorpionReplay()}
+              onMorpionLeave={() => void abandonMorpionSeat()}
+              morpionBusy={morpionBusy}
+              morpionError={morpionError}
+              morpionDefaultName={session.playerName || morpionName}
             />
             {error ? (
               <>
@@ -1970,6 +2517,16 @@ export default function App() {
                 setSession((s) => ({ ...s, status: 'finished' }))
                 setScreen('finished')
               }}
+              flags={
+                isFlagTheme(session.theme)
+                  ? {
+                      flagDifficulty: session.flagDifficulty ?? 'easy',
+                      flagCount: session.flagCount ?? 10,
+                      onPickFlags: ({ flagDifficulty, flagCount }) =>
+                        void replayFlagsQuiz({ flagDifficulty, flagCount }),
+                    }
+                  : undefined
+              }
             />
             <AnswerAudit
               entries={audit}
@@ -1987,6 +2544,16 @@ export default function App() {
             totalScore={session.totalScore}
             tierAttempts={session.tierAttempts}
             onRestart={resetAll}
+            flags={
+              isFlagTheme(session.theme)
+                ? {
+                    flagDifficulty: session.flagDifficulty ?? 'easy',
+                    flagCount: session.flagCount ?? 10,
+                    onReplay: ({ flagDifficulty, flagCount }) =>
+                      void replayFlagsQuiz({ flagDifficulty, flagCount }),
+                  }
+                : undefined
+            }
           />
         )}
 
@@ -2008,11 +2575,53 @@ export default function App() {
             onChangeTheme={() => handleMultiChangeTheme('lobby')}
             onCancelGenerate={() => void handleMultiCancelGenerate()}
             onTypingScore={handleMultiTypingScore}
+            onMorpionEnter={handleMorpionEnter}
+            morpionResume={
+              morpionRoom && morpionPlayerId
+                ? {
+                    room: morpionRoom,
+                    playerId: morpionPlayerId,
+                    playerName: morpionName || multiName,
+                  }
+                : null
+            }
+            onMorpionMove={(cell) => void handleMorpionMove(cell)}
+            onMorpionReplay={() => void handleMorpionReplay()}
+            onMorpionLeave={() => void abandonMorpionSeat()}
+            morpionBusy={morpionBusy}
+            morpionError={morpionError}
+            morpionDefaultName={multiName || morpionName}
           />
         )}
 
         {screen === 'multi-play' && multiRoom && multiPlayerId && (
           <>
+            {multiRoom.quizMode === 'pendu' && multiRoom.penduGame ? (
+              <PenduPlay
+                remote={{
+                  game: multiRoom.penduGame,
+                  myId: multiPlayerId,
+                  myName: multiName,
+                  myTurn: isPenduMyTurn(multiRoom.penduGame, multiPlayerId),
+                  busy: multiBusy,
+                  onLetter: (letter) =>
+                    void handlePenduMove({ kind: 'letter', letter }),
+                  onHintEliminate: () =>
+                    void handlePenduMove({ kind: 'hintEliminate' }),
+                  onHintReveal: () =>
+                    void handlePenduMove({ kind: 'hintReveal' }),
+                  onContinue: () => void handlePenduMove({ kind: 'continue' }),
+                }}
+                onExit={() => {
+                  if (multiPlayerId === multiRoom.hostId) {
+                    void handleMultiBackToLobby()
+                  } else {
+                    void handleMultiLeave()
+                  }
+                }}
+              />
+            ) : (
+              <>
             {multiRoom.playMode === 'progression' ? (
               <ProgressBar
                 current={
@@ -2043,6 +2652,8 @@ export default function App() {
               difficulty={multiRoom.difficulty}
               mode="multi"
             />
+              </>
+            )}
           </>
         )}
 
@@ -2061,6 +2672,7 @@ export default function App() {
               onLeave={() => void handleMultiLeave()}
               onKick={(id) => void handleMultiKick(id)}
             />
+            {multiRoom.quizMode !== 'pendu' && (
             <AnswerAudit
               entries={audit}
               compact={false}
@@ -2068,6 +2680,7 @@ export default function App() {
               difficulty={multiRoom.difficulty}
               mode="multi"
             />
+            )}
           </>
         )}
 

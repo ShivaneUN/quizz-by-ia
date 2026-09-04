@@ -52,7 +52,7 @@ export async function resolveEstimateSec(
 ): Promise<number> {
   const local = getLocalEstimateSec(kind)
   try {
-    const res = await fetch(`/api/gen-eta?kind=${kind}`)
+    const res = await fetch(`/api/gen-status?kind=${kind}`)
     if (!res.ok) return local
     const data = (await res.json()) as {
       estimateSec?: number

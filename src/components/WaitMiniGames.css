@@ -209,6 +209,10 @@
   border-color: color-mix(in srgb, #2ec4a8 50%, transparent);
 }
 
+.wait-minis__pick--morpion {
+  border-color: color-mix(in srgb, #f0c14b 45%, transparent);
+}
+
 .wait-minis__pick-name {
   font-family: var(--font-display);
   font-size: 1.25rem;

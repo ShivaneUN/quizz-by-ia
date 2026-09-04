@@ -43,3 +43,55 @@
   border: 1px solid color-mix(in srgb, var(--teal) 25%, transparent);
   border-radius: 12px;
 }
+
+.results__flags {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.results__flags-title {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.results__flags-section {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.results__flags-section--count {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0.4rem;
+  justify-items: center;
+}
+
+.results__chip {
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--teal) 35%, transparent);
+  background: var(--paper-elevated);
+  color: var(--ink);
+  padding: 0.35rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.results__chip--count {
+  min-width: 2.2rem;
+}
+
+.results__chip.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 20%, var(--paper-elevated));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.results__flags-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}

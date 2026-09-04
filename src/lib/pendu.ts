@@ -141,7 +141,7 @@ function makePlayers(input: Array<string | PenduSeat>): PenduPlayer[] {
   const slice = seats.slice(0, n)
   while (slice.length < n) slice.push({ name: '' })
   return slice.map((s, i) => ({
-    id: s.id,
+    id: s.id?.trim() || `seat-${i}`,
     name: s.name.trim() || defaultPlayerName(i),
     strokes: 0,
     points: 0,
@@ -246,13 +246,31 @@ export function activeStrokes(game: PenduGame, playerId?: string): number {
   return game.strokes
 }
 
+export function resolvePenduPlayer(
+  game: PenduGame,
+  playerId: string,
+  opts?: { name?: string },
+): PenduPlayer | null {
+  if (!playerId && !opts?.name) return null
+  const byId = playerId
+    ? game.players.find((pl) => pl.id && pl.id === playerId)
+    : undefined
+  if (byId) return byId
+  const name = opts?.name?.trim()
+  if (!name) return null
+  const matches = game.players.filter(
+    (pl) => pl.name.trim().toLowerCase() === name.toLowerCase(),
+  )
+  return matches.length === 1 ? matches[0]! : null
+}
+
 export function playerMultiRound(
   game: PenduGame,
   playerId: string,
+  opts?: { name?: string },
 ): NonNullable<PenduPlayer['multiRound']> | null {
   if (game.mode !== 'multi') return null
-  const p = game.players.find((pl) => pl.id === playerId)
-  return p?.multiRound ?? null
+  return resolvePenduPlayer(game, playerId, opts)?.multiRound ?? null
 }
 
 /** Multi parallèle : toutes les lettres tentées par tous les joueurs (pour affichage commun du mot) */
@@ -278,7 +296,7 @@ export function isPenduMyTurn(game: PenduGame, playerId: string): boolean {
   if (game.mode === 'multi') {
     // En multi parallèle chaque joueur joue dès que son status est 'playing'
     if (game.status === 'wordOver' || game.status === 'gameOver') return false
-    const p = game.players.find((pl) => pl.id === playerId)
+    const p = resolvePenduPlayer(game, playerId)
     return p?.multiRound?.status === 'playing'
   }
   if (game.status === 'wordOver') return true
@@ -481,7 +499,7 @@ function advanceMultiWord(game: PenduGame): PenduGame {
 
 function applyMultiLetter(game: PenduGame, actorId: string, L: string): PenduGame {
   if (game.status !== 'playing') return game
-  const actorIdx = game.players.findIndex((p) => p.id === actorId)
+  const actorIdx = game.players.findIndex((p) => p.id && p.id === actorId)
   if (actorIdx === -1) return game
   const p = game.players[actorIdx]!
   const mr = p.multiRound
@@ -531,7 +549,7 @@ function applyMultiLetter(game: PenduGame, actorId: string, L: string): PenduGam
 
 function applyMultiWord(game: PenduGame, actorId: string, guess: string): PenduGame {
   if (game.status !== 'playing') return game
-  const actorIdx = game.players.findIndex((p) => p.id === actorId)
+  const actorIdx = game.players.findIndex((p) => p.id && p.id === actorId)
   if (actorIdx === -1) return game
   const p = game.players[actorIdx]!
   const mr = p.multiRound

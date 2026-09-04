@@ -7,6 +7,7 @@ import {
   saveTtsVoice,
   emitTtsStart,
   emitTtsStop,
+  onPlaybackStop,
   ttsEvents,
   TTS_VOICES,
   type TtsVoiceId,
@@ -16,8 +17,10 @@ import './QuestionTtsBar.css'
 interface QuestionTtsBarProps {
   questionId: string
   question: string
-  answers: [string, string, string, string]
+  answers: string[]
   answerMode?: 'qcm' | 'free'
+  /** Réponse envoyée → coupe la lecture */
+  halted?: boolean
 }
 
 function clipKey(questionId: string, voice: TtsVoiceId): string {
@@ -29,6 +32,7 @@ export function QuestionTtsBar({
   question,
   answers,
   answerMode,
+  halted = false,
 }: QuestionTtsBarProps) {
   const [voice, setVoice] = useState<TtsVoiceId>(() => loadTtsVoice())
   const [auto, setAuto] = useState(() => loadTtsAuto())
@@ -49,7 +53,7 @@ export function QuestionTtsBar({
   const inflightRef = useRef(new Map<string, Promise<Blob | null>>())
   const abortByKeyRef = useRef(new Map<string, AbortController>())
 
-  function stopAudio() {
+  function stopAudio(emit = true) {
     playGenRef.current += 1
     wantPlayRef.current = false
     const audio = audioRef.current
@@ -64,7 +68,7 @@ export function QuestionTtsBar({
     }
     setPlaying(false)
     setLoading(false)
-    emitTtsStop()
+    if (emit) emitTtsStop()
   }
 
   function cancelAllPrefetch() {
@@ -183,10 +187,22 @@ export function QuestionTtsBar({
   }, [voice])
 
   useEffect(() => {
-    const onPreview = () => stopAudio()
+    const onPreview = () => stopAudio(false)
+    const onStop = () => stopAudio(false)
     window.addEventListener(ttsEvents.previewPlay, onPreview)
-    return () => window.removeEventListener(ttsEvents.previewPlay, onPreview)
+    window.addEventListener(ttsEvents.stop, onStop)
+    const off = onPlaybackStop(() => stopAudio(false))
+    return () => {
+      window.removeEventListener(ttsEvents.previewPlay, onPreview)
+      window.removeEventListener(ttsEvents.stop, onStop)
+      off()
+    }
   }, [])
+
+  useEffect(() => {
+    if (!halted) return
+    stopAudio(false)
+  }, [halted])
 
   function onVoiceChange(next: TtsVoiceId) {
     setVoice(next)

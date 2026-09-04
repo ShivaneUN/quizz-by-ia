@@ -13,8 +13,8 @@ export const DIFFICULTY_LABELS: Record<Difficulty, string> = {
 export interface Question {
   id: string
   question: string
-  answers: [string, string, string, string]
-  correctIndex: 0 | 1 | 2 | 3
+  answers: string[]
+  correctIndex: number
   difficulty: Difficulty
   themeSlug: string
   createdAt: string
@@ -75,8 +75,8 @@ export interface TierAttempt {
 /** Portée culturelle des questions */
 export type QuizScope = 'fr' | 'international'
 
-/** Texte seul, QCM illustré, ou quiz musical Deezer */
-export type QuizContentMode = 'standard' | 'image' | 'audio'
+/** Texte, images, Deezer, ou Pendu en salle */
+export type QuizContentMode = 'standard' | 'image' | 'audio' | 'pendu'
 
 /** Choix d’IA pour la génération */
 export type AiProvider =
@@ -96,6 +96,7 @@ export const QUIZ_CONTENT_MODE_LABELS: Record<QuizContentMode, string> = {
   standard: 'Texte',
   image: 'Images',
   audio: 'Musique Deezer',
+  pendu: 'Pendu',
 }
 
 export const AI_PROVIDER_LABELS: Record<AiProvider, string> = {
@@ -128,10 +129,12 @@ export interface GameSession {
   aiProvider?: AiProvider
   /** standard = texte ; image = illustré */
   quizMode?: QuizContentMode
+  flagCount?: number
+  flagDifficulty?: 'easy' | 'medium' | 'hard' | 'expert'
   currentDifficulty: Difficulty
   unlocked: Difficulty[]
   tierAttempts: Record<Difficulty, TierAttempt>
-  /** Questions de la manche en cours (max 10) */
+  /** Questions de la manche en cours */
   currentHand: Question[]
   handIndex: number
   totalScore: number

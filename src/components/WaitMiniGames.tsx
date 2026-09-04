@@ -9,10 +9,23 @@ import {
 } from '../lib/arcadeStorage'
 import { FlappyWait } from './FlappyWait'
 import { TypingDuel } from './TypingDuel'
+import {
+  MorpionLobby,
+  type MorpionEnterPayload,
+} from './MorpionLobby'
+import { MorpionPlay } from './MorpionPlay'
 import { GenEtaLabel, useGenEta } from './waitEta'
 import './WaitMiniGames.css'
 
-export type WaitGameId = 'typing' | 'flappy'
+export type WaitGameId = 'typing' | 'flappy' | 'morpion'
+
+const GAME_TITLES: Record<WaitGameId, string> = {
+  typing: 'Duel de frappe',
+  flappy: 'Flappy',
+  morpion: 'Morpion',
+}
+
+export type { MorpionEnterPayload }
 
 interface WaitMiniGamesProps {
   statusLabel?: string
@@ -32,6 +45,17 @@ interface WaitMiniGamesProps {
   theme?: string | null
   /** Libellé difficulté (ex: "Facile") */
   difficultyLabel?: string | null
+  /** Hub arcade : entrée dans une salle morpion */
+  onMorpionEnter?: (payload: MorpionEnterPayload) => void
+  morpionResume?: MorpionEnterPayload | null
+  onMorpionResume?: () => void
+  onMorpionMove?: (cell: number) => void
+  onMorpionReplay?: () => void
+  onMorpionLeave?: () => void
+  morpionBusy?: boolean
+  morpionError?: string | null
+  /** Pseudo déjà connu (salle quiz / solo) */
+  morpionDefaultName?: string
 }
 
 /**
@@ -49,6 +73,15 @@ export function WaitMiniGames({
   aiSource = null,
   theme = null,
   difficultyLabel = null,
+  onMorpionEnter,
+  morpionResume = null,
+  onMorpionResume,
+  onMorpionMove,
+  onMorpionReplay,
+  onMorpionLeave,
+  morpionBusy,
+  morpionError,
+  morpionDefaultName,
 }: WaitMiniGamesProps) {
   const [game, setGame] = useState<WaitGameId | null>(null)
   const [records, setRecords] = useState<ArcadeScores>(() => loadArcadeScores())
@@ -73,7 +106,7 @@ export function WaitMiniGames({
     }
   }, [])
 
-  function report(kind: WaitGameId, score: number) {
+  function report(kind: 'typing' | 'flappy', score: number) {
     if (score > sessionBestRef.current) {
       sessionBestRef.current = score
       onScoreRef.current?.(score)
@@ -92,10 +125,20 @@ export function WaitMiniGames({
   }
 
   const hint = freePlay
-    ? 'Entraîne-toi quand tu veux — frappe ou Flappy.'
+    ? 'Entraîne-toi ou lance un morpion — un 2ᵉ joueur peut rejoindre.'
     : mode === 'multi'
-      ? 'Choisis un jeu — chacun de son côté en attendant.'
-      : 'Choisis un jeu le temps que le quiz se prépare.'
+      ? 'Choisis un jeu — tu peux rejoindre un morpion. Si le quiz démarre, l’IA reprend ta place.'
+      : 'Choisis un jeu le temps que le quiz se prépare — morpion possible, l’IA reprend si ça lance.'
+
+  const isDeezerWait = aiSource === 'deezer'
+  const sourceLabel = isDeezerWait
+    ? 'Deezer'
+    : aiSource
+      ? (AI_PROVIDER_LABELS[aiSource as AiProvider] ?? aiSource)
+      : '…'
+  const progressLead = isDeezerWait
+    ? 'Extraits Deezer'
+    : 'Questions générées par'
 
   return (
     <section className="wait-minis">
@@ -109,16 +152,12 @@ export function WaitMiniGames({
           {difficultyLabel}
         </p>
       )}
-      {!freePlay && <GenEtaLabel etaSec={etaSec} />}
+      {!freePlay && !isDeezerWait && <GenEtaLabel etaSec={etaSec} />}
       {showProgress && (
         <>
           <p className="wait-minis__progress" aria-live="polite">
-            Questions générées par{' '}
-            <span className="wait-minis__ai-source">
-              {aiSource
-                ? (AI_PROVIDER_LABELS[aiSource as AiProvider] ?? aiSource)
-                : '…'}
-            </span>{' '}
+            {progressLead}{' '}
+            <span className="wait-minis__ai-source">{sourceLabel}</span>{' '}
             <span className="wait-minis__progress-num">
               {progressDone}/{questionsTotal}
             </span>
@@ -188,18 +227,33 @@ export function WaitMiniGames({
                   : ''}
               </span>
             </button>
+            {onMorpionEnter && (
+              <button
+                type="button"
+                className="wait-minis__pick wait-minis__pick--morpion"
+                onClick={() => setGame('morpion')}
+              >
+                <span className="wait-minis__pick-name">Morpion</span>
+                <span className="wait-minis__pick-desc">
+                  {freePlay
+                    ? 'Vs IA — un joueur peut rejoindre en cours'
+                    : 'Vs IA ou rejoins une salle — l’IA reprend si le quiz part'}
+                </span>
+              </button>
+            )}
           </div>
         </>
       ) : (
         <>
           <div className="wait-minis__toolbar">
             <h2 className="wait-minis__title wait-minis__title--sm">
-              {game === 'typing' ? 'Duel de frappe' : 'Flappy'}
+              {GAME_TITLES[game]}
             </h2>
             <button
               type="button"
               className="wait-minis__switch"
               onClick={() => {
+                if (game === 'morpion' && morpionResume) onMorpionLeave?.()
                 setGame(null)
                 setRecords(loadArcadeScores())
               }}
@@ -207,10 +261,14 @@ export function WaitMiniGames({
               Changer
             </button>
           </div>
-          <p className="wait-minis__record" aria-live="polite">
-            Record{' '}
-            {game === 'typing' ? records.typingBest : records.flappyBest}
-          </p>
+          {game !== 'morpion' && (
+            <p className="wait-minis__record" aria-live="polite">
+              Record{' '}
+              {game === 'typing'
+                ? records.typingBest
+                : records.flappyBest}
+            </p>
+          )}
 
           {game === 'typing' ? (
             <TypingDuel
@@ -218,9 +276,26 @@ export function WaitMiniGames({
               embedded
               onScoreChange={(s) => report('typing', s)}
             />
-          ) : (
+          ) : game === 'flappy' ? (
             <FlappyWait onScoreChange={(s) => report('flappy', s)} />
-          )}
+          ) : morpionResume && onMorpionMove && onMorpionLeave ? (
+            <MorpionPlay
+              room={morpionResume.room}
+              playerId={morpionResume.playerId}
+              busy={morpionBusy}
+              error={morpionError}
+              onMove={onMorpionMove}
+              onReplay={onMorpionReplay}
+              onLeave={onMorpionLeave}
+            />
+          ) : onMorpionEnter ? (
+            <MorpionLobby
+              onEnter={onMorpionEnter}
+              resume={morpionResume}
+              onResume={onMorpionResume}
+              defaultName={morpionDefaultName}
+            />
+          ) : null}
         </>
       )}
     </section>

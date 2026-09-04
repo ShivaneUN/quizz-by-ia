@@ -11,6 +11,7 @@
  *   - difficile = hits, réponse libre
  *     (artiste choisi → titre seul ; sinon titre OU artiste)
  * - Décennies optionnelles : 80 / 90 / 2000 / 2010 / 2020
+ *   → fourchette stricte sur release_date Deezer (ex. 2000–2009)
  */
 
 export type DeezerDifficulty = 'easy' | 'medium' | 'hard'
@@ -49,6 +50,7 @@ interface DeezerAlbum {
   id?: number
   title?: string
   cover_medium?: string
+  release_date?: string
 }
 
 interface DeezerTrack {
@@ -57,8 +59,11 @@ interface DeezerTrack {
   title_short?: string
   preview?: string
   rank?: number
+  release_date?: string
   artist?: DeezerArtist
   album?: DeezerAlbum
+  /** Année de sortie résolue (/track) — null = introuvable */
+  releaseYear?: number | null
 }
 
 interface DeezerSearchResponse {
@@ -142,32 +147,55 @@ export const DEEZER_GLOBAL = {
   queryIntl: 'top hits',
 } as const
 
-/** Décennies / période → suffixes de recherche Deezer */
+/** Décennies / période → suffixes de recherche + fourchette d’années (stricte) */
 export const DEEZER_DECADES: {
   id: string
   label: string
   queryFr: string
   queryIntl: string
+  yearFrom: number
+  /** Inclus ; pour 2020, borné à l’année courante au runtime */
+  yearTo: number
 }[] = [
-  { id: '80', label: 'Années 80', queryFr: 'années 80', queryIntl: '80s hits' },
-  { id: '90', label: 'Années 90', queryFr: 'années 90', queryIntl: '90s hits' },
+  {
+    id: '80',
+    label: 'Années 80',
+    queryFr: 'années 80',
+    queryIntl: '80s hits',
+    yearFrom: 1980,
+    yearTo: 1989,
+  },
+  {
+    id: '90',
+    label: 'Années 90',
+    queryFr: 'années 90',
+    queryIntl: '90s hits',
+    yearFrom: 1990,
+    yearTo: 1999,
+  },
   {
     id: '2000',
     label: 'Années 2000',
     queryFr: 'années 2000',
     queryIntl: '2000s hits',
+    yearFrom: 2000,
+    yearTo: 2009,
   },
   {
     id: '2010',
     label: 'Années 2010',
     queryFr: 'années 2010',
     queryIntl: '2010s hits',
+    yearFrom: 2010,
+    yearTo: 2019,
   },
   {
     id: '2020',
     label: 'Années 2020',
     queryFr: 'années 2020',
     queryIntl: '2020s hits',
+    yearFrom: 2020,
+    yearTo: 2029,
   },
 ]
 
@@ -176,9 +204,189 @@ function resolveDecadePeriod(decadeId: string | null): {
   label: string
   queryFr: string
   queryIntl: string
+  yearFrom: number
+  yearTo: number
 } | null {
   if (!decadeId) return null
   return DEEZER_DECADES.find((d) => d.id === decadeId) ?? null
+}
+
+/** Fourchette inclusive, ex. 2000–2009 ; 2020 bornée à aujourd’hui */
+export function decadeYearRange(
+  decadeId: string | null,
+): { from: number; to: number; label: string } | null {
+  const d = resolveDecadePeriod(decadeId)
+  if (!d) return null
+  const now = new Date().getFullYear()
+  return {
+    from: d.yearFrom,
+    to: Math.min(d.yearTo, now),
+    label: d.label,
+  }
+}
+
+function yearFromReleaseDate(raw: string | undefined | null): number | null {
+  if (!raw) return null
+  const m = String(raw).trim().match(/^(\d{4})/)
+  if (!m) return null
+  const y = Number(m[1])
+  if (!Number.isFinite(y) || y < 1950 || y > 2100) return null
+  return y
+}
+
+/** Préfère la date la plus ancienne (piste vs album) pour contrer les rééditions. */
+function pickOriginalReleaseYear(
+  trackDate: string | undefined | null,
+  albumDate: string | undefined | null,
+): number | null {
+  const t = yearFromReleaseDate(trackDate)
+  const a = yearFromReleaseDate(albumDate)
+  if (t != null && a != null) return Math.min(t, a)
+  return t ?? a
+}
+
+function trackReleaseYearCached(t: DeezerTrack): number | null | undefined {
+  if (t.releaseYear !== undefined) return t.releaseYear
+  const y = pickOriginalReleaseYear(t.release_date, t.album?.release_date)
+  if (y != null) {
+    t.releaseYear = y
+    return y
+  }
+  return undefined
+}
+
+async function fetchTrackReleaseYear(id: number): Promise<number | null> {
+  try {
+    const full = await deezerGet<{
+      release_date?: string
+      album?: { release_date?: string }
+    }>(`/track/${id}`)
+    return pickOriginalReleaseYear(full.release_date, full.album?.release_date)
+  } catch {
+    return null
+  }
+}
+
+async function mapConcurrent<T>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<void>,
+): Promise<void> {
+  const n = Math.max(1, concurrency)
+  let i = 0
+  async function worker() {
+    while (i < items.length) {
+      const idx = i++
+      await fn(items[idx])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, () => worker()))
+}
+
+/**
+ * Enrichit les candidats via /track/{id} puis ne garde que les sorties
+ * dans la fourchette de décennie. Sans date → exclu (strict).
+ * Enrichit par vagues jusqu’à maxEnrich pour maximiser le vivier daté.
+ */
+async function enrichAndFilterByDecade(
+  tracks: DeezerTrack[],
+  decadeId: string | null,
+  maxEnrich = 120,
+): Promise<DeezerTrack[]> {
+  const range = decadeYearRange(decadeId)
+  if (!range) return tracks
+
+  const sorted = [...tracks].sort((a, b) => trackFame(b) - trackFame(a))
+  const kept: DeezerTrack[] = []
+  const wave = 40
+  let offset = 0
+  const limit = Math.min(sorted.length, Math.max(maxEnrich, 80))
+
+  while (offset < limit && kept.length < 48) {
+    const batch = sorted.slice(offset, Math.min(offset + wave, limit))
+    offset += batch.length
+    if (batch.length === 0) break
+
+    await mapConcurrent(batch, 8, async (t) => {
+      const known = trackReleaseYearCached(t)
+      if (known !== undefined) return
+      t.releaseYear = await fetchTrackReleaseYear(t.id)
+    })
+
+    for (const t of batch) {
+      const y = t.releaseYear
+      if (y == null) continue
+      if (y >= range.from && y <= range.to) kept.push(t)
+    }
+  }
+
+  return kept.sort((a, b) => trackFame(b) - trackFame(a))
+}
+
+/** Recherches complémentaires — éviter « tubes 2004 » (spam remasters). */
+function decadeYearSearchQueries(
+  decadeId: string | null,
+  scope: DeezerScope,
+): string[] {
+  const range = decadeYearRange(decadeId)
+  if (!range) return []
+  const mid = range.from + Math.floor((range.to - range.from) / 2)
+  if (scope === 'fr') {
+    return [
+      `variété française ${range.from}`,
+      `tubes français ${mid}`,
+      `hits france ${range.from}`,
+      `chanson française ${mid}`,
+    ]
+  }
+  return [
+    `${range.from}s pop hits`,
+    `greatest hits ${mid}`,
+    `billboard hits ${range.from}`,
+    `top 40 ${mid}`,
+  ]
+}
+
+/**
+ * Playlists Deezer ciblées par décennie (beaucoup plus fiables que le search texte).
+ * Le filtre release_date reste le filet final.
+ */
+const CURATED_DECADE_PLAYLIST_IDS: Record<
+  string,
+  { fr: number[]; international: number[] }
+> = {
+  '80': {
+    fr: [10045287942, 7559091362, 791349661, 1268089951, 7004935844],
+    international: [5240337442, 15355354683, 10045287942, 1268089951],
+  },
+  '90': {
+    fr: [10054736662, 2234568662, 1051470831, 1268090621],
+    international: [15609712203, 10054736662, 1268090621, 1682663671],
+  },
+  '2000': {
+    fr: [
+      10055316202, // Années 2000 : l'essentiel
+      1252278941, // Tubes des annees 2000
+      6647218664, // variété FR 2000
+      713806955, // Bleu blanc hits 2000
+      6312313584,
+      1268091491,
+    ],
+    international: [
+      10055316202,
+      1252278941,
+      15326687803, // 2000s Hits Essentials
+      15605376003,
+    ],
+  },
+  '2010': {
+    fr: [10055456062, 14917741483],
+    international: [10055456062, 14917741483, 10150744242],
+  },
+  '2020': {
+    fr: [11915740641, 13650084141, 14055911981],
+    international: [13650084141, 11915740641],
+  },
 }
 
 export type DeezerThemeParsed = {
@@ -375,6 +583,18 @@ function isRemixTrack(t: DeezerTrack): boolean {
   )
 }
 
+/** Remasters / lives : fausse date Deezer (année de réédition). */
+function isRemasterOrLiveTrack(t: DeezerTrack): boolean {
+  const title = normalizeKey(trackTitle(t))
+  const album = normalizeKey(String(t.album?.title ?? ''))
+  if (/\b(remaster(?:ed)?|re[- ]?recorded)\b/.test(title)) return true
+  if (/\b(live|unplugged|mtv session|bbc session)\b/.test(title)) return true
+  if (/\b(live|remaster(?:ed)?)\b/.test(album) && /\b(live|remaster)/.test(title)) {
+    return true
+  }
+  return false
+}
+
 function isCoverTrack(t: DeezerTrack): boolean {
   const title = normalizeKey(trackTitle(t))
   const album = normalizeKey(String(t.album?.title ?? ''))
@@ -405,6 +625,7 @@ function variantForDifficulty(_d: DeezerDifficulty): TrackVariantFilter {
 
 function matchesVariant(t: DeezerTrack, _variant: TrackVariantFilter): boolean {
   if (isRemixTrack(t)) return false
+  if (isRemasterOrLiveTrack(t)) return false
   if (isInstrumentalTrack(t)) return false
   if (isCoverTrack(t)) return false
   return true
@@ -918,17 +1139,19 @@ const FR_INTL_HITS_FLOOR = 80_000
 async function fetchTracksFromPlaylistIds(
   ids: number[],
   maxTracks = 120,
+  perPlaylist = 50,
 ): Promise<DeezerTrack[]> {
   const byId = new Map<number, DeezerTrack>()
   for (const id of ids) {
     if (byId.size >= maxTracks) break
     try {
       const page = await deezerGet<DeezerTrackListResponse>(
-        `/playlist/${id}/tracks?limit=50`,
+        `/playlist/${id}/tracks?limit=${Math.min(100, Math.max(25, perPlaylist))}`,
       )
       for (const t of page.data ?? []) {
         if (!trackUsable(t) || byId.has(t.id)) continue
         byId.set(t.id, t)
+        if (byId.size >= maxTracks) break
       }
     } catch {
       /* playlist suivante */
@@ -1221,22 +1444,47 @@ async function collectTracks(
 
   // 1) Sources selon le mode (global ≠ style)
   if (!anchoredArtist) {
-    if (parsed.mode === 'global') {
-      const curatedIds =
-        scope === 'fr'
-          ? [...CURATED_PLAYLIST_IDS.fr]
-          : [...CURATED_PLAYLIST_IDS.international]
+    // Décennie : playlists ciblées d’abord (fiables), puis filtre release_date
+    const decadePlaylists = parsed.decadeId
+      ? CURATED_DECADE_PLAYLIST_IDS[parsed.decadeId]
+      : null
+    if (decadePlaylists) {
+      const ids =
+        scope === 'fr' ? decadePlaylists.fr : decadePlaylists.international
       try {
         addTracks(
           byId,
-          await fetchTracksFromPlaylistIds(curatedIds, 140),
+          await fetchTracksFromPlaylistIds(ids, 280, 80),
           CURATED_RANK_FLOOR,
           parsed.decadeId,
           allowCoverActs,
           variant,
         )
       } catch {
-        /* playlists ensuite */
+        /* playlists période ensuite */
+      }
+    }
+
+    if (parsed.mode === 'global') {
+      // Sans décennie : essentiels « tous temps ». Avec décennie : playlists période d’abord
+      // (évite de polluer avec des tubes hors fourchette).
+      if (!parsed.decadeId) {
+        const curatedIds =
+          scope === 'fr'
+            ? [...CURATED_PLAYLIST_IDS.fr]
+            : [...CURATED_PLAYLIST_IDS.international]
+        try {
+          addTracks(
+            byId,
+            await fetchTracksFromPlaylistIds(curatedIds, 140),
+            CURATED_RANK_FLOOR,
+            parsed.decadeId,
+            allowCoverActs,
+            variant,
+          )
+        } catch {
+          /* playlists ensuite */
+        }
       }
       if (byId.size < need * 3 || parsed.decadeId) {
         try {
@@ -1244,7 +1492,7 @@ async function collectTracks(
             byId,
             await fetchPlaylistHitTracks(
               playlistQueriesForTheme(theme, scope),
-              80,
+              parsed.decadeId ? 120 : 80,
             ),
             CURATED_RANK_FLOOR,
             parsed.decadeId,
@@ -1257,7 +1505,8 @@ async function collectTracks(
       }
     } else if (parsed.mode === 'style' && parsed.styleId) {
       // JAMAIS les essentiels variété globaux (sauf style Variété / Pop)
-      if (parsed.styleId === 'variete') {
+      // Avec décennie : skip catalogues « tous temps » → playlists période ensuite
+      if (parsed.styleId === 'variete' && !parsed.decadeId) {
         try {
           addTracks(
             byId,
@@ -1270,7 +1519,7 @@ async function collectTracks(
         } catch {
           /* charts ensuite */
         }
-      } else if (parsed.styleId === 'pop') {
+      } else if (parsed.styleId === 'pop' && !parsed.decadeId) {
         try {
           addTracks(
             byId,
@@ -1286,7 +1535,7 @@ async function collectTracks(
         } catch {
           /* charts ensuite */
         }
-      } else if (parsed.styleId === 'variete-intl') {
+      } else if (parsed.styleId === 'variete-intl' && !parsed.decadeId) {
         // Portée FR : hits intl les plus streamés / connus en France
         const ids =
           scope === 'fr'
@@ -1419,6 +1668,7 @@ async function collectTracks(
 
   const curatedEnough =
     !anchoredArtist &&
+    !parsed.decadeId &&
     (parsed.mode === 'style'
       ? byId.size >= Math.max(need, 24)
       : parsed.mode === 'global'
@@ -1509,7 +1759,36 @@ async function collectTracks(
     }
   }
 
-  if (!anchoredArtist && list.length > need * 3) {
+  // Décennie : filtre strict sur release_date (fourchette d’années)
+  if (parsed.decadeId) {
+    // Vivier large : recherches période + années (2000, 2002, …)
+    const decadeQueries = [
+      ...queries,
+      ...decadeYearSearchQueries(parsed.decadeId, scope),
+    ]
+    for (const q of decadeQueries) {
+      if (byId.size >= need * 16) break
+      try {
+        addTracks(
+          byId,
+          await fetchTracksForQuery(q, 80),
+          Math.min(searchFloor, 3_000),
+          parsed.decadeId,
+          allowCoverActs,
+          variant,
+        )
+      } catch {
+        /* suivante */
+      }
+    }
+    list = filterPool(Math.max(1_500, Math.floor(minRank * 0.2)))
+
+    list = await enrichAndFilterByDecade(
+      list,
+      parsed.decadeId,
+      Math.max(need * 16, 160),
+    )
+  } else if (!anchoredArtist && list.length > need * 3) {
     list = list.slice(0, Math.max(need * 3, 40))
   }
 
@@ -1786,6 +2065,20 @@ function buildAcceptedAnswers(
   return [...out].filter((s) => s.length >= 2)
 }
 
+function formatDeezerSourceType(year: number | null | undefined): string {
+  if (typeof year === 'number' && year >= 1950 && year <= 2100) {
+    return String(year)
+  }
+  return 'Deezer (extrait officiel)'
+}
+
+async function ensureTrackReleaseYear(t: DeezerTrack): Promise<void> {
+  if (t.releaseYear !== undefined) return
+  const known = trackReleaseYearCached(t)
+  if (known !== undefined) return
+  t.releaseYear = await fetchTrackReleaseYear(t.id)
+}
+
 function makeTitleQuestion(
   track: DeezerTrack,
   pool: DeezerTrack[],
@@ -1804,8 +2097,10 @@ function makeTitleQuestion(
   const preview = String(track.preview ?? '').trim()
   if (!preview || !artist || !title) return null
 
+  const year = track.releaseYear ?? null
   const revealAnswer = `${title} — ${artist}`
-  const explanation = `L’extrait correspond à « ${title} » de ${artist} (thème : ${themeLabel || 'Deezer'}).`
+  const explanation = `L’extrait correspond à « ${title} » de ${artist}.`
+  const sourceType = formatDeezerSourceType(year)
 
   // Difficile : réponse libre
   if (difficulty === 'hard') {
@@ -1814,7 +2109,7 @@ function makeTitleQuestion(
     const prompt = prompts[promptIndex % prompts.length]
     return {
       id: newId(),
-      question: `Extrait ${promptIndex + 1} — ${prompt}`,
+      question: prompt,
       answers: [title, artist, title, artist],
       correctIndex: 0,
       difficulty,
@@ -1822,7 +2117,7 @@ function makeTitleQuestion(
       createdAt: now,
       batchId,
       explanation,
-      sourceType: 'Deezer (extrait officiel)',
+      sourceType,
       previewUrl: preview,
       coverUrl: track.album?.cover_medium || undefined,
       deezerTrackId: String(track.id),
@@ -1856,7 +2151,7 @@ function makeTitleQuestion(
 
   return {
     id: newId(),
-    question: `Extrait ${promptIndex + 1} — ${prompts[promptIndex % prompts.length]}`,
+    question: prompts[promptIndex % prompts.length],
     answers,
     correctIndex,
     difficulty,
@@ -1864,7 +2159,7 @@ function makeTitleQuestion(
     createdAt: now,
     batchId,
     explanation,
-    sourceType: 'Deezer (extrait officiel)',
+    sourceType,
     previewUrl: preview,
     coverUrl: track.album?.cover_medium || undefined,
     deezerTrackId: String(track.id),
@@ -1926,13 +2221,16 @@ export async function buildDeezerQuiz(input: {
   }
 
   if (pool.length < 8) {
+    const decadeRange = decadeYearRange(parseDeezerTheme(input.theme).decadeId)
     return {
       error:
         anchoredArtist
           ? `Pas assez de titres de « ${anchoredArtist} » pour ce niveau. Essaie un autre artiste.`
-          : input.difficulty === 'hard'
-            ? 'Pas assez de titres pour ce thème en mode difficile. Essaie un artiste ou un style plus large.'
-            : 'Pas assez de tubes connus pour ce thème. Essaie Hits (global), un autre style, ou élargis la décennie.',
+          : decadeRange
+            ? `Pas assez de tubes sortis en ${decadeRange.label} (${decadeRange.from}–${decadeRange.to}). Essaie Hits (global), un autre style, ou une autre période.`
+            : input.difficulty === 'hard'
+              ? 'Pas assez de titres pour ce thème en mode difficile. Essaie un artiste ou un style plus large.'
+              : 'Pas assez de tubes connus pour ce thème. Essaie Hits (global), un autre style, ou élargis la décennie.',
     }
   }
 
@@ -1954,7 +2252,14 @@ export async function buildDeezerQuiz(input: {
 
   const DIFF_FR = { easy: 'facile', medium: 'moyen', hard: 'difficile' } as const
 
-  function tryAddFrom(
+  // Enrichir les années de sortie pour la source affichée (max ~vivier utile)
+  await mapConcurrent(
+    [...answerPool, ...distractorPool].slice(0, Math.max(count * 6, 40)),
+    8,
+    (t) => ensureTrackReleaseYear(t),
+  )
+
+  async function tryAddFrom(
     candidates: DeezerTrack[],
     opts: { preferUniqueWrongs: boolean; allowWrongAsCorrect: boolean },
   ) {
@@ -1964,6 +2269,8 @@ export async function buildDeezerQuiz(input: {
       const titleKey = titleDedupeKey(trackTitle(track))
       if (!titleKey || usedTitles.has(titleKey)) continue
       if (!opts.allowWrongAsCorrect && usedWrongTitles.has(titleKey)) continue
+
+      await ensureTrackReleaseYear(track)
 
       const avoidWrongs = opts.preferUniqueWrongs
         ? new Set<string>([...usedTitles, ...usedWrongTitles])
@@ -2006,20 +2313,20 @@ export async function buildDeezerQuiz(input: {
   }
 
   // 1) Leurres variés en priorité
-  tryAddFrom(answerPool, {
+  await tryAddFrom(answerPool, {
     preferUniqueWrongs: true,
     allowWrongAsCorrect: false,
   })
   // 2) Compléter en réutilisant des leurres si besoin
   if (questions.length < count) {
-    tryAddFrom(answerPool, {
+    await tryAddFrom(answerPool, {
       preferUniqueWrongs: false,
       allowWrongAsCorrect: false,
     })
   }
   // 3) Élargir aux titres déjà vus en leurres + tout le vivier
   if (questions.length < count) {
-    tryAddFrom(distractorPool, {
+    await tryAddFrom(distractorPool, {
       preferUniqueWrongs: false,
       allowWrongAsCorrect: true,
     })

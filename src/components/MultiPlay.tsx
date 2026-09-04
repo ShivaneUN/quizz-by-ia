@@ -4,13 +4,17 @@ import {
   readDeezerAutoplayPreference,
   writeDeezerAutoplayPreference,
 } from '../lib/deezerStyles'
+import { emitTtsStop } from '../lib/tts'
 import { HostPlayersPanel } from './HostPlayersPanel'
 import { PlayersStreakBar } from './PlayersStreakBar'
 import { QuestionFeedback } from './QuestionFeedback'
 import { StreakFlame } from './StreakFlame'
 import { PreviewAudio } from './PreviewAudio'
 import { QuestionTtsBar } from './QuestionTtsBar'
+import { AnswerTtsButton } from './AnswerTtsButton'
 import { revealCorrectAnswer } from './AnswerAudit'
+import { isLanguesTheme } from '../lib/themes'
+import { displayLangueAnswerChoice } from '../lib/langueAnswerDisplay'
 import './MultiPlay.css'
 
 interface MultiPlayProps {
@@ -138,6 +142,16 @@ export function MultiPlay({
     hasAnswered &&
     myAnswer === correctIndex
 
+  const languesTts = isLanguesTheme(room.theme)
+  const correctWord =
+    typeof correctIndex === 'number'
+      ? revealCorrectAnswer(
+          q.explanation,
+          q.answers[correctIndex],
+          q.revealAnswer,
+        )
+      : ''
+
   const timeExpired = timerRunning && !paused && leftMs <= 0
   const answersLocked =
     disabled ||
@@ -145,6 +159,17 @@ export function MultiPlay({
     needsHostStart ||
     hasAnswered ||
     timeExpired
+
+  function pickAnswer(answer: number | string) {
+    if (answersLocked) return
+    emitTtsStop()
+    onAnswer(answer)
+  }
+
+  useEffect(() => {
+    if (!timeExpired || hasAnswered || revealing) return
+    emitTtsStop()
+  }, [timeExpired, hasAnswered, revealing])
 
   return (
     <section className="multi-play">
@@ -218,6 +243,7 @@ export function MultiPlay({
           question={q.question}
           answers={q.answers}
           answerMode={q.answerMode}
+          halted={hasAnswered || revealing || timeExpired}
         />
       )}
       <h2 className="multi-play__question">{q.question}</h2>
@@ -228,6 +254,7 @@ export function MultiPlay({
           questionId={q.id}
           maxSeconds={30}
           autoPlay={room.quizMode === 'audio' && audioAutoplay}
+          halted={hasAnswered || revealing || timeExpired}
           onAutoPlayChange={(on) => {
             setAudioAutoplay(on)
             writeDeezerAutoplayPreference(on)
@@ -259,7 +286,7 @@ export function MultiPlay({
             if (answersLocked) return
             const t = freeText.trim()
             if (!t) return
-            onAnswer(t)
+            pickAnswer(t)
           }}
         >
           <label className="multi-play__free-label" htmlFor={`mfree-${q.id}`}>
@@ -299,7 +326,11 @@ export function MultiPlay({
           )}
         </form>
       ) : (
-        <div className="multi-play__answers" role="group" aria-label="Réponses">
+        <div
+          className={`multi-play__answers multi-play__answers--n${q.answers.length}`}
+          role="group"
+          aria-label="Réponses"
+        >
           {q.answers.map((answer, i) => {
             const selected = hasAnswered && myAnswer === i
             let state = ''
@@ -319,12 +350,20 @@ export function MultiPlay({
                 type="button"
                 className={`multi-play__answer${state}`}
                 disabled={answersLocked}
-                onClick={() => onAnswer(i)}
+                onClick={() => pickAnswer(i)}
               >
                 <span className="multi-play__letter" aria-hidden>
                   {String.fromCharCode(65 + i)}
                 </span>
-                <span className="multi-play__answer-text">{answer}</span>
+                <span className="multi-play__answer-text">
+                  {languesTts
+                    ? displayLangueAnswerChoice(
+                        answer,
+                        q.question,
+                        revealing,
+                      )
+                    : answer}
+                </span>
                 {revealing && (
                   <span
                     className="multi-play__votes"
@@ -406,19 +445,19 @@ export function MultiPlay({
           )}
           {typeof correctIndex === 'number' && !myCorrect && (
             <p className="multi-play__feedback-detail">
-              La bonne réponse était :{' '}
-              <strong>
-                {revealCorrectAnswer(
-                  q.explanation,
-                  q.answers[correctIndex],
-                  q.revealAnswer,
-                )}
-              </strong>
+              La bonne réponse était : <strong>{correctWord}</strong>
+              {languesTts && <AnswerTtsButton text={correctWord} />}
             </p>
           )}
-          {typeof correctIndex === 'number' && myCorrect && q.previewUrl && (
+          {typeof correctIndex === 'number' && myCorrect && languesTts && (
             <p className="multi-play__feedback-detail">
-              {revealCorrectAnswer(q.explanation, q.answers[correctIndex], q.revealAnswer)}
+              <strong>{correctWord}</strong>
+              <AnswerTtsButton text={correctWord} />
+            </p>
+          )}
+          {typeof correctIndex === 'number' && myCorrect && q.previewUrl && !languesTts && (
+            <p className="multi-play__feedback-detail">
+              {correctWord}
             </p>
           )}
           {q.explanation && (
@@ -427,14 +466,12 @@ export function MultiPlay({
           {q.sourceType && (
             <p className="multi-play__source">Source : {q.sourceType}</p>
           )}
-          {typeof correctIndex === 'number' &&
-            correctIndex >= 0 &&
-            correctIndex <= 3 && (
+          {typeof correctIndex === 'number' && correctIndex >= 0 && (
             <QuestionFeedback
               questionId={q.id}
               question={q.question}
               answers={q.answers}
-              correctIndex={correctIndex as 0 | 1 | 2 | 3}
+              correctIndex={correctIndex}
               explanation={q.explanation}
               sourceType={q.sourceType}
               theme={room.theme}

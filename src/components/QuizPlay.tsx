@@ -5,10 +5,14 @@ import {
   readDeezerAutoplayPreference,
   writeDeezerAutoplayPreference,
 } from '../lib/deezerStyles'
+import { emitTtsStop } from '../lib/tts'
 import { QuestionFeedback } from './QuestionFeedback'
 import { PreviewAudio } from './PreviewAudio'
 import { QuestionTtsBar } from './QuestionTtsBar'
+import { AnswerTtsButton } from './AnswerTtsButton'
 import { revealCorrectAnswer } from './AnswerAudit'
+import { isLanguesTheme } from '../lib/themes'
+import { displayLangueAnswerChoice } from '../lib/langueAnswerDisplay'
 import './QuizPlay.css'
 
 interface QuizPlayProps {
@@ -49,6 +53,12 @@ export function QuizPlay({
     !timedOut &&
     !wrongFree &&
     selectedIndex === question.correctIndex
+  const languesTts = isLanguesTheme(theme)
+  const correctWord = revealCorrectAnswer(
+    question.explanation,
+    question.answers[question.correctIndex],
+    question.revealAnswer,
+  )
 
   const [startedAt, setStartedAt] = useState(() => Date.now())
   const [now, setNow] = useState(() => Date.now())
@@ -83,6 +93,7 @@ export function QuizPlay({
   useEffect(() => {
     if (!timerEnabled || revealed || leftMs > 0 || timedOutRef.current) return
     timedOutRef.current = true
+    emitTtsStop()
     onAnswer(-1)
   }, [timerEnabled, revealed, leftMs, onAnswer])
 
@@ -91,7 +102,14 @@ export function QuizPlay({
     if (disabled || revealed) return
     const t = freeText.trim()
     if (!t) return
+    emitTtsStop()
     onAnswer(t)
+  }
+
+  function pickAnswer(answer: number | string) {
+    if (disabled || revealed) return
+    emitTtsStop()
+    onAnswer(answer)
   }
 
   return (
@@ -125,6 +143,7 @@ export function QuizPlay({
           question={question.question}
           answers={question.answers}
           answerMode={question.answerMode}
+          halted={revealed}
         />
       )}
       <h2 className="quiz-play__question">{question.question}</h2>
@@ -135,6 +154,7 @@ export function QuizPlay({
           questionId={question.id}
           maxSeconds={30}
           autoPlay={audioAutoplay}
+          halted={revealed}
           onAutoPlayChange={(on) => {
             setAudioAutoplay(on)
             writeDeezerAutoplayPreference(on)
@@ -189,7 +209,11 @@ export function QuizPlay({
           </div>
         </form>
       ) : (
-        <div className="quiz-play__answers" role="group" aria-label="Réponses">
+        <div
+          className={`quiz-play__answers quiz-play__answers--n${question.answers.length}`}
+          role="group"
+          aria-label="Réponses"
+        >
           {question.answers.map((answer, i) => {
             let state = ''
             if (revealed) {
@@ -204,12 +228,20 @@ export function QuizPlay({
                 type="button"
                 className={`quiz-play__answer${state}`}
                 disabled={disabled || revealed}
-                onClick={() => onAnswer(i)}
+                onClick={() => pickAnswer(i)}
               >
                 <span className="quiz-play__letter" aria-hidden>
                   {String.fromCharCode(65 + i)}
                 </span>
-                <span className="quiz-play__answer-text">{answer}</span>
+                <span className="quiz-play__answer-text">
+                  {languesTts
+                    ? displayLangueAnswerChoice(
+                        answer,
+                        question.question,
+                        revealed,
+                      )
+                    : answer}
+                </span>
                 {revealed && i === question.correctIndex && (
                   <span className="quiz-play__badge quiz-play__badge--ok">
                     Correct
@@ -254,22 +286,19 @@ export function QuizPlay({
           {!isCorrect && (
             <p className="quiz-play__feedback-detail">
               La bonne réponse était :{' '}
-              <strong>
-                {revealCorrectAnswer(
-                  question.explanation,
-                  question.answers[question.correctIndex],
-                  question.revealAnswer,
-                )}
-              </strong>
+              <strong>{correctWord}</strong>
+              {languesTts && <AnswerTtsButton text={correctWord} />}
             </p>
           )}
-          {isCorrect && question.previewUrl && (
+          {isCorrect && languesTts && (
             <p className="quiz-play__feedback-detail">
-              {revealCorrectAnswer(
-                question.explanation,
-                question.answers[question.correctIndex],
-                question.revealAnswer,
-              )}
+              <strong>{correctWord}</strong>
+              <AnswerTtsButton text={correctWord} />
+            </p>
+          )}
+          {isCorrect && question.previewUrl && !languesTts && (
+            <p className="quiz-play__feedback-detail">
+              {correctWord}
             </p>
           )}
           {question.explanation && (

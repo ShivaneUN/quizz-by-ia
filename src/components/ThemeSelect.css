@@ -276,6 +276,12 @@
   width: 100%;
 }
 
+.scope-field__toggle--4 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  width: 100%;
+}
+
 .deezer-layout__settings .game-home__options {
   display: grid;
   gap: 0.7rem;
@@ -446,7 +452,8 @@
 }
 
 .scope-field__toggle--2,
-.scope-field__toggle--3 {
+.scope-field__toggle--3,
+.scope-field__toggle--4 {
   display: grid;
   width: 100%;
   border-radius: 14px;
@@ -1295,4 +1302,60 @@
     min-height: 1.55rem;
     padding: 0.24rem 0.5rem;
   }
+}
+
+.flag-count-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.28rem;
+  max-width: 22rem;
+  margin-inline: auto;
+}
+
+.game-home__center .flag-count-grid .subtheme-chip {
+  min-width: 2.4rem;
+  padding: 0.28rem 0.45rem;
+  font-size: 0.72rem;
+}
+
+.pendu-setup {
+  display: grid;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.pendu-setup__slider {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.pendu-setup__slider input {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.pendu-setup__names {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.pendu-setup__names input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1.5px solid color-mix(in srgb, #4db8ff 40%, transparent);
+  border-radius: 10px;
+  background: #0a1835;
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  padding: 0.5rem 0.7rem;
+}
+
+.pendu-setup__names input:focus {
+  border-color: #f0c14b;
+  outline: none;
 }

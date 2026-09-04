@@ -35,8 +35,8 @@ export interface RoomPlayer {
 export interface RoomQuestion {
   id: string
   question: string
-  answers: [string, string, string, string]
-  correctIndex: 0 | 1 | 2 | 3
+  answers: string[]
+  correctIndex: number
   explanation?: string
   sourceType?: string
   imageUrl?: string
@@ -67,9 +67,19 @@ export interface RoomState {
   /** IA : auto ou provider forcé */
   aiProvider: 'auto' | 'groq' | 'gemini' | 'cerebras' | 'deepseek' | 'openrouter'
   /** standard = texte IA ; audio = quiz Deezer */
-  quizMode?: 'standard' | 'image' | 'audio'
+  quizMode?: 'standard' | 'image' | 'audio' | 'pendu'
+  /** Pendu en salle : duo (2) ou multi (2–8, pendu individuel) */
+  penduVariant?: 'duo' | 'multi'
+  penduGame?: object
+  /** Mots déjà tirés dans cette salle (anti-doublon + filet IA). */
+  penduPlayedWords?: string[]
+  /** Banque locale seule ou banque + IA quand épuisée */
+  penduWordSource?: 'bank' | 'ai'
   /** Deezer : lecture auto des extraits (hôte) */
   audioAutoplay?: boolean
+  /** Drapeaux : N questions + palier 4 niveaux (easy/medium/hard/expert) */
+  flagCount?: number
+  flagDifficulty?: 'easy' | 'medium' | 'hard' | 'expert'
   /** Message si status === 'error' */
   errorMessage?: string
   players: RoomPlayer[]
@@ -290,9 +300,12 @@ export async function getRoom(code: string): Promise<RoomState | null> {
   if (room.playMode !== 'progression' && room.playMode !== 'free') {
     room.playMode = 'free'
   }
-  // Compat : thème Deezer sans quizMode → audio
-  if (/^deezer\b/i.test(String(room.theme ?? '').trim())) {
+  // Compat : thème Deezer / Pendu sans quizMode
+  const themeLabel = String(room.theme ?? '').trim()
+  if (/^deezer\b/i.test(themeLabel)) {
     room.quizMode = 'audio'
+  } else if (room.quizMode === 'pendu' || /^pendu\b/i.test(themeLabel)) {
+    room.quizMode = 'pendu'
   } else if (room.quizMode !== 'audio') {
     room.quizMode = 'standard'
   }
@@ -544,6 +557,88 @@ export function hostResumeTimer(room: RoomState, now = Date.now()): RoomState {
   return room
 }
 
+type PenduPublicRound = {
+  guesses: string[]
+  strokes: number
+  revealed: string[]
+  status: 'playing' | 'won' | 'lost'
+  wordScore: number
+}
+
+type PenduPublicPlayer = {
+  id?: string
+  name: string
+  strokes: number
+  points: number
+  eliminated: boolean
+  hintSpent: number
+  multiRound?: PenduPublicRound
+}
+
+function emptyMultiRound(): PenduPublicRound {
+  return { guesses: [], strokes: 0, revealed: [], status: 'playing', wordScore: 0 }
+}
+
+/**
+ * Aligne penduGame.players sur les sièges de la salle (id + multiRound).
+ * Sans ça, un invité dont l’id n’est pas recopié ne voit ni ses lettres ni les minis.
+ */
+export function hydratePenduGame(room: RoomState): object | undefined {
+  const game = room.penduGame as
+    | {
+        mode?: string
+        players?: PenduPublicPlayer[]
+        round?: { unique?: string[] }
+      }
+    | undefined
+  if (!game) return undefined
+  if (game.mode !== 'multi' || !Array.isArray(game.players)) return game
+
+  const used = new Set<PenduPublicPlayer>()
+  const seats = room.players
+  const hydrated = seats.map((seat, i) => {
+    const byId = game.players!.find(
+      (p) => p.id && p.id === seat.id && !used.has(p),
+    )
+    const byName =
+      !byId && seat.name
+        ? game.players!.find(
+            (p) =>
+              !used.has(p) &&
+              String(p.name ?? '').trim().toLowerCase() ===
+                seat.name.trim().toLowerCase(),
+          )
+        : undefined
+    const byIndex =
+      !byId && !byName ? game.players![i] : undefined
+    const src = byId ?? byName ?? (byIndex && !used.has(byIndex) ? byIndex : undefined)
+    if (src) used.add(src)
+    const mr = src?.multiRound
+    return {
+      ...(src ?? {}),
+      id: seat.id,
+      name: (src?.name && String(src.name).trim()) || seat.name,
+      strokes: src?.strokes ?? 0,
+      points: src?.points ?? 0,
+      eliminated: Boolean(src?.eliminated),
+      hintSpent: src?.hintSpent ?? 0,
+      multiRound:
+        mr && typeof mr === 'object'
+          ? {
+              guesses: Array.isArray(mr.guesses) ? mr.guesses : [],
+              strokes: typeof mr.strokes === 'number' ? mr.strokes : 0,
+              revealed: Array.isArray(mr.revealed) ? mr.revealed : [],
+              status:
+                mr.status === 'won' || mr.status === 'lost' ? mr.status : 'playing',
+              wordScore: typeof mr.wordScore === 'number' ? mr.wordScore : 0,
+            }
+          : emptyMultiRound(),
+    }
+  })
+
+  return { ...game, players: hydrated }
+}
+
 /** Vue client : masque les bonnes réponses tant que la manche n’est pas close */
 export function publicRoomView(
   room: RoomState,
@@ -552,8 +647,8 @@ export function publicRoomView(
   questions: Array<{
     id: string
     question: string
-    answers: [string, string, string, string]
-    correctIndex?: 0 | 1 | 2 | 3
+    answers: string[]
+    correctIndex?: number
     explanation?: string
     sourceType?: string
     imageUrl?: string
@@ -605,9 +700,15 @@ export function publicRoomView(
   return {
     ...(({ genCollectedQuestions: _omit, ...safe }) => safe)(room),
     quizMode:
-      room.quizMode === 'audio' || /^deezer\b/i.test(String(room.theme ?? '').trim())
-        ? 'audio'
-        : 'standard',
+      room.quizMode === 'pendu'
+        ? 'pendu'
+        : room.quizMode === 'audio' || /^deezer\b/i.test(String(room.theme ?? '').trim())
+          ? 'audio'
+          : 'standard',
+    penduVariant: room.quizMode === 'pendu' ? room.penduVariant : undefined,
+    penduWordSource:
+      room.quizMode === 'pendu' ? room.penduWordSource ?? 'bank' : undefined,
+    penduGame: room.quizMode === 'pendu' ? hydratePenduGame(room) : undefined,
     audioAutoplay:
       room.quizMode === 'audio' || /^deezer\b/i.test(String(room.theme ?? '').trim())
         ? room.audioAutoplay !== false
@@ -629,7 +730,7 @@ export function publicRoomView(
         // Audio / pochette toujours visibles (sinon le quiz musical est injouable)
         previewUrl: q.previewUrl,
         coverUrl: q.coverUrl,
-        imageUrl: undefined,
+        imageUrl: q.imageUrl,
         answerMode: q.answerMode === 'free' ? 'free' : 'qcm',
         freeInputHint:
           q.freeInputHint === 'title' ? 'title' : 'title_or_artist',

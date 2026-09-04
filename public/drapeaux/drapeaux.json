@@ -1,0 +1,1178 @@
+[
+  {
+    "code": "ZA",
+    "nom": "Afrique du Sud",
+    "fichier": "images/za.png",
+    "tier": 1
+  },
+  {
+    "code": "DE",
+    "nom": "Allemagne",
+    "fichier": "images/de.png",
+    "tier": 1
+  },
+  {
+    "code": "SA",
+    "nom": "Arabie saoudite",
+    "fichier": "images/sa.png",
+    "tier": 1
+  },
+  {
+    "code": "AR",
+    "nom": "Argentine",
+    "fichier": "images/ar.png",
+    "tier": 1
+  },
+  {
+    "code": "AU",
+    "nom": "Australie",
+    "fichier": "images/au.png",
+    "tier": 1
+  },
+  {
+    "code": "AT",
+    "nom": "Autriche",
+    "fichier": "images/at.png",
+    "tier": 1
+  },
+  {
+    "code": "BE",
+    "nom": "Belgique",
+    "fichier": "images/be.png",
+    "tier": 1
+  },
+  {
+    "code": "BR",
+    "nom": "Brésil",
+    "fichier": "images/br.png",
+    "tier": 1
+  },
+  {
+    "code": "CA",
+    "nom": "Canada",
+    "fichier": "images/ca.png",
+    "tier": 1
+  },
+  {
+    "code": "CN",
+    "nom": "Chine",
+    "fichier": "images/cn.png",
+    "tier": 1
+  },
+  {
+    "code": "CO",
+    "nom": "Colombie",
+    "fichier": "images/co.png",
+    "tier": 1
+  },
+  {
+    "code": "KP",
+    "nom": "Corée du Nord",
+    "fichier": "images/kp.png",
+    "tier": 1
+  },
+  {
+    "code": "KR",
+    "nom": "Corée du Sud",
+    "fichier": "images/kr.png",
+    "tier": 1
+  },
+  {
+    "code": "CU",
+    "nom": "Cuba",
+    "fichier": "images/cu.png",
+    "tier": 1
+  },
+  {
+    "code": "DK",
+    "nom": "Danemark",
+    "fichier": "images/dk.png",
+    "tier": 1
+  },
+  {
+    "code": "ES",
+    "nom": "Espagne",
+    "fichier": "images/es.png",
+    "tier": 1
+  },
+  {
+    "code": "FR",
+    "nom": "France",
+    "fichier": "images/fr.png",
+    "tier": 1
+  },
+  {
+    "code": "GR",
+    "nom": "Grèce",
+    "fichier": "images/gr.png",
+    "tier": 1
+  },
+  {
+    "code": "IN",
+    "nom": "Inde",
+    "fichier": "images/in.png",
+    "tier": 1
+  },
+  {
+    "code": "ID",
+    "nom": "Indonésie",
+    "fichier": "images/id.png",
+    "tier": 1
+  },
+  {
+    "code": "IE",
+    "nom": "Irlande",
+    "fichier": "images/ie.png",
+    "tier": 1
+  },
+  {
+    "code": "IL",
+    "nom": "Israël",
+    "fichier": "images/il.png",
+    "tier": 1
+  },
+  {
+    "code": "IT",
+    "nom": "Italie",
+    "fichier": "images/it.png",
+    "tier": 1
+  },
+  {
+    "code": "JM",
+    "nom": "Jamaïque",
+    "fichier": "images/jm.png",
+    "tier": 1
+  },
+  {
+    "code": "JP",
+    "nom": "Japon",
+    "fichier": "images/jp.png",
+    "tier": 1
+  },
+  {
+    "code": "MA",
+    "nom": "Maroc",
+    "fichier": "images/ma.png",
+    "tier": 1
+  },
+  {
+    "code": "MX",
+    "nom": "Mexique",
+    "fichier": "images/mx.png",
+    "tier": 1
+  },
+  {
+    "code": "NG",
+    "nom": "Nigeria",
+    "fichier": "images/ng.png",
+    "tier": 1
+  },
+  {
+    "code": "NO",
+    "nom": "Norvège",
+    "fichier": "images/no.png",
+    "tier": 1
+  },
+  {
+    "code": "NZ",
+    "nom": "Nouvelle-Zélande",
+    "fichier": "images/nz.png",
+    "tier": 1
+  },
+  {
+    "code": "NL",
+    "nom": "Pays-Bas",
+    "fichier": "images/nl.png",
+    "tier": 1
+  },
+  {
+    "code": "PL",
+    "nom": "Pologne",
+    "fichier": "images/pl.png",
+    "tier": 1
+  },
+  {
+    "code": "PT",
+    "nom": "Portugal",
+    "fichier": "images/pt.png",
+    "tier": 1
+  },
+  {
+    "code": "GB",
+    "nom": "Royaume-Uni",
+    "fichier": "images/gb.png",
+    "tier": 1
+  },
+  {
+    "code": "RU",
+    "nom": "Russie",
+    "fichier": "images/ru.png",
+    "tier": 1
+  },
+  {
+    "code": "CH",
+    "nom": "Suisse",
+    "fichier": "images/ch.png",
+    "tier": 1
+  },
+  {
+    "code": "SE",
+    "nom": "Suède",
+    "fichier": "images/se.png",
+    "tier": 1
+  },
+  {
+    "code": "TH",
+    "nom": "Thaïlande",
+    "fichier": "images/th.png",
+    "tier": 1
+  },
+  {
+    "code": "TR",
+    "nom": "Turquie",
+    "fichier": "images/tr.png",
+    "tier": 1
+  },
+  {
+    "code": "UA",
+    "nom": "Ukraine",
+    "fichier": "images/ua.png",
+    "tier": 1
+  },
+  {
+    "code": "VN",
+    "nom": "Vietnam",
+    "fichier": "images/vn.png",
+    "tier": 1
+  },
+  {
+    "code": "EG",
+    "nom": "Égypte",
+    "fichier": "images/eg.png",
+    "tier": 1
+  },
+  {
+    "code": "AE",
+    "nom": "Émirats arabes unis",
+    "fichier": "images/ae.png",
+    "tier": 1
+  },
+  {
+    "code": "US",
+    "nom": "États-Unis",
+    "fichier": "images/us.png",
+    "tier": 1
+  },
+  {
+    "code": "AL",
+    "nom": "Albanie",
+    "fichier": "images/al.png",
+    "tier": 2
+  },
+  {
+    "code": "DZ",
+    "nom": "Algérie",
+    "fichier": "images/dz.png",
+    "tier": 2
+  },
+  {
+    "code": "AD",
+    "nom": "Andorre",
+    "fichier": "images/ad.png",
+    "tier": 2
+  },
+  {
+    "code": "AO",
+    "nom": "Angola",
+    "fichier": "images/ao.png",
+    "tier": 2
+  },
+  {
+    "code": "AM",
+    "nom": "Arménie",
+    "fichier": "images/am.png",
+    "tier": 2
+  },
+  {
+    "code": "AZ",
+    "nom": "Azerbaïdjan",
+    "fichier": "images/az.png",
+    "tier": 2
+  },
+  {
+    "code": "BD",
+    "nom": "Bangladesh",
+    "fichier": "images/bd.png",
+    "tier": 2
+  },
+  {
+    "code": "MM",
+    "nom": "Birmanie",
+    "fichier": "images/mm.png",
+    "tier": 2
+  },
+  {
+    "code": "BY",
+    "nom": "Biélorussie",
+    "fichier": "images/by.png",
+    "tier": 2
+  },
+  {
+    "code": "BO",
+    "nom": "Bolivie",
+    "fichier": "images/bo.png",
+    "tier": 2
+  },
+  {
+    "code": "BA",
+    "nom": "Bosnie-Herzégovine",
+    "fichier": "images/ba.png",
+    "tier": 2
+  },
+  {
+    "code": "BW",
+    "nom": "Botswana",
+    "fichier": "images/bw.png",
+    "tier": 2
+  },
+  {
+    "code": "BG",
+    "nom": "Bulgarie",
+    "fichier": "images/bg.png",
+    "tier": 2
+  },
+  {
+    "code": "KH",
+    "nom": "Cambodge",
+    "fichier": "images/kh.png",
+    "tier": 2
+  },
+  {
+    "code": "CM",
+    "nom": "Cameroun",
+    "fichier": "images/cm.png",
+    "tier": 2
+  },
+  {
+    "code": "CL",
+    "nom": "Chili",
+    "fichier": "images/cl.png",
+    "tier": 2
+  },
+  {
+    "code": "CY",
+    "nom": "Chypre",
+    "fichier": "images/cy.png",
+    "tier": 2
+  },
+  {
+    "code": "CR",
+    "nom": "Costa Rica",
+    "fichier": "images/cr.png",
+    "tier": 2
+  },
+  {
+    "code": "HR",
+    "nom": "Croatie",
+    "fichier": "images/hr.png",
+    "tier": 2
+  },
+  {
+    "code": "CI",
+    "nom": "Côte d'Ivoire",
+    "fichier": "images/ci.png",
+    "tier": 2
+  },
+  {
+    "code": "EE",
+    "nom": "Estonie",
+    "fichier": "images/ee.png",
+    "tier": 2
+  },
+  {
+    "code": "FJ",
+    "nom": "Fidji",
+    "fichier": "images/fj.png",
+    "tier": 2
+  },
+  {
+    "code": "FI",
+    "nom": "Finlande",
+    "fichier": "images/fi.png",
+    "tier": 2
+  },
+  {
+    "code": "GH",
+    "nom": "Ghana",
+    "fichier": "images/gh.png",
+    "tier": 2
+  },
+  {
+    "code": "GT",
+    "nom": "Guatemala",
+    "fichier": "images/gt.png",
+    "tier": 2
+  },
+  {
+    "code": "GE",
+    "nom": "Géorgie",
+    "fichier": "images/ge.png",
+    "tier": 2
+  },
+  {
+    "code": "HT",
+    "nom": "Haïti",
+    "fichier": "images/ht.png",
+    "tier": 2
+  },
+  {
+    "code": "HN",
+    "nom": "Honduras",
+    "fichier": "images/hn.png",
+    "tier": 2
+  },
+  {
+    "code": "HU",
+    "nom": "Hongrie",
+    "fichier": "images/hu.png",
+    "tier": 2
+  },
+  {
+    "code": "IQ",
+    "nom": "Irak",
+    "fichier": "images/iq.png",
+    "tier": 2
+  },
+  {
+    "code": "IR",
+    "nom": "Iran",
+    "fichier": "images/ir.png",
+    "tier": 2
+  },
+  {
+    "code": "IS",
+    "nom": "Islande",
+    "fichier": "images/is.png",
+    "tier": 2
+  },
+  {
+    "code": "JO",
+    "nom": "Jordanie",
+    "fichier": "images/jo.png",
+    "tier": 2
+  },
+  {
+    "code": "KZ",
+    "nom": "Kazakhstan",
+    "fichier": "images/kz.png",
+    "tier": 2
+  },
+  {
+    "code": "KE",
+    "nom": "Kenya",
+    "fichier": "images/ke.png",
+    "tier": 2
+  },
+  {
+    "code": "KW",
+    "nom": "Koweït",
+    "fichier": "images/kw.png",
+    "tier": 2
+  },
+  {
+    "code": "LA",
+    "nom": "Laos",
+    "fichier": "images/la.png",
+    "tier": 2
+  },
+  {
+    "code": "LV",
+    "nom": "Lettonie",
+    "fichier": "images/lv.png",
+    "tier": 2
+  },
+  {
+    "code": "LB",
+    "nom": "Liban",
+    "fichier": "images/lb.png",
+    "tier": 2
+  },
+  {
+    "code": "LY",
+    "nom": "Libye",
+    "fichier": "images/ly.png",
+    "tier": 2
+  },
+  {
+    "code": "LI",
+    "nom": "Liechtenstein",
+    "fichier": "images/li.png",
+    "tier": 2
+  },
+  {
+    "code": "LT",
+    "nom": "Lituanie",
+    "fichier": "images/lt.png",
+    "tier": 2
+  },
+  {
+    "code": "LU",
+    "nom": "Luxembourg",
+    "fichier": "images/lu.png",
+    "tier": 2
+  },
+  {
+    "code": "MK",
+    "nom": "Macédoine du Nord",
+    "fichier": "images/mk.png",
+    "tier": 2
+  },
+  {
+    "code": "MY",
+    "nom": "Malaisie",
+    "fichier": "images/my.png",
+    "tier": 2
+  },
+  {
+    "code": "MT",
+    "nom": "Malte",
+    "fichier": "images/mt.png",
+    "tier": 2
+  },
+  {
+    "code": "MU",
+    "nom": "Maurice",
+    "fichier": "images/mu.png",
+    "tier": 2
+  },
+  {
+    "code": "MD",
+    "nom": "Moldavie",
+    "fichier": "images/md.png",
+    "tier": 2
+  },
+  {
+    "code": "MC",
+    "nom": "Monaco",
+    "fichier": "images/mc.png",
+    "tier": 2
+  },
+  {
+    "code": "MN",
+    "nom": "Mongolie",
+    "fichier": "images/mn.png",
+    "tier": 2
+  },
+  {
+    "code": "MZ",
+    "nom": "Mozambique",
+    "fichier": "images/mz.png",
+    "tier": 2
+  },
+  {
+    "code": "NA",
+    "nom": "Namibie",
+    "fichier": "images/na.png",
+    "tier": 2
+  },
+  {
+    "code": "NI",
+    "nom": "Nicaragua",
+    "fichier": "images/ni.png",
+    "tier": 2
+  },
+  {
+    "code": "NP",
+    "nom": "Népal",
+    "fichier": "images/np.png",
+    "tier": 2
+  },
+  {
+    "code": "OM",
+    "nom": "Oman",
+    "fichier": "images/om.png",
+    "tier": 2
+  },
+  {
+    "code": "UG",
+    "nom": "Ouganda",
+    "fichier": "images/ug.png",
+    "tier": 2
+  },
+  {
+    "code": "UZ",
+    "nom": "Ouzbékistan",
+    "fichier": "images/uz.png",
+    "tier": 2
+  },
+  {
+    "code": "PK",
+    "nom": "Pakistan",
+    "fichier": "images/pk.png",
+    "tier": 2
+  },
+  {
+    "code": "PA",
+    "nom": "Panama",
+    "fichier": "images/pa.png",
+    "tier": 2
+  },
+  {
+    "code": "PG",
+    "nom": "Papouasie-Nouvelle-Guinée",
+    "fichier": "images/pg.png",
+    "tier": 2
+  },
+  {
+    "code": "PY",
+    "nom": "Paraguay",
+    "fichier": "images/py.png",
+    "tier": 2
+  },
+  {
+    "code": "PH",
+    "nom": "Philippines",
+    "fichier": "images/ph.png",
+    "tier": 2
+  },
+  {
+    "code": "PE",
+    "nom": "Pérou",
+    "fichier": "images/pe.png",
+    "tier": 2
+  },
+  {
+    "code": "QA",
+    "nom": "Qatar",
+    "fichier": "images/qa.png",
+    "tier": 2
+  },
+  {
+    "code": "RO",
+    "nom": "Roumanie",
+    "fichier": "images/ro.png",
+    "tier": 2
+  },
+  {
+    "code": "DO",
+    "nom": "République dominicaine",
+    "fichier": "images/do.png",
+    "tier": 2
+  },
+  {
+    "code": "SM",
+    "nom": "Saint-Marin",
+    "fichier": "images/sm.png",
+    "tier": 2
+  },
+  {
+    "code": "SV",
+    "nom": "Salvador",
+    "fichier": "images/sv.png",
+    "tier": 2
+  },
+  {
+    "code": "RS",
+    "nom": "Serbie",
+    "fichier": "images/rs.png",
+    "tier": 2
+  },
+  {
+    "code": "SG",
+    "nom": "Singapour",
+    "fichier": "images/sg.png",
+    "tier": 2
+  },
+  {
+    "code": "SK",
+    "nom": "Slovaquie",
+    "fichier": "images/sk.png",
+    "tier": 2
+  },
+  {
+    "code": "SI",
+    "nom": "Slovénie",
+    "fichier": "images/si.png",
+    "tier": 2
+  },
+  {
+    "code": "SD",
+    "nom": "Soudan",
+    "fichier": "images/sd.png",
+    "tier": 2
+  },
+  {
+    "code": "LK",
+    "nom": "Sri Lanka",
+    "fichier": "images/lk.png",
+    "tier": 2
+  },
+  {
+    "code": "SY",
+    "nom": "Syrie",
+    "fichier": "images/sy.png",
+    "tier": 2
+  },
+  {
+    "code": "SN",
+    "nom": "Sénégal",
+    "fichier": "images/sn.png",
+    "tier": 2
+  },
+  {
+    "code": "TZ",
+    "nom": "Tanzanie",
+    "fichier": "images/tz.png",
+    "tier": 2
+  },
+  {
+    "code": "TW",
+    "nom": "Taïwan",
+    "fichier": "images/tw.png",
+    "tier": 2
+  },
+  {
+    "code": "CZ",
+    "nom": "Tchéquie",
+    "fichier": "images/cz.png",
+    "tier": 2
+  },
+  {
+    "code": "TN",
+    "nom": "Tunisie",
+    "fichier": "images/tn.png",
+    "tier": 2
+  },
+  {
+    "code": "UY",
+    "nom": "Uruguay",
+    "fichier": "images/uy.png",
+    "tier": 2
+  },
+  {
+    "code": "VA",
+    "nom": "Vatican",
+    "fichier": "images/va.png",
+    "tier": 2
+  },
+  {
+    "code": "VE",
+    "nom": "Venezuela",
+    "fichier": "images/ve.png",
+    "tier": 2
+  },
+  {
+    "code": "YE",
+    "nom": "Yémen",
+    "fichier": "images/ye.png",
+    "tier": 2
+  },
+  {
+    "code": "ZM",
+    "nom": "Zambie",
+    "fichier": "images/zm.png",
+    "tier": 2
+  },
+  {
+    "code": "ZW",
+    "nom": "Zimbabwe",
+    "fichier": "images/zw.png",
+    "tier": 2
+  },
+  {
+    "code": "EC",
+    "nom": "Équateur",
+    "fichier": "images/ec.png",
+    "tier": 2
+  },
+  {
+    "code": "ET",
+    "nom": "Éthiopie",
+    "fichier": "images/et.png",
+    "tier": 2
+  },
+  {
+    "code": "AF",
+    "nom": "Afghanistan",
+    "fichier": "images/af.png",
+    "tier": 3
+  },
+  {
+    "code": "AG",
+    "nom": "Antigua-et-Barbuda",
+    "fichier": "images/ag.png",
+    "tier": 3
+  },
+  {
+    "code": "BS",
+    "nom": "Bahamas",
+    "fichier": "images/bs.png",
+    "tier": 3
+  },
+  {
+    "code": "BH",
+    "nom": "Bahreïn",
+    "fichier": "images/bh.png",
+    "tier": 3
+  },
+  {
+    "code": "BB",
+    "nom": "Barbade",
+    "fichier": "images/bb.png",
+    "tier": 3
+  },
+  {
+    "code": "BZ",
+    "nom": "Belize",
+    "fichier": "images/bz.png",
+    "tier": 3
+  },
+  {
+    "code": "BT",
+    "nom": "Bhoutan",
+    "fichier": "images/bt.png",
+    "tier": 3
+  },
+  {
+    "code": "BN",
+    "nom": "Brunei",
+    "fichier": "images/bn.png",
+    "tier": 3
+  },
+  {
+    "code": "BF",
+    "nom": "Burkina Faso",
+    "fichier": "images/bf.png",
+    "tier": 3
+  },
+  {
+    "code": "BI",
+    "nom": "Burundi",
+    "fichier": "images/bi.png",
+    "tier": 3
+  },
+  {
+    "code": "BJ",
+    "nom": "Bénin",
+    "fichier": "images/bj.png",
+    "tier": 3
+  },
+  {
+    "code": "CV",
+    "nom": "Cap-Vert",
+    "fichier": "images/cv.png",
+    "tier": 3
+  },
+  {
+    "code": "KM",
+    "nom": "Comores",
+    "fichier": "images/km.png",
+    "tier": 3
+  },
+  {
+    "code": "CG",
+    "nom": "Congo-Brazzaville",
+    "fichier": "images/cg.png",
+    "tier": 3
+  },
+  {
+    "code": "CD",
+    "nom": "Congo-Kinshasa (RDC)",
+    "fichier": "images/cd.png",
+    "tier": 3
+  },
+  {
+    "code": "DJ",
+    "nom": "Djibouti",
+    "fichier": "images/dj.png",
+    "tier": 3
+  },
+  {
+    "code": "DM",
+    "nom": "Dominique",
+    "fichier": "images/dm.png",
+    "tier": 3
+  },
+  {
+    "code": "SZ",
+    "nom": "Eswatini",
+    "fichier": "images/sz.png",
+    "tier": 3
+  },
+  {
+    "code": "GA",
+    "nom": "Gabon",
+    "fichier": "images/ga.png",
+    "tier": 3
+  },
+  {
+    "code": "GM",
+    "nom": "Gambie",
+    "fichier": "images/gm.png",
+    "tier": 3
+  },
+  {
+    "code": "GD",
+    "nom": "Grenade",
+    "fichier": "images/gd.png",
+    "tier": 3
+  },
+  {
+    "code": "GN",
+    "nom": "Guinée",
+    "fichier": "images/gn.png",
+    "tier": 3
+  },
+  {
+    "code": "GQ",
+    "nom": "Guinée équatoriale",
+    "fichier": "images/gq.png",
+    "tier": 3
+  },
+  {
+    "code": "GW",
+    "nom": "Guinée-Bissau",
+    "fichier": "images/gw.png",
+    "tier": 3
+  },
+  {
+    "code": "GY",
+    "nom": "Guyana",
+    "fichier": "images/gy.png",
+    "tier": 3
+  },
+  {
+    "code": "KG",
+    "nom": "Kirghizistan",
+    "fichier": "images/kg.png",
+    "tier": 3
+  },
+  {
+    "code": "KI",
+    "nom": "Kiribati",
+    "fichier": "images/ki.png",
+    "tier": 3
+  },
+  {
+    "code": "XK",
+    "nom": "Kosovo",
+    "fichier": "images/xk.png",
+    "tier": 3
+  },
+  {
+    "code": "LS",
+    "nom": "Lesotho",
+    "fichier": "images/ls.png",
+    "tier": 3
+  },
+  {
+    "code": "LR",
+    "nom": "Libéria",
+    "fichier": "images/lr.png",
+    "tier": 3
+  },
+  {
+    "code": "MG",
+    "nom": "Madagascar",
+    "fichier": "images/mg.png",
+    "tier": 3
+  },
+  {
+    "code": "MW",
+    "nom": "Malawi",
+    "fichier": "images/mw.png",
+    "tier": 3
+  },
+  {
+    "code": "MV",
+    "nom": "Maldives",
+    "fichier": "images/mv.png",
+    "tier": 3
+  },
+  {
+    "code": "ML",
+    "nom": "Mali",
+    "fichier": "images/ml.png",
+    "tier": 3
+  },
+  {
+    "code": "MR",
+    "nom": "Mauritanie",
+    "fichier": "images/mr.png",
+    "tier": 3
+  },
+  {
+    "code": "FM",
+    "nom": "Micronésie",
+    "fichier": "images/fm.png",
+    "tier": 3
+  },
+  {
+    "code": "ME",
+    "nom": "Monténégro",
+    "fichier": "images/me.png",
+    "tier": 3
+  },
+  {
+    "code": "NR",
+    "nom": "Nauru",
+    "fichier": "images/nr.png",
+    "tier": 3
+  },
+  {
+    "code": "NE",
+    "nom": "Niger",
+    "fichier": "images/ne.png",
+    "tier": 3
+  },
+  {
+    "code": "PW",
+    "nom": "Palaos",
+    "fichier": "images/pw.png",
+    "tier": 3
+  },
+  {
+    "code": "PS",
+    "nom": "Palestine",
+    "fichier": "images/ps.png",
+    "tier": 3
+  },
+  {
+    "code": "RW",
+    "nom": "Rwanda",
+    "fichier": "images/rw.png",
+    "tier": 3
+  },
+  {
+    "code": "KN",
+    "nom": "Saint-Christophe-et-Niévès",
+    "fichier": "images/kn.png",
+    "tier": 3
+  },
+  {
+    "code": "VC",
+    "nom": "Saint-Vincent-et-les-Grenadines",
+    "fichier": "images/vc.png",
+    "tier": 3
+  },
+  {
+    "code": "LC",
+    "nom": "Sainte-Lucie",
+    "fichier": "images/lc.png",
+    "tier": 3
+  },
+  {
+    "code": "SB",
+    "nom": "Salomon",
+    "fichier": "images/sb.png",
+    "tier": 3
+  },
+  {
+    "code": "WS",
+    "nom": "Samoa",
+    "fichier": "images/ws.png",
+    "tier": 3
+  },
+  {
+    "code": "ST",
+    "nom": "Sao Tomé-et-Principe",
+    "fichier": "images/st.png",
+    "tier": 3
+  },
+  {
+    "code": "SC",
+    "nom": "Seychelles",
+    "fichier": "images/sc.png",
+    "tier": 3
+  },
+  {
+    "code": "SL",
+    "nom": "Sierra Leone",
+    "fichier": "images/sl.png",
+    "tier": 3
+  },
+  {
+    "code": "SO",
+    "nom": "Somalie",
+    "fichier": "images/so.png",
+    "tier": 3
+  },
+  {
+    "code": "SS",
+    "nom": "Soudan du Sud",
+    "fichier": "images/ss.png",
+    "tier": 3
+  },
+  {
+    "code": "SR",
+    "nom": "Suriname",
+    "fichier": "images/sr.png",
+    "tier": 3
+  },
+  {
+    "code": "TJ",
+    "nom": "Tadjikistan",
+    "fichier": "images/tj.png",
+    "tier": 3
+  },
+  {
+    "code": "TD",
+    "nom": "Tchad",
+    "fichier": "images/td.png",
+    "tier": 3
+  },
+  {
+    "code": "TL",
+    "nom": "Timor oriental",
+    "fichier": "images/tl.png",
+    "tier": 3
+  },
+  {
+    "code": "TG",
+    "nom": "Togo",
+    "fichier": "images/tg.png",
+    "tier": 3
+  },
+  {
+    "code": "TO",
+    "nom": "Tonga",
+    "fichier": "images/to.png",
+    "tier": 3
+  },
+  {
+    "code": "TT",
+    "nom": "Trinité-et-Tobago",
+    "fichier": "images/tt.png",
+    "tier": 3
+  },
+  {
+    "code": "TM",
+    "nom": "Turkménistan",
+    "fichier": "images/tm.png",
+    "tier": 3
+  },
+  {
+    "code": "TV",
+    "nom": "Tuvalu",
+    "fichier": "images/tv.png",
+    "tier": 3
+  },
+  {
+    "code": "VU",
+    "nom": "Vanuatu",
+    "fichier": "images/vu.png",
+    "tier": 3
+  },
+  {
+    "code": "ER",
+    "nom": "Érythrée",
+    "fichier": "images/er.png",
+    "tier": 3
+  },
+  {
+    "code": "MH",
+    "nom": "Îles Marshall",
+    "fichier": "images/mh.png",
+    "tier": 3
+  }
+]

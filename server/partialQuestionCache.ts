@@ -12,8 +12,8 @@ const TARGET = 10
 export type PartialCachedQuestion = {
   id: string
   question: string
-  answers: [string, string, string, string]
-  correctIndex: 0 | 1 | 2 | 3
+  answers: string[]
+  correctIndex: number
   difficulty: 'easy' | 'medium' | 'hard'
   themeSlug: string
   createdAt: string

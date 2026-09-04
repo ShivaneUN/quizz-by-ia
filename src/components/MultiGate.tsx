@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { pollRoom } from '../lib/multiApi'
+import { useSharedDisplayName } from '../lib/displayName'
 import {
   clearLastMultiRoom,
   loadLastMultiRoom,
@@ -80,7 +81,7 @@ export function MultiGate({
   error,
 }: MultiGateProps) {
   const [tab, setTab] = useState<'create' | 'join'>('create')
-  const [name, setName] = useState('')
+  const { name, setName, commit } = useSharedDisplayName()
   const [code, setCode] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
   const [lastRoom, setLastRoom] = useState<LastMultiRoom | null>(null)
@@ -90,7 +91,6 @@ export function MultiGate({
     const saved = loadLastMultiRoom()
     if (!saved) return
     setLastRoom(saved)
-    setName((prev) => (prev.trim() ? prev : saved.playerName))
     setLastStatus('checking')
     let cancelled = false
     ;(async () => {
@@ -120,6 +120,7 @@ export function MultiGate({
       return
     }
     setLocalError(null)
+    commit(trimmedName)
     if (tab === 'create') onCreate(trimmedName)
     else onJoin(code.trim().toUpperCase(), trimmedName)
   }
@@ -128,6 +129,7 @@ export function MultiGate({
     if (!lastRoom || busy || lastStatus !== 'active') return
     const pseudo = trimmedName.length >= 2 ? trimmedName : lastRoom.playerName
     setLocalError(null)
+    commit(pseudo)
     onJoin(lastRoom.code, pseudo)
   }
 

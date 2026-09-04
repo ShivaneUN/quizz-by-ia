@@ -1,0 +1,40 @@
+.answer-tts {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  margin-left: 0.35rem;
+  padding: 0;
+  vertical-align: middle;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--teal) 28%, transparent);
+  background: color-mix(in srgb, var(--paper-elevated) 88%, transparent);
+  color: var(--teal);
+  cursor: pointer;
+}
+
+.answer-tts:hover {
+  border-color: color-mix(in srgb, var(--teal) 55%, transparent);
+}
+
+.answer-tts.is-active {
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: transparent;
+}
+
+.answer-tts__spinner {
+  width: 0.65rem;
+  height: 0.65rem;
+  border: 2px solid color-mix(in srgb, currentColor 35%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: answer-tts-spin 0.7s linear infinite;
+}
+
+@keyframes answer-tts-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

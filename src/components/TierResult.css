@@ -54,6 +54,19 @@
   cursor: not-allowed;
 }
 
+.tier-result__diffs--count {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.tier-result__diff--count {
+  min-width: 2.6rem;
+  padding: 0.4rem 0.55rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
 .tier-result__actions {
   display: grid;
   gap: 0.65rem;

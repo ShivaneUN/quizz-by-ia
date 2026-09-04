@@ -25,6 +25,7 @@ import {
   hostResumeTimer,
   resetPlayersForNewGame,
   clearGeneratingFields,
+  hydratePenduGame,
   tryAcquireGenLock,
   releaseGenLock,
   forceReleaseGenLock,
@@ -50,7 +51,6 @@ import {
   createDuoGame,
   createMultiGame,
   guessLetter,
-  guessWord,
   isPenduMyTurn,
   penduScoresByPlayerId,
   SOLO_DUO_WORDS,
@@ -362,6 +362,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         room.quizMode = 'pendu'
         room.penduVariant = variant
         room.penduGame = game
+        if (variant === 'multi') {
+          room.penduGame = hydratePenduGame(room) ?? game
+        }
         const played = [
           ...(room.penduPlayedWords ?? []),
           ...filled.words,
@@ -1405,7 +1408,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!room.players.some((p) => p.id === playerId)) {
         return json(res, 403, { error: 'Pas dans la salle' })
       }
-      let game = room.penduGame as PenduGame
+      let game = (hydratePenduGame(room) ?? room.penduGame) as PenduGame
+      room.penduGame = game
       const isMultiParallel = game.mode === 'multi'
       if (!isMultiParallel && kind !== 'continue' && !isPenduMyTurn(game, playerId)) {
         return json(res, 400, { error: 'Pas ton tour' })
@@ -1417,7 +1421,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (kind === 'letter') {
         game = guessLetter(game, String(body.letter ?? ''), isMultiParallel ? playerId : undefined)
       } else if (kind === 'word') {
-        game = guessWord(game, String(body.word ?? ''), isMultiParallel ? playerId : undefined)
+        return json(res, 400, { error: 'Le mot entier n’est plus proposé' })
       } else if (kind === 'hintEliminate') {
         game = useHintEliminate(game)
       } else if (kind === 'hintReveal') {

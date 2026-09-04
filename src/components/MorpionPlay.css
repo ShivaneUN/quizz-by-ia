@@ -1,0 +1,101 @@
+.morpion-play {
+  width: min(22rem, 100%);
+  margin: 0 auto;
+  display: grid;
+  gap: 0.65rem;
+  justify-items: center;
+  text-align: center;
+}
+
+.morpion-play__code {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.morpion-play__vs {
+  margin: 0;
+  font-weight: 800;
+  color: var(--teal);
+}
+
+.morpion-play__status {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #f0c14b;
+  min-height: 1.4em;
+}
+
+.morpion-play__board {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.45rem;
+  width: min(18rem, 100%);
+}
+
+.morpion-play__cell {
+  aspect-ratio: 1;
+  border-radius: 14px;
+  border: 2px solid color-mix(in srgb, #4db8ff 40%, transparent);
+  background: #0a1835;
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: clamp(1.8rem, 8vw, 2.4rem);
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+}
+
+.morpion-play__cell:disabled {
+  cursor: default;
+}
+
+.morpion-play__cell:not(:disabled):hover,
+.morpion-play__cell:not(:disabled):focus-visible {
+  border-color: #f0c14b;
+  outline: none;
+}
+
+.morpion-play__cell.is-x {
+  color: #f0c14b;
+}
+
+.morpion-play__cell.is-o {
+  color: #2ec4a8;
+}
+
+.morpion-play__error {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #ff7a45;
+}
+
+.morpion-play__replay {
+  width: 100%;
+  max-width: 18rem;
+  padding: 0.7rem 1.2rem;
+  font-size: 0.95rem;
+}
+
+.morpion-play__leave {
+  border: none;
+  background: transparent;
+  color: var(--ink-muted);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  padding: 0.4rem;
+}
+
+.morpion-play__leave:hover {
+  color: #ff7a45;
+}

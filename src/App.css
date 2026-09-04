@@ -141,6 +141,10 @@
   animation: fade-in 0.3s ease both;
 }
 
+.pendu-hub {
+  width: min(24rem, 100%);
+}
+
 .app__hint {
   margin: 0;
   font-size: 0.85rem;

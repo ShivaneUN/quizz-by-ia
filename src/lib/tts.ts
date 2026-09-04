@@ -77,8 +77,36 @@ export function emitTtsStart(): void {
   window.dispatchEvent(new Event(TTS_START_EVENT))
 }
 
+type PlaybackStopHandler = () => void
+const playbackStopHandlers = new Set<PlaybackStopHandler>()
+
+/** Enregistre un coupe-son (TTS / Deezer). Retourne le désabonnement. */
+export function onPlaybackStop(handler: PlaybackStopHandler): () => void {
+  playbackStopHandlers.add(handler)
+  return () => {
+    playbackStopHandlers.delete(handler)
+  }
+}
+
+/** Coupe TTS + extraits Deezer (réponse cliquée, timeout, etc.). */
 export function emitTtsStop(): void {
   window.dispatchEvent(new Event(TTS_STOP_EVENT))
+  for (const handler of [...playbackStopHandlers]) {
+    try {
+      handler()
+    } catch {
+      /* ignore */
+    }
+  }
+  if (typeof document !== 'undefined') {
+    document.querySelectorAll('audio').forEach((el) => {
+      try {
+        el.pause()
+      } catch {
+        /* ignore */
+      }
+    })
+  }
 }
 
 export function emitPreviewPlay(): void {
@@ -89,7 +117,7 @@ export async function fetchTtsAudio(
   input: {
     voice: TtsVoiceId
     question: string
-    answers: [string, string, string, string]
+    answers: string[]
     answerMode?: 'qcm' | 'free'
   },
   signal?: AbortSignal,

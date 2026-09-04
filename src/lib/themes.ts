@@ -27,6 +27,9 @@ const ORBIT_IDS: Omit<ThemeTile, 'angle'>[] = [
   { id: 'espace', label: 'Espace', color: '#1a2a6b', shape: 'circle' },
   { id: 'jeuxvideo', label: 'Jeux vidéo', color: '#0d5c5c', shape: 'circle' },
   { id: 'actualite', label: 'Actualité', color: '#8a3a1a', shape: 'circle' },
+  { id: 'langues', label: 'Langues', color: '#1a5f7a', shape: 'circle' },
+  { id: 'drapeaux', label: 'Drapeaux', color: '#1e4d8c', shape: 'circle' },
+  { id: 'aleatoire', label: 'Aléatoire', color: '#5c4a1f', shape: 'circle' },
   /** Orphelins banque — bientôt */
   { id: 'custom', label: 'Custom', color: '#4a5568', shape: 'circle', soon: true },
   /** Banque Q déjà générées — bientôt */
@@ -198,12 +201,38 @@ export const SUBTHEMES: Record<string, string[]> = {
     'Sciences & tech',
     'Sport actualité',
   ],
+  langues: [
+    'Général',
+    'Anglais',
+    'Espagnol',
+    'Allemand',
+    'Italien',
+    'Portugais',
+    'Français',
+    'Arabe',
+    'Japonais',
+    'Coréen',
+    'Chinois',
+    'Russe',
+    'Néerlandais',
+    'Turc',
+    'Polonais',
+    'Suédois',
+    'Grec',
+    'Hébreu',
+    'Hindi',
+    'Vietnamien',
+    'Cambodgien',
+  ],
+  drapeaux: [],
+  aleatoire: [],
   custom: ['Général'],
   pregen: ['Général'],
 }
 
 /** Sous-thèmes officiels + pastille « Custom » (générés associés). */
 export function officialSubsForTheme(themeId: string): string[] {
+  if (themeId === 'aleatoire' || themeId === 'drapeaux') return []
   const base = SUBTHEMES[themeId] ?? ['Général']
   if (themeId === 'custom' || themeId === 'pregen') return base
   if (base.includes('Custom')) return base
@@ -212,6 +241,17 @@ export function officialSubsForTheme(themeId: string): string[] {
 
 export function getThemeById(id: string): ThemeTile | undefined {
   return ORBIT_THEMES.find((t) => t.id === id)
+}
+
+/** Thème Langues (apprentissage) — pour TTS bonne réponse, etc. */
+export function isLanguesTheme(theme?: string | null): boolean {
+  if (!theme?.trim()) return false
+  const n = theme
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+  const head = n.split(/\s*[—\-–|]\s*/)[0]?.trim() ?? n
+  return head === 'langues'
 }
 
 /** Libellé envoyé à l’API : "Musique — Pop" ou "Musique" si Général */

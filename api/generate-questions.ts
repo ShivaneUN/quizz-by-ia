@@ -16,6 +16,8 @@ import {
   recordGenerationMs,
 } from '../server/genStats.js'
 import { logError } from '../server/errorLog.js'
+import { resolveQuizScope } from '../server/quizScope.js'
+import { isFlagTheme } from '../server/flagQuiz.js'
 
 export const config = {
   maxDuration: 60,
@@ -51,8 +53,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       quizMode: rawQuizMode,
       excludeQuestions: rawExclude,
       progressId: rawProgressId,
+      flagCount: rawFlagCount,
+      flagDifficulty: rawFlagDifficulty,
     } = req.body ?? {}
-    const scope = parseScope(rawScope)
+    const scopeRaw = parseScope(rawScope)
     const provider = parseAiProvider(rawProvider)
     const quizMode = parseQuizContentMode(rawQuizMode)
     const excludeQuestions = Array.isArray(rawExclude)
@@ -65,12 +69,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!theme || typeof theme !== 'string' || !theme.trim()) {
       return res.status(400).json({ error: 'theme requis' })
     }
+    const scope =
+      quizMode === 'audio'
+        ? scopeRaw
+        : resolveQuizScope(theme.trim(), scopeRaw)
     if (mode !== 'initial' && mode !== 'complementary') {
       return res
         .status(400)
         .json({ error: "mode doit être 'initial' ou 'complementary'" })
     }
-    if (mode === 'complementary') {
+    if (mode === 'complementary' && !isFlagTheme(String(theme))) {
       const ok =
         difficulty === 'easy' ||
         difficulty === 'medium' ||
@@ -111,6 +119,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         : undefined,
       true,
+      undefined,
+      typeof rawFlagCount === 'number' ? rawFlagCount : Number(rawFlagCount) || undefined,
+      typeof rawFlagDifficulty === 'string' ? rawFlagDifficulty : undefined,
     )
     const generationMs = Date.now() - started
     const qCount = Array.isArray(result.questions) ? result.questions.length : 0

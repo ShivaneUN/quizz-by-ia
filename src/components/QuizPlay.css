@@ -162,6 +162,19 @@
   gap: 0.65rem;
 }
 
+.quiz-play__answers--n8,
+.quiz-play__answers--n10 {
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+}
+
+.quiz-play__answers--n8 .quiz-play__answer,
+.quiz-play__answers--n10 .quiz-play__answer {
+  padding: 0.55rem 0.7rem;
+  font-size: 0.88rem;
+  min-height: 2.6rem;
+}
+
 .quiz-play__free {
   display: grid;
   gap: 0.5rem;

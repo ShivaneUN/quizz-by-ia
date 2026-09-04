@@ -1,4 +1,5 @@
 import type { Difficulty, QuizScope, AiProvider, QuizContentMode } from '../types'
+import type { PenduGame } from './pendu'
 
 export interface MultiPlayer {
   id: string
@@ -15,8 +16,8 @@ export interface MultiPlayer {
 export interface MultiQuestion {
   id: string
   question: string
-  answers: [string, string, string, string]
-  correctIndex?: 0 | 1 | 2 | 3
+  answers: string[]
+  correctIndex?: number
   explanation?: string
   sourceType?: string
   imageUrl?: string
@@ -39,6 +40,13 @@ export interface MultiRoom {
   difficulty?: Difficulty
   aiProvider?: AiProvider
   quizMode?: QuizContentMode
+  penduVariant?: 'duo' | 'multi'
+  /** Banque locale seule ou banque + IA quand épuisée */
+  penduWordSource?: 'bank' | 'ai'
+  penduGame?: PenduGame
+  /** Drapeaux */
+  flagCount?: number
+  flagDifficulty?: 'easy' | 'medium' | 'hard' | 'expert'
   /** Deezer : lecture auto des extraits */
   audioAutoplay?: boolean
   /** Présent si status === 'error' */
@@ -169,7 +177,11 @@ export async function createRoom(input: {
   playMode?: 'progression' | 'free'
   aiProvider?: AiProvider
   quizMode?: QuizContentMode
+  penduVariant?: 'duo' | 'multi'
+  penduWordSource?: 'bank' | 'ai'
   audioAutoplay?: boolean
+  flagCount?: number
+  flagDifficulty?: 'easy' | 'medium' | 'hard' | 'expert'
 }) {
   const data = await postRoom({ action: 'create', ...input })
   return { room: data.room!, playerId: data.playerId, message: data.message }
@@ -236,9 +248,24 @@ export async function setRoomTheme(input: {
   scope: QuizScope
   aiProvider?: AiProvider
   quizMode?: QuizContentMode
+  penduVariant?: 'duo' | 'multi'
+  penduWordSource?: 'bank' | 'ai'
+  difficulty?: Difficulty
   audioAutoplay?: boolean
+  flagCount?: number
+  flagDifficulty?: 'easy' | 'medium' | 'hard' | 'expert'
 }) {
   const data = await postRoom({ action: 'setTheme', ...input })
+  return { room: data.room! }
+}
+
+export async function penduRoomMove(input: {
+  code: string
+  playerId: string
+  kind: 'letter' | 'hintEliminate' | 'hintReveal' | 'continue'
+  letter?: string
+}) {
+  const data = await postRoom({ action: 'pendu', ...input })
   return { room: data.room! }
 }
 

@@ -1,6 +1,7 @@
 import type { MultiRoom } from '../lib/multiApi'
 import type { Difficulty } from '../types'
 import { DIFFICULTY_LABELS, PASS_THRESHOLD, QUESTIONS_PER_TIER } from '../types'
+import { isFlagTheme } from '../lib/flagQuiz'
 import { HostPlayersPanel } from './HostPlayersPanel'
 import { WaitMiniGames } from './WaitMiniGames'
 import './MultiLobby.css'
@@ -19,6 +20,14 @@ interface MultiLobbyProps {
   onChangeTheme?: () => void
   onCancelGenerate?: () => void
   onTypingScore?: (score: number) => void
+  onMorpionEnter?: (payload: import('./WaitMiniGames').MorpionEnterPayload) => void
+  morpionResume?: import('./WaitMiniGames').MorpionEnterPayload | null
+  onMorpionMove?: (cell: number) => void
+  onMorpionReplay?: () => void
+  onMorpionLeave?: () => void
+  morpionBusy?: boolean
+  morpionError?: string | null
+  morpionDefaultName?: string
 }
 
 export function MultiLobby({
@@ -34,6 +43,14 @@ export function MultiLobby({
   onChangeTheme,
   onCancelGenerate,
   onTypingScore,
+  onMorpionEnter,
+  morpionResume,
+  onMorpionMove,
+  onMorpionReplay,
+  onMorpionLeave,
+  morpionBusy,
+  morpionError,
+  morpionDefaultName,
 }: MultiLobbyProps) {
   const isHost = playerId === room.hostId
   const timerOn = room.timerEnabled !== false
@@ -43,6 +60,12 @@ export function MultiLobby({
       ? room.difficulty
       : 'easy'
   const generating = room.status === 'generating' || busy
+  const isPendu = room.quizMode === 'pendu'
+  const penduCount = room.players.length
+  const penduReady =
+    room.penduVariant === 'duo'
+      ? penduCount === 2
+      : penduCount >= 2 && penduCount <= 8
   const roomError =
     room.status === 'error'
       ? room.errorMessage || 'La génération a échoué. Réessaie.'
@@ -56,9 +79,19 @@ export function MultiLobby({
       <p className="multi-lobby__theme">
         {room.theme} · {room.scope === 'fr' ? 'Français' : 'International'}
         {room.quizMode === 'audio' ? ' · Musique Deezer' : ''}
-        {playMode === 'progression' ? ' · Paliers' : ' · Libre'}
-        {` · ${DIFFICULTY_LABELS[difficulty]}`}
-        {timerOn ? ' · Chrono 10 s' : ' · Sans chrono'}
+        {room.quizMode === 'pendu'
+          ? ` · Pendu ${room.penduVariant === 'duo' ? 'Duo' : 'Multi'} · ${DIFFICULTY_LABELS[difficulty]} · ${room.penduWordSource === 'ai' ? 'Banque + IA' : 'Banque locale'}`
+          : ''}
+        {room.flagCount
+          ? ` · ${room.flagCount} drapeaux${
+              room.flagDifficulty === 'expert' ? ' · Hard' : ''
+            }`
+          : ''}
+        {room.quizMode !== 'pendu' &&
+          (playMode === 'progression' ? ' · Paliers' : ' · Libre')}
+        {room.quizMode !== 'pendu' && ` · ${DIFFICULTY_LABELS[difficulty]}`}
+        {room.quizMode !== 'pendu' &&
+          (timerOn ? ' · Chrono 10 s' : ' · Sans chrono')}
       </p>
 
       <HostPlayersPanel
@@ -91,14 +124,32 @@ export function MultiLobby({
       {room.status === 'generating' && (
         <WaitMiniGames
           mode="multi"
-          statusLabel="Génération des questions… Tout le monde reste synchronisé."
+          statusLabel={
+            room.quizMode === 'audio'
+              ? 'Tirage Deezer… Tout le monde reste synchronisé.'
+              : isFlagTheme(room.theme)
+                ? 'Préparation des drapeaux… Tout le monde reste synchronisé.'
+                : 'Génération IA… Tout le monde reste synchronisé.'
+          }
           theme={room.theme || null}
           difficultyLabel={DIFFICULTY_LABELS[difficulty]}
           onScoreChange={onTypingScore}
           estimateSec={room.genEstimateSec ?? null}
           questionsDone={room.genQuestionsDone ?? 0}
           questionsTotal={room.genQuestionsTotal ?? 10}
-          aiSource={room.genAiSource ?? null}
+          aiSource={
+            room.quizMode === 'audio'
+              ? 'deezer'
+              : (room.genAiSource ?? null)
+          }
+          onMorpionEnter={onMorpionEnter}
+          morpionResume={morpionResume}
+          onMorpionMove={onMorpionMove}
+          onMorpionReplay={onMorpionReplay}
+          onMorpionLeave={onMorpionLeave}
+          morpionBusy={morpionBusy}
+          morpionError={morpionError}
+          morpionDefaultName={morpionDefaultName}
         />
       )}
 
@@ -127,12 +178,20 @@ export function MultiLobby({
               <button
                 type="button"
                 className="btn btn--primary"
-                disabled={generating || room.players.length < 1}
+                disabled={generating || (isPendu ? !penduReady : room.players.length < 1)}
                 onClick={onStart}
               >
-                {room.status === 'error'
-                  ? `Réessayer (10 Q · ${DIFFICULTY_LABELS[difficulty]}${timerOn ? ' · 10 s' : ''})`
-                  : `Démarrer (10 Q · ${DIFFICULTY_LABELS[difficulty]}${timerOn ? ' · 10 s' : ''})`}
+                {isPendu
+                  ? room.penduVariant === 'duo'
+                    ? penduCount === 2
+                      ? 'Démarrer le pendu Duo'
+                      : `Duo : 2 joueurs (${penduCount}/2)`
+                    : penduCount >= 2
+                      ? 'Démarrer le pendu Multi'
+                      : `Multi : au moins 2 joueurs (${penduCount}/2)`
+                  : room.status === 'error'
+                    ? `Réessayer (10 Q · ${DIFFICULTY_LABELS[difficulty]}${timerOn ? ' · 10 s' : ''})`
+                    : `Démarrer (10 Q · ${DIFFICULTY_LABELS[difficulty]}${timerOn ? ' · 10 s' : ''})`}
               </button>
               {onChangeTheme && (
                 <button

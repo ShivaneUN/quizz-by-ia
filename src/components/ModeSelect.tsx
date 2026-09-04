@@ -80,7 +80,7 @@ export function ModeSelect({ onSolo, onMulti, onMinigames }: ModeSelectProps) {
         </span>
         <span className="mode-card__label">Mini-jeux</span>
         <span className="mode-card__hint">
-          Frappe · Flappy — joue librement
+          Frappe · Flappy · Morpion
         </span>
       </button>
 

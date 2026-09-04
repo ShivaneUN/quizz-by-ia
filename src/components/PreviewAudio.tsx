@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { emitPreviewPlay, ttsEvents } from '../lib/tts'
+import { emitPreviewPlay, onPlaybackStop, ttsEvents } from '../lib/tts'
 import { writeDeezerAutoplayPreference } from '../lib/deezerStyles'
 
 interface PreviewAudioProps {
@@ -11,6 +11,8 @@ interface PreviewAudioProps {
   autoPlay?: boolean
   /** Notifie le parent si l’utilisateur bascule Auto */
   onAutoPlayChange?: (on: boolean) => void
+  /** Réponse envoyée / révélée → coupe et empêche la reprise auto */
+  halted?: boolean
   figureClassName?: string
   audioClassName?: string
   captionClassName?: string
@@ -23,17 +25,26 @@ export function PreviewAudio({
   maxSeconds = 30,
   autoPlay = false,
   onAutoPlayChange,
+  halted = false,
   figureClassName = 'quiz-play__media quiz-play__media--audio',
   audioClassName = 'quiz-play__audio',
   captionClassName = 'quiz-play__audio-caption',
 }: PreviewAudioProps) {
   const ref = useRef<HTMLAudioElement>(null)
+  const haltedRef = useRef(halted)
+  haltedRef.current = halted
   const limit = Math.max(1, maxSeconds)
   const [auto, setAuto] = useState(autoPlay)
 
   useEffect(() => {
     setAuto(autoPlay)
   }, [autoPlay])
+
+  function pauseNow() {
+    const el = ref.current
+    if (!el) return
+    el.pause()
+  }
 
   function toggleAuto() {
     setAuto((v) => {
@@ -56,7 +67,7 @@ export function PreviewAudio({
       /* ignore */
     }
 
-    if (!auto) {
+    if (!auto || haltedRef.current) {
       return () => {
         el.pause()
         try {
@@ -69,7 +80,7 @@ export function PreviewAudio({
 
     let cancelled = false
     const tryPlay = () => {
-      if (cancelled) return
+      if (cancelled || haltedRef.current) return
       void el.play().catch(() => {
         /* politique autoplay navigateur */
       })
@@ -93,6 +104,12 @@ export function PreviewAudio({
     }
   }, [questionId, src, auto])
 
+  // Réponse cliquée / révélée
+  useEffect(() => {
+    if (!halted) return
+    pauseNow()
+  }, [halted])
+
   useEffect(() => {
     const el = ref.current
     if (!el) return
@@ -107,15 +124,28 @@ export function PreviewAudio({
     const onTtsStart = () => {
       el.pause()
     }
-    const onPlay = () => emitPreviewPlay()
+    const onStop = () => {
+      el.pause()
+    }
+    const onPlay = () => {
+      if (haltedRef.current) {
+        el.pause()
+        return
+      }
+      emitPreviewPlay()
+    }
 
     el.addEventListener('timeupdate', clip)
     el.addEventListener('play', onPlay)
     window.addEventListener(ttsEvents.start, onTtsStart)
+    window.addEventListener(ttsEvents.stop, onStop)
+    const off = onPlaybackStop(() => el.pause())
     return () => {
       el.removeEventListener('timeupdate', clip)
       el.removeEventListener('play', onPlay)
       window.removeEventListener(ttsEvents.start, onTtsStart)
+      window.removeEventListener(ttsEvents.stop, onStop)
+      off()
     }
   }, [questionId, limit])
 

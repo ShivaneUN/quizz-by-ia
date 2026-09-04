@@ -13,9 +13,9 @@ import {
   type ChatChannel,
   type ChatMessage,
 } from '../lib/chatApi'
+import { saveDisplayName, useSharedDisplayName } from '../lib/displayName'
 import './MultiChat.css'
 
-const CHAT_NAME_KEY = 'quizz:chatDisplayName'
 const CHAT_LAYOUT_KEY = 'quizz:chatLayout'
 
 const EMOJIS = [
@@ -63,22 +63,6 @@ type ChatLayout = {
   y: number | null
   w: number
   h: number
-}
-
-function loadChatName(): string {
-  try {
-    return localStorage.getItem(CHAT_NAME_KEY)?.trim() ?? ''
-  } catch {
-    return ''
-  }
-}
-
-function saveChatName(name: string) {
-  try {
-    localStorage.setItem(CHAT_NAME_KEY, name.trim().slice(0, 24))
-  } catch {
-    /* ignore */
-  }
 }
 
 function loadLayout(): ChatLayout {
@@ -197,11 +181,11 @@ export function MultiChat({
   const [channel, setChannel] = useState<ChatChannel>('global')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [text, setText] = useState('')
-  const [displayName, setDisplayName] = useState(() => {
-    const pref = preferredName.trim()
-    if (pref.length >= 2) return pref
-    return loadChatName()
-  })
+  const {
+    name: displayName,
+    setName: setDisplayName,
+    commit: commitName,
+  } = useSharedDisplayName(preferredName)
   const [error, setError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [unread, setUnread] = useState(0)
@@ -222,9 +206,9 @@ export function MultiChat({
     const pref = preferredName.trim()
     if (pref.length >= 2) {
       setDisplayName(pref)
-      saveChatName(pref)
+      saveDisplayName(pref)
     }
-  }, [preferredName])
+  }, [preferredName, setDisplayName])
 
   useEffect(() => {
     if (!playerId) return
@@ -447,7 +431,7 @@ export function MultiChat({
     setSending(true)
     setError(null)
     setEmojiOpen(false)
-    saveChatName(name)
+    commitName(name)
     try {
       const msg = await sendChat({
         channel,
@@ -580,7 +564,7 @@ export function MultiChat({
               onChange={(e) => setDisplayName(e.target.value.slice(0, 24))}
               onBlur={() => {
                 const n = displayName.trim()
-                if (n.length >= 2) saveChatName(n)
+                if (n.length >= 2) commitName(n)
               }}
               placeholder="Ton pseudo…"
               maxLength={24}

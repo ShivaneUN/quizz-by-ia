@@ -6,6 +6,8 @@ import {
   officialSubsForTheme,
   type ThemeTile,
 } from '../lib/themes'
+import { resolveQuizScope, themeSupportsFrScope } from '../lib/quizScope'
+import { drawRandomThemePair } from '../lib/randomTheme'
 import {
   DEEZER_GLOBAL_OPTION,
   DEEZER_STYLE_OPTIONS,
@@ -25,6 +27,18 @@ import {
 import type { AiProvider } from '../types'
 import { ThemeIcon } from './ThemeIcon'
 import { ensureCuratedThemeFromPlay } from '../lib/curatedBank'
+import {
+  FLAG_CHOICE_COUNT,
+  FLAG_DIFFICULTIES,
+  FLAG_DIFFICULTY_LABELS,
+  FLAG_MAX_COUNT,
+  clampFlagCount,
+  flagCountSteps,
+  flagDifficultyToQuestionDifficulty,
+  type FlagDifficulty,
+} from '../lib/flagQuiz'
+import { type PenduMode } from '../lib/pendu'
+import { type PenduWordSource } from '../lib/penduWords'
 import './ThemeSelect.css'
 
 export type GameModeOption = 'progression' | 'free'
@@ -37,6 +51,18 @@ export interface ThemeStartOptions {
   gameMode: GameModeOption
   aiProvider: AiProvider
   quizMode: QuizContentMode
+  flagDifficulty?: FlagDifficulty
+  flagCount?: number
+  penduVariant?: 'duo' | 'multi'
+  penduWordSource?: 'bank' | 'ai'
+}
+
+export type PenduStartPayload = {
+  mode: PenduMode
+  names?: string[]
+  difficulty?: Difficulty
+  words?: string[]
+  wordSource?: PenduWordSource
 }
 
 const AI_OPTIONS: { id: AiProvider; label: string; hint: string }[] = [
@@ -65,6 +91,10 @@ interface ThemeSelectProps {
   soloLocked?: boolean
   soloLockHint?: string
   onReturnToRoom?: () => void
+  /** Type Pendu — lance le jeu local (pas de génération IA) */
+  onPendu?: (payload: PenduStartPayload) => void
+  /** Joueurs déjà dans la salle (multi) — Duo grisé si > 2 */
+  playerCount?: number
   /** Barre nav icônes sous le titre (accueil) */
   topDock?: ReactNode
 }
@@ -80,6 +110,8 @@ export function ThemeSelect({
   soloLocked = false,
   soloLockHint,
   onReturnToRoom,
+  onPendu,
+  playerCount = 1,
   topDock,
 }: ThemeSelectProps) {
   const [themeId, setThemeId] = useState<string | null>(null)
@@ -103,10 +135,17 @@ export function ThemeSelect({
   const [deezerStyleId, setDeezerStyleId] = useState<string>('pop')
   const [deezerDecadeId, setDeezerDecadeId] = useState<string>('all')
   const [deezerQuery, setDeezerQuery] = useState('')
+  const [flagDifficulty, setFlagDifficulty] = useState<FlagDifficulty>('easy')
+  const [flagCount, setFlagCount] = useState(10)
+  const [isPendu, setIsPendu] = useState(false)
+  const [penduMode, setPenduMode] = useState<PenduMode>('solo')
+  const [penduWordSource, setPenduWordSource] = useState<PenduWordSource>('bank')
 
   const isMulti = variant === 'multi'
+  const duoLocked = isMulti && playerCount > 2
   const showDifficulty = gameMode === 'free'
-  const isDeezer = quizMode === 'audio'
+  const isDeezer = quizMode === 'audio' && !isPendu
+  const isFlags = themeId === 'drapeaux' && !isPendu
 
   const parent = themeId ? getThemeById(themeId) : undefined
   const officialSubs = themeId ? officialSubsForTheme(themeId) : []
@@ -118,6 +157,31 @@ export function ThemeSelect({
   const deezerStyle =
     DEEZER_STYLE_OPTIONS.find((s) => s.id === deezerStyleId) ??
     DEEZER_STYLE_OPTIONS[0]
+
+  /** Thèmes hors ancrage FR → bascule auto International (sauf Deezer / Aléatoire). */
+  useEffect(() => {
+    if (isDeezer || themeId === 'aleatoire') return
+    const label =
+      customTheme.trim() ||
+      (parent && themeId !== 'custom' && themeId !== 'pregen'
+        ? formatThemeQuery(parent.label, subtheme === 'Custom' ? 'Général' : subtheme)
+        : '')
+    if (!label) return
+    if (scope === 'fr' && !themeSupportsFrScope(label)) {
+      setScope('international')
+    }
+  }, [isDeezer, customTheme, parent, themeId, subtheme, scope])
+
+  useEffect(() => {
+    if (duoLocked && penduMode === 'duo') setPenduMode('multi')
+  }, [duoLocked, penduMode])
+
+  useEffect(() => {
+    if (!isFlags) return
+    setGameMode('free')
+    setQuizMode('standard')
+    setFlagCount((n) => clampFlagCount(flagDifficulty, n))
+  }, [isFlags, flagDifficulty])
 
   useEffect(() => {
     let cancelled = false
@@ -156,7 +220,7 @@ export function ThemeSelect({
   }, [])
 
   useEffect(() => {
-    if (themeId === 'custom' || themeId === 'pregen') {
+    if (themeId === 'custom' || themeId === 'pregen' || themeId === 'aleatoire') {
       if (subtheme !== 'Général') setSubtheme('Général')
     }
   }, [themeId, subtheme])
@@ -175,6 +239,11 @@ export function ThemeSelect({
     setSubtheme('Général')
     setCustomTheme('')
     setCustomFromThemeId(null)
+    if (t.id === 'drapeaux') {
+      setGameMode('free')
+      setQuizMode('standard')
+      setIsPendu(false)
+    }
   }
 
   /** Custom d’un thème → même flux que la barre manuelle du centre */
@@ -201,6 +270,7 @@ export function ThemeSelect({
     const manual = customTheme.trim()
     if (manual) return manual
     if (!parent || !themeId) return ''
+    if (themeId === 'aleatoire') return parent.label
     if (themeId === 'custom' || themeId === 'pregen') return ''
     if (generatedUnderTheme.includes(subtheme)) return subtheme.trim()
     if (subtheme === 'Custom') return ''
@@ -210,6 +280,26 @@ export function ThemeSelect({
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (busy || (variant === 'solo' && soloLocked)) return
+
+    if (isPendu) {
+      if (!isMulti) {
+        onPendu?.({ mode: 'solo', difficulty, wordSource: penduWordSource })
+        return
+      }
+      const variantPendu: 'duo' | 'multi' =
+        duoLocked || penduMode !== 'duo' ? 'multi' : 'duo'
+      onStart(variantPendu === 'duo' ? 'Pendu — Duo' : 'Pendu — Multi', '', 'fr', {
+        timerEnabled: false,
+        audioAutoplay: false,
+        difficulty,
+        gameMode: 'free',
+        aiProvider,
+        quizMode: 'pendu',
+        penduVariant: variantPendu,
+        penduWordSource,
+      })
+      return
+    }
 
     if (isDeezer) {
       const t = deezerThemeLabel()
@@ -225,8 +315,45 @@ export function ThemeSelect({
       return
     }
 
+    if (themeId === 'drapeaux') {
+      const t = parent?.label ?? 'Drapeaux'
+      onStart(t, '', 'international', {
+        timerEnabled,
+        audioAutoplay: false,
+        difficulty: flagDifficultyToQuestionDifficulty(flagDifficulty),
+        gameMode: 'free',
+        aiProvider,
+        quizMode: 'standard',
+        flagDifficulty,
+        flagCount: clampFlagCount(flagDifficulty, flagCount),
+      })
+      return
+    }
+
+    if (themeId === 'aleatoire') {
+      const picked = drawRandomThemePair()
+      const t = picked.query
+      const effectiveScope = resolveQuizScope(t, scope)
+      if (effectiveScope !== scope) setScope(effectiveScope)
+      ensureCuratedThemeFromPlay(t, {
+        themeId: picked.themeId,
+        subTheme: picked.sub,
+      })
+      onStart(t, '', effectiveScope, {
+        timerEnabled,
+        audioAutoplay: false,
+        difficulty: gameMode === 'free' ? difficulty : 'easy',
+        gameMode,
+        aiProvider,
+        quizMode: 'standard',
+      })
+      return
+    }
+
     const t = playThemeLabel()
     if (!t) return
+    const effectiveScope = resolveQuizScope(t, scope)
+    if (effectiveScope !== scope) setScope(effectiveScope)
     const placeUnder =
       customFromThemeId ||
       (themeId &&
@@ -239,7 +366,7 @@ export function ThemeSelect({
       t,
       placeUnder ? { themeId: placeUnder, subTheme: t } : undefined,
     )
-    onStart(t, '', scope, {
+    onStart(t, '', effectiveScope, {
       timerEnabled,
       audioAutoplay: false,
       difficulty: gameMode === 'free' ? difficulty : 'easy',
@@ -252,12 +379,54 @@ export function ThemeSelect({
   const activeLabel = isDeezer
     ? deezerThemeLabel()
     : playThemeLabel()
-  const canPlay =
-    Boolean(activeLabel) && !busy && !(variant === 'solo' && soloLocked)
+  const canPlay = isPendu
+    ? !busy &&
+      (isMulti
+        ? true
+        : Boolean(onPendu) && !soloLocked)
+    : Boolean(activeLabel) && !busy && !(variant === 'solo' && soloLocked)
   const deezerUsingCustom = Boolean(deezerQuery.trim())
 
   function renderSubthemes(opts?: { inPanel?: boolean; showChosen?: boolean }) {
     if (!parent || customTheme.trim()) return null
+    if (themeId === 'drapeaux') {
+      const inPanel = Boolean(opts?.inPanel)
+      return (
+        <fieldset
+          className={`subthemes${inPanel ? ' subthemes--in-panel' : ''}`}
+        >
+          <legend className="subthemes__title">Drapeaux du monde</legend>
+          <p className="subthemes__chosen">
+            {FLAG_CHOICE_COUNT[flagDifficulty]} choix · pool{' '}
+            {flagDifficulty === 'easy'
+              ? '44 pays (très connus)'
+              : flagDifficulty === 'medium'
+                ? '132 pays'
+                : '196 pays'}{' '}
+            · max {FLAG_MAX_COUNT[flagDifficulty]}
+          </p>
+          {opts?.showChosen && (
+            <p className="subthemes__chosen">
+              Partie : <strong>{flagCount} drapeaux</strong>
+            </p>
+          )}
+        </fieldset>
+      )
+    }
+    if (themeId === 'aleatoire') {
+      const inPanel = Boolean(opts?.inPanel)
+      return (
+        <fieldset
+          className={`subthemes${inPanel ? ' subthemes--in-panel' : ''}`}
+        >
+          <legend className="subthemes__title">Aléatoire</legend>
+          <p className="subthemes__chosen">
+            Un thème + sous-thème au hasard — sans rejouer le même couple tant
+            que tous n’ont pas tourné.
+          </p>
+        </fieldset>
+      )
+    }
     const inPanel = Boolean(opts?.inPanel)
     const isOrbitCustom = themeId === 'custom'
     const primarySubs = isOrbitCustom
@@ -357,7 +526,11 @@ export function ThemeSelect({
           ? 'Change de thème — la salle et les joueurs restent.'
           : isDeezer
             ? 'Quiz musical avec vrais extraits Deezer'
-            : 'Choisis un thème, puis joue !'}
+            : isPendu
+              ? isMulti
+                ? 'Pendu en salle — Duo ou Multi · Facile / Moyen / Difficile'
+                : 'Pendu solo — petits mots, mélange, ou grands / composés'
+              : 'Choisis un thème, puis joue !'}
       </p>
     </div>
   )
@@ -387,7 +560,13 @@ export function ThemeSelect({
         </span>
         {busy
           ? 'Préparation…'
-          : existingRoom
+          : isPendu
+            ? isMulti
+              ? existingRoom
+                ? 'Valider le pendu'
+                : 'Créer la salle'
+              : 'Jouer au pendu'
+            : existingRoom
             ? 'Valider le thème'
             : isMulti
               ? isDeezer
@@ -406,13 +585,20 @@ export function ThemeSelect({
     <div className="game-home__options">
       <fieldset className="scope-field">
         <legend className="scope-field__label">Type</legend>
-        <div className="scope-field__toggle" role="group" aria-label="Type">
+        <div
+          className="scope-field__toggle scope-field__toggle--3"
+          role="group"
+          aria-label="Type"
+        >
           <button
             type="button"
-            className={`scope-chip${!isDeezer ? ' is-selected' : ''}`}
-            onClick={() => setQuizMode('standard')}
+            className={`scope-chip${!isDeezer && !isPendu ? ' is-selected' : ''}`}
+            onClick={() => {
+              setIsPendu(false)
+              setQuizMode('standard')
+            }}
             disabled={busy}
-            aria-pressed={!isDeezer}
+            aria-pressed={!isDeezer && !isPendu}
           >
             Texte (IA)
           </button>
@@ -420,6 +606,7 @@ export function ThemeSelect({
             type="button"
             className={`scope-chip${isDeezer ? ' is-selected' : ''}`}
             onClick={() => {
+              setIsPendu(false)
               setQuizMode('audio')
               setGameMode('free')
             }}
@@ -428,9 +615,184 @@ export function ThemeSelect({
           >
             Deezer
           </button>
+          <button
+            type="button"
+            className={`scope-chip${isPendu ? ' is-selected' : ''}`}
+            onClick={() => {
+              setIsPendu(true)
+              setQuizMode('standard')
+              setGameMode('free')
+              setPenduMode(isMulti ? (playerCount > 2 ? 'multi' : 'duo') : 'solo')
+            }}
+            disabled={busy || (!isMulti && !onPendu)}
+            aria-pressed={isPendu}
+          >
+            Pendu
+          </button>
         </div>
       </fieldset>
 
+      {isPendu && isMulti && (
+        <fieldset className="scope-field">
+          <legend className="scope-field__label">Partie</legend>
+          <div
+            className="scope-field__toggle scope-field__toggle--2"
+            role="group"
+            aria-label="Mode pendu"
+          >
+            <button
+              type="button"
+              className={`scope-chip${penduMode === 'duo' ? ' is-selected' : ''}`}
+              onClick={() => setPenduMode('duo')}
+              disabled={busy || duoLocked}
+              aria-pressed={penduMode === 'duo'}
+              title={
+                duoLocked
+                  ? 'Plus de 2 joueurs dans la salle — Duo indisponible'
+                  : 'Équipe · pendu partagé · 2 joueurs'
+              }
+            >
+              Duo
+            </button>
+            <button
+              type="button"
+              className={`scope-chip${penduMode === 'multi' ? ' is-selected' : ''}`}
+              onClick={() => setPenduMode('multi')}
+              disabled={busy}
+              aria-pressed={penduMode === 'multi'}
+              title="2–8 joueurs · pendu individuel"
+            >
+              Multi
+            </button>
+          </div>
+          {duoLocked && (
+            <p className="subthemes__chosen">
+              Duo grisé : plus de 2 joueurs dans la salle
+            </p>
+          )}
+        </fieldset>
+      )}
+
+      {isPendu && (
+        <fieldset className="scope-field">
+          <legend className="scope-field__label">Difficulté</legend>
+          <div className="scope-field__toggle" role="group" aria-label="Difficulté pendu">
+            {DIFFICULTIES.map((d) => (
+              <button
+                key={d}
+                type="button"
+                className={`scope-chip${difficulty === d ? ' is-selected' : ''}`}
+                onClick={() => setDifficulty(d)}
+                disabled={busy}
+                aria-pressed={difficulty === d}
+                title={
+                  d === 'easy'
+                    ? 'Petits mots (5–6 lettres)'
+                    : d === 'hard'
+                      ? 'Grands mots et mots composés'
+                      : 'Tous les mots simples'
+                }
+              >
+                {DIFFICULTY_LABELS[d]}
+              </button>
+            ))}
+          </div>
+          <p className="subthemes__chosen">
+            {difficulty === 'easy'
+              ? 'Petits mots · 5–6 lettres'
+              : difficulty === 'hard'
+                ? 'Grands mots (8+ lettres) et composés · tirets déjà visibles'
+                : 'Mélange de toute la banque'}
+          </p>
+        </fieldset>
+      )}
+
+      {isPendu && (
+        <fieldset className="scope-field">
+          <legend className="scope-field__label">Mots</legend>
+          <div
+            className="scope-field__toggle scope-field__toggle--2"
+            role="group"
+            aria-label="Source des mots pendu"
+          >
+            <button
+              type="button"
+              className={`scope-chip${penduWordSource === 'bank' ? ' is-selected' : ''}`}
+              onClick={() => setPenduWordSource('bank')}
+              disabled={busy}
+              aria-pressed={penduWordSource === 'bank'}
+              title="Banque locale uniquement — recycle si tout est joué"
+            >
+              Banque locale
+            </button>
+            <button
+              type="button"
+              className={`scope-chip${penduWordSource === 'ai' ? ' is-selected' : ''}`}
+              onClick={() => setPenduWordSource('ai')}
+              disabled={busy}
+              aria-pressed={penduWordSource === 'ai'}
+              title="Banque puis mots IA (log admin)"
+            >
+              Banque + IA
+            </button>
+          </div>
+          <p className="subthemes__chosen">
+            {penduWordSource === 'bank'
+              ? 'Pas d’IA — mots aléatoires dans la banque quand tout est joué'
+              : 'Nouveaux mots IA quand la banque est épuisée (onglet Pendu admin)'}
+          </p>
+        </fieldset>
+      )}
+
+      {isFlags && (
+        <>
+          <fieldset className="scope-field">
+            <legend className="scope-field__label">Difficulté</legend>
+            <div
+              className="scope-field__toggle scope-field__toggle--4"
+              role="group"
+              aria-label="Difficulté drapeaux"
+            >
+              {FLAG_DIFFICULTIES.map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  className={`scope-chip${flagDifficulty === d ? ' is-selected' : ''}`}
+                  onClick={() => {
+                    setFlagDifficulty(d)
+                    setFlagCount((n) => clampFlagCount(d, n))
+                  }}
+                  disabled={busy}
+                  aria-pressed={flagDifficulty === d}
+                  title={`${FLAG_CHOICE_COUNT[d]} choix · max ${FLAG_MAX_COUNT[d]}`}
+                >
+                  {FLAG_DIFFICULTY_LABELS[d]}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+          <fieldset className="scope-field">
+            <legend className="scope-field__label">Nombre de drapeaux</legend>
+            <div className="flag-count-grid" role="group" aria-label="Nombre">
+              {flagCountSteps(flagDifficulty).map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  className={`subtheme-chip${flagCount === n ? ' is-selected' : ''}`}
+                  onClick={() => setFlagCount(n)}
+                  disabled={busy}
+                  aria-pressed={flagCount === n}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+        </>
+      )}
+
+      {!isFlags && !isPendu && (
+        <>
       <fieldset className="scope-field">
         <legend className="scope-field__label">Portée</legend>
         <div className="scope-field__toggle" role="group">
@@ -440,6 +802,17 @@ export function ThemeSelect({
               type="button"
               className={`scope-chip${scope === s ? ' is-selected' : ''}`}
               onClick={() => {
+                if (s === 'fr' && !isDeezer && themeId !== 'aleatoire') {
+                  const label =
+                    customTheme.trim() ||
+                    (parent && themeId !== 'custom' && themeId !== 'pregen'
+                      ? parent.label
+                      : '')
+                  if (label && !themeSupportsFrScope(label)) {
+                    setScope('international')
+                    return
+                  }
+                }
                 setScope(s)
                 // Si le style actuel ne colle pas à la nouvelle portée → style neutre
                 if (
@@ -452,7 +825,17 @@ export function ThemeSelect({
               disabled={busy}
               aria-pressed={scope === s}
               aria-label={QUIZ_SCOPE_LABELS[s]}
-              title={QUIZ_SCOPE_LABELS[s]}
+              title={
+                s === 'fr' &&
+                !isDeezer &&
+                themeId !== 'aleatoire' &&
+                parent &&
+                themeId !== 'custom' &&
+                themeId !== 'pregen' &&
+                !themeSupportsFrScope(parent.label)
+                  ? 'Ce thème est toujours en International'
+                  : QUIZ_SCOPE_LABELS[s]
+              }
             >
               {s === 'fr' ? (
                 <span className="scope-chip__flag scope-chip__flag--fr" aria-hidden>
@@ -516,9 +899,12 @@ export function ThemeSelect({
           </div>
         </fieldset>
       )}
+        </>
+      )}
 
+      {!isPendu && (
       <div className="game-home__ia-chrono">
-        {!isDeezer && (
+        {!isDeezer && !isFlags && (
           <fieldset className="scope-field">
             <legend className="scope-field__label">IA</legend>
             <div className="scope-field__toggle" role="group" aria-label="IA">
@@ -552,6 +938,7 @@ export function ThemeSelect({
           </span>
         </button>
       </div>
+      )}
     </div>
   )
 
@@ -592,7 +979,7 @@ export function ThemeSelect({
       <div className="game-home__center">
         {brandBlock}
         {settingsFields}
-        {customThemeField}
+        {isFlags ? null : customThemeField}
         {playButton}
       </div>
     )
@@ -633,7 +1020,7 @@ export function ThemeSelect({
 
   return (
     <section
-      className={`game-home${isMulti ? ' game-home--multi' : ''}${isDeezer ? ' game-home--deezer' : ''}`}
+      className={`game-home${isMulti ? ' game-home--multi' : ''}${isDeezer ? ' game-home--deezer' : ''}${isPendu ? ' game-home--pendu' : ''}`}
     >
       {onBack && (
         <button
@@ -646,7 +1033,20 @@ export function ThemeSelect({
         </button>
       )}
       <form className="game-home__form" onSubmit={handleSubmit}>
-        {isDeezer ? (
+        {isPendu ? (
+          <>
+            {topDock ? (
+              <div className="game-home__top-dock">{topDock}</div>
+            ) : null}
+            <div className="deezer-layout">
+              <div className="deezer-layout__hero">{brandBlock}</div>
+              <div className="deezer-layout__settings">
+                {settingsFields}
+                {playButton}
+              </div>
+            </div>
+          </>
+        ) : isDeezer ? (
           <div className="deezer-layout">
             <div className="deezer-layout__hero">{brandBlock}</div>
 

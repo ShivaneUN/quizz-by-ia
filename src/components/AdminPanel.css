@@ -48,6 +48,10 @@
   padding: 0;
 }
 
+.admin-panel--pinned {
+  z-index: 220;
+}
+
 .admin-panel--float .admin-panel__card {
   pointer-events: auto;
   position: fixed;
@@ -117,11 +121,26 @@
   flex: 0 0 auto;
 }
 
+.admin-panel__title-wrap {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .admin-panel__title {
   margin: 0;
   font-size: 1.05rem;
   font-weight: 800;
   color: #fff;
+}
+
+.admin-panel__quota-chip {
+  margin: 0.15rem 0 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .admin-panel__close,
@@ -138,6 +157,17 @@
 .admin-panel__lock:hover,
 .admin-panel__close:hover {
   color: #fff;
+}
+
+.admin-panel__lock.is-on {
+  color: #f0c14b;
+}
+
+.admin-panel__card--pinned {
+  border-color: color-mix(in srgb, #f0c14b 70%, transparent);
+  box-shadow:
+    0 18px 48px color-mix(in srgb, #000 50%, transparent),
+    0 0 0 1px color-mix(in srgb, #f0c14b 45%, transparent);
 }
 
 .admin-panel__resize {
@@ -432,6 +462,53 @@
 .admin-panel__bars {
   display: grid;
   gap: 0.55rem;
+}
+
+.admin-quota {
+  margin: 0 0 0.85rem;
+  padding: 0.55rem 0.65rem 0.65rem;
+  border-radius: 12px;
+  background: #041022;
+  border: 1px solid color-mix(in srgb, #4db8ff 28%, transparent);
+}
+
+.admin-quota--warn {
+  border-color: color-mix(in srgb, #f0c14b 55%, transparent);
+}
+
+.admin-quota--hot {
+  border-color: color-mix(in srgb, #ff6b7a 55%, transparent);
+}
+
+.admin-quota .admin-bar__fill {
+  background: linear-gradient(90deg, #4db8ff, #7ee0a3);
+}
+
+.admin-quota--warn .admin-bar__fill {
+  background: linear-gradient(90deg, #f0c14b, #ff9f43);
+}
+
+.admin-quota--hot .admin-bar__fill {
+  background: linear-gradient(90deg, #ff6b7a, #ff9f43);
+}
+
+.admin-quota__hint {
+  margin: 0.4rem 0 0;
+  font-size: 0.68rem;
+  font-weight: 650;
+  color: var(--ink-muted);
+}
+
+.admin-quota__families {
+  margin: 0.35rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.65rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #c5d4ef;
 }
 
 .admin-bar__label {

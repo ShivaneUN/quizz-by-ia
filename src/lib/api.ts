@@ -10,6 +10,9 @@ export interface GenerateRequest {
   scope?: QuizScope
   provider?: AiProvider
   quizMode?: QuizContentMode
+  /** Drapeaux : 10–196 selon difficulté */
+  flagCount?: number
+  flagDifficulty?: 'easy' | 'medium' | 'hard' | 'expert'
   /** Énoncés déjà posés — injectés dans le prompt anti-doublon */
   excludeQuestions?: string[]
 }
@@ -18,7 +21,7 @@ export interface GenerateResponse {
   theme: string
   themeSlug: string
   questions: Question[]
-  source: 'groq' | 'gemini' | 'mock' | 'bank' | 'deezer'
+  source: 'groq' | 'gemini' | 'mock' | 'bank' | 'deezer' | 'flags'
   message?: string
   /** Durée réelle serveur (ms) */
   generationMs?: number
@@ -83,7 +86,7 @@ export async function generateQuestions(
         if (signal?.aborted) return
         try {
           const pr = await fetch(
-            `/api/gen-progress?id=${encodeURIComponent(progressId)}&t=${Date.now()}`,
+            `/api/gen-status?id=${encodeURIComponent(progressId)}&t=${Date.now()}`,
             { cache: 'no-store' },
           )
           if (!pr.ok) return
@@ -199,7 +202,11 @@ export async function generateQuestions(
 export async function clearMultiQuestionCache(): Promise<{
   multiHistoriesCleared: number
 }> {
-  const res = await fetch('/api/clear-cache', { method: 'POST' })
+  const res = await fetch('/api/calib-stats', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'clearMultiHistory' }),
+  })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))
     throw new Error(

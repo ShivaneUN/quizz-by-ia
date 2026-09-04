@@ -24,6 +24,8 @@ import {
   summarizeCuratedBank,
 } from '../server/curatedBank.js'
 import { listCuratedThemeSlots } from '../server/curatedFiles.js'
+import { getRedisQuota } from '../server/redisQuota.js'
+import { clearAllQuestionHistory } from '../server/questionHistory.js'
 
 export const config = {
   maxDuration: 30,
@@ -69,6 +71,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await clearErrorLog()
         await clearCuratedBank()
         return json(res, 200, { ok: true })
+      }
+
+      if (body.action === 'clearMultiHistory') {
+        const cleared = await clearAllQuestionHistory()
+        return json(res, 200, { ok: true, multiHistoriesCleared: cleared })
       }
 
       const ok = await recordCalibHand(body as Partial<CalibHandEvent>)
@@ -261,8 +268,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         )
         return res.send(JSON.stringify(payload, null, 2))
       }
+      const storage = await getRedisQuota()
       return json(res, 200, {
         count: events.length,
+        storage,
         summary,
         events,
         feedback: {

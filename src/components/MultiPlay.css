@@ -149,6 +149,19 @@
   gap: 0.55rem;
 }
 
+.multi-play__answers--n8,
+.multi-play__answers--n10 {
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+}
+
+.multi-play__answers--n8 .multi-play__answer,
+.multi-play__answers--n10 .multi-play__answer {
+  padding: 0.5rem 0.65rem;
+  font-size: 0.85rem;
+  min-height: 2.4rem;
+}
+
 .multi-play__free {
   display: grid;
   gap: 0.45rem;

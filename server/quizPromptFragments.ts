@@ -85,11 +85,41 @@ CONTRÔLE FINAL DE QUANTITÉ
 - Avant de livrer le JSON : compte le tableau — EXACTEMENT {question_count} questions.
 
 PORTÉE
-- "Français" : priorise France/francophonie sur thèmes pertinents (Histoire, Cinéma, Musique, Littérature, Actualité, Cuisine) ; thèmes universels restent internationaux, ancrage français si possible.
+- "Français" : priorise France/francophonie UNIQUEMENT sur : Histoire, Cinéma, Musique, Littérature, Actualité, Cuisine, Sport, Art, Géographie.
 - "International" : vivier mondial, sans priorité géographique.
+- Si la portée reçue est "Français" hors de cette liste → traite comme "International" (pas d'ancrage FR forcé).
 - La portée ajuste le périmètre géographique, jamais le niveau de difficulté.
 
-THÈME LIBRE (hors 16 thèmes prédéfinis)
+LANGUES (apprentissage)
+- Si le thème est « Langues », le sous-thème = langue cible. « Général » = mélange de langues courantes.
+- Sous-thèmes VALIDES (génère toujours, sans {"erreur":...}) :
+  Latin : Anglais, Espagnol, Allemand, Italien, Portugais, Français, Néerlandais, Turc, Polonais, Suédois, Vietnamien.
+  Écriture spéciale (MÊME règle pour toutes) : Arabe, Japonais, Coréen, Chinois, Russe, Grec, Hébreu, Hindi, Cambodgien (= khmer).
+- Priorise l'apprentissage : vocabulaire courant, traduction FR ↔ langue cible, phrases utiles, conjugaison / grammaire de base — pas de culture générale sur le pays.
+- Ces règles d'apprentissage PRIMENT sur le calibrage spectateur/coulisses et sur les tests « personne dans la rue ».
+- ANTI-SPOILER STRICT sur les 4 réponses du QCM :
+  - INTERDIT le sens français dans les options (interdit : 안녕하세요 (bonjour) ou 안녕하세요 (annyeonghaseyo) (bonjour)).
+  - Le sens français va UNIQUEMENT dans "explication", jamais dans "reponses".
+- FORMAT OBLIGATOIRE — écritures spéciales (Arabe, Japonais, Coréen, Chinois, Russe, Grec, Hébreu, Hindi, Cambodgien) :
+  "forme native (transcription latine)" — une seule paire de parenthèses, transcription uniquement (pas de français).
+  Exemples (applique le même principe à CHAQUE langue spéciale) :
+  - Japonais : こんにちは (konnichiwa)
+  - Coréen : 안녕하세요 (annyeonghaseyo)
+  - Chinois : 你好 (nihao)
+  - Arabe : مرحبا (marhaba)
+  - Russe : привет (privet)
+  - Grec : γεια (geia)
+  - Hébreu : שלום (shalom)
+  - Hindi : नमस्ते (namaste)
+  - Cambodgien : សួស្តី (suostei)
+  Si l'écriture native est incertaine : transcription latine SEULE encore acceptable (ex. suostei), plutôt que d'inventer des caractères.
+- Alphabet latin (Anglais, Espagnol, etc.) : mot/phrase seul, SANS parenthèse de sens FR.
+- Énonce clairement ce qui est demandé. Facile = quotidien ; moyen = faux amis / temps courants ; difficile = nuances.
+- Traductions exactes uniquement. Sources : Larousse, dictionnaire, Wiktionnaire, manuel scolaire.
+- fait_verifiable = true pour toute traduction standard de vocabulaire courant.
+- INTERDIT de refuser un sous-thème Langues listé.
+
+THÈME LIBRE (hors 17 thèmes prédéfinis)
 - Identifie la famille de rattachement, applique strictement niveau/fiabilité/anti-doublon.
 - Trop pointu pour 10 questions fiables → élargis, n'invente pas.
 - Ambigu/mal orthographié → interprétation la plus probable et grand public.
@@ -153,7 +183,7 @@ NIVEAU DIFFICILE — STRICT
 // ─────────────────────────────────────────────
 export const ANCRAGE_PAR_THEME = `
 ANCRAGE SPECTATEUR/COULISSES PAR THÈME (calibrage, non exhaustif)
-Histoire: événements connus / dates-traités précis. Sport: champions connus / entraîneurs-stats. Musique: artiste-tube connu / compositeur-label. Cinéma: acteurs-répliques cultes / réalisateur-studio. Géographie: pays-monuments connus / relief-démographie. Sciences: faits scolaires / chercheur-process. Tech: marques connues / specs-dates précises. Nature: animaux connus / classification scientifique. Cuisine: plats-origine connus / technique-chef-date. Art: œuvres célèbres / mouvement-technique. Mythologie: dieux-héros connus / généalogies-variantes. Littérature: livres-auteurs connus / courants-dates précises. Animaux: animaux du quotidien / classification-comportements. Espace: astronomie scolaire / missions-données techniques. Jeux vidéo: jeux-persos populaires / studio-moteur-date. Actualité: tendances connues et datées / détails ponctuels précis — jamais de fait instable non daté.
+Histoire: événements connus / dates-traités précis. Sport: champions connus / entraîneurs-stats. Musique: artiste-tube connu / compositeur-label. Cinéma: acteurs-répliques cultes / réalisateur-studio. Géographie: pays-monuments connus / relief-démographie. Sciences: faits scolaires / chercheur-process. Tech: marques connues / specs-dates précises. Nature: animaux connus / classification scientifique. Cuisine: plats-origine connus / technique-chef-date. Art: œuvres célèbres / mouvement-technique. Mythologie: dieux-héros connus / généalogies-variantes. Littérature: livres-auteurs connus / courants-dates précises. Animaux: animaux du quotidien / classification-comportements. Espace: astronomie scolaire / missions-données techniques. Jeux vidéo: jeux-persos populaires / studio-moteur-date. Actualité: tendances connues et datées / détails ponctuels précis — jamais de fait instable non daté. Langues: mots/phrases du quotidien / conjugaisons-nuances-faux amis.
 Thème libre : applique le même principe spectateur/coulisses de façon autonome.
 `.trim()
 

@@ -63,6 +63,30 @@ type ErrorEvent = {
   path?: string
 }
 
+type PenduAiLogEvent = {
+  id: string
+  at: number
+  difficulty: string
+  words: string[]
+  source: string
+  mode?: string
+}
+
+type PenduAiLogPayload = {
+  count: number
+  wordCount: number
+  events: PenduAiLogEvent[]
+  dump: string[]
+}
+
+type RedisQuota = {
+  backend: 'redis' | 'memory'
+  usedBytes: number | null
+  maxBytes: number | null
+  keyCount: number | null
+  families?: { id: string; label: string; count: number }[]
+}
+
 type LogsPayload = {
   count: number
   summary: DiffRow[]
@@ -104,6 +128,7 @@ type LogsPayload = {
     }[]
     events?: CuratedBankEvent[]
   }
+  storage?: RedisQuota
 }
 
 type CuratedBankEvent = {
@@ -304,6 +329,33 @@ function barWidth(pct: number | null) {
   return `${Math.max(0, Math.min(100, pct))}%`
 }
 
+function fmtMo(bytes: number): string {
+  const mo = bytes / (1024 * 1024)
+  if (mo < 10) return mo.toFixed(1).replace('.', ',')
+  return String(Math.round(mo))
+}
+
+function quotaLabel(q: RedisQuota): string {
+  if (q.backend === 'memory') return 'mémoire locale (pas Redis)'
+  if (q.usedBytes == null || q.maxBytes == null || q.maxBytes <= 0) {
+    return 'quota Redis indisponible'
+  }
+  return `${fmtMo(q.usedBytes)} Mo / ${fmtMo(q.maxBytes)} Mo`
+}
+
+function quotaChipLabel(q: RedisQuota): string {
+  if (q.backend === 'memory') return 'RAM locale'
+  if (q.usedBytes == null || q.maxBytes == null || q.maxBytes <= 0) {
+    return 'Redis —'
+  }
+  return `${fmtMo(q.usedBytes)} / ${fmtMo(q.maxBytes)} Mo`
+}
+
+function quotaPct(q: RedisQuota): number | null {
+  if (q.usedBytes == null || q.maxBytes == null || q.maxBytes <= 0) return null
+  return (100 * q.usedBytes) / q.maxBytes
+}
+
 /**
  * Engrenage accueil — code Quizzyosh → logs calib/feedback + clear chat global.
  */
@@ -319,7 +371,7 @@ export function AdminPanel({ hideGear = false }: { hideGear?: boolean }) {
   const [clearing, setClearing] = useState(false)
   const [resetting, setResetting] = useState(false)
   const [tab, setTab] = useState<
-    'summary' | 'hands' | 'feedback' | 'errors' | 'curated' | 'ai'
+    'summary' | 'hands' | 'feedback' | 'errors' | 'curated' | 'ai' | 'pendu'
   >('summary')
   const [aiRows, setAiRows] = useState<AiCapacityRow[] | null>(null)
   const [aiGen, setAiGen] = useState<AiGenPayload | null>(null)
@@ -330,6 +382,8 @@ export function AdminPanel({ hideGear = false }: { hideGear?: boolean }) {
   const [aiHistoryKind, setAiHistoryKind] = useState<'day' | 'month'>('day')
   const [curatedOpen, setCuratedOpen] = useState<Record<string, boolean>>({})
   const [curatedBusyId, setCuratedBusyId] = useState<string | null>(null)
+  const [penduLog, setPenduLog] = useState<PenduAiLogPayload | null>(null)
+  const [penduLogBusy, setPenduLogBusy] = useState(false)
   const [panelSize, setPanelSize] = useState(() => {
     try {
       const w = Number(localStorage.getItem('quizz:admin:w'))
@@ -354,6 +408,13 @@ export function AdminPanel({ hideGear = false }: { hideGear?: boolean }) {
       return null
     },
   )
+  const [pinned, setPinned] = useState(() => {
+    try {
+      return localStorage.getItem('quizz:admin:pinned') === '1'
+    } catch {
+      return false
+    }
+  })
   const resizeRef = useRef<{
     startX: number
     startY: number
@@ -382,9 +443,12 @@ export function AdminPanel({ hideGear = false }: { hideGear?: boolean }) {
     return gen
   }
 
-  async function loadLogs(secret: string) {
-    setLoading(true)
-    setLoadError(null)
+  async function loadLogs(secret: string, opts?: { silent?: boolean }) {
+    const silent = Boolean(opts?.silent)
+    if (!silent) {
+      setLoading(true)
+      setLoadError(null)
+    }
     try {
       const res = await fetch(
         `/api/calib-stats?secret=${encodeURIComponent(secret)}&limit=2000`,
@@ -397,15 +461,18 @@ export function AdminPanel({ hideGear = false }: { hideGear?: boolean }) {
       }
       setLogs(data as LogsPayload)
     } catch (e) {
-      setLogs(null)
-      setLoadError(e instanceof Error ? e.message : 'Chargement impossible')
+      if (!silent) {
+        setLogs(null)
+        setLoadError(e instanceof Error ? e.message : 'Chargement impossible')
+      }
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
-  async function loadAiCapacity(secret: string) {
-    setLoadError(null)
+  async function loadAiCapacity(secret: string, opts?: { silent?: boolean }) {
+    const silent = Boolean(opts?.silent)
+    if (!silent) setLoadError(null)
     try {
       const res = await fetch(
         `/api/ai-capacity?secret=${encodeURIComponent(secret)}`,
@@ -429,6 +496,7 @@ export function AdminPanel({ hideGear = false }: { hideGear?: boolean }) {
       )
       setAiNote(typeof data.note === 'string' ? data.note : null)
     } catch (e) {
+      if (silent) return
       setAiRows(null)
       setAiGen(null)
       setAiHistory(null)
@@ -561,6 +629,61 @@ export function AdminPanel({ hideGear = false }: { hideGear?: boolean }) {
     }
   }
 
+  async function loadPenduLog(secret: string, opts?: { silent?: boolean }) {
+    const silent = Boolean(opts?.silent)
+    if (!silent) setPenduLogBusy(true)
+    try {
+      const res = await fetch(
+        `/api/pendu-words?secret=${encodeURIComponent(secret)}`,
+      )
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(
+          typeof data.error === 'string' ? data.error : `Erreur ${res.status}`,
+        )
+      }
+      setPenduLog(data as PenduAiLogPayload)
+    } catch (e) {
+      if (!silent) {
+        setPenduLog(null)
+        setLoadError(e instanceof Error ? e.message : 'Log pendu impossible')
+      }
+    } finally {
+      if (!silent) setPenduLogBusy(false)
+    }
+  }
+
+  async function handleClearPenduLog() {
+    const ok = window.confirm(
+      'Vider le log des mots pendu générés par l’IA ?\nLa banque officielle ne change pas.',
+    )
+    if (!ok) return
+    setPenduLogBusy(true)
+    setClearMsg(null)
+    try {
+      const res = await fetch('/api/pendu-words', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'clear',
+          secret: ADMIN_PANEL_CODE,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(
+          typeof data.error === 'string' ? data.error : `Erreur ${res.status}`,
+        )
+      }
+      setPenduLog({ count: 0, wordCount: 0, events: [], dump: [] })
+      setClearMsg('Log pendu vidé.')
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : 'Reset pendu impossible')
+    } finally {
+      setPenduLogBusy(false)
+    }
+  }
+
   async function handleResetLogs() {
     const ok = window.confirm(
       'Reset TOUS les logs (manches + feedback + erreurs + banque curatée) sur le serveur ?\nIrréversible.',
@@ -684,6 +807,11 @@ export function AdminPanel({ hideGear = false }: { hideGear?: boolean }) {
     if (!open || !unlocked) return
     void loadLogs(ADMIN_PANEL_CODE)
     void loadAiCapacity(ADMIN_PANEL_CODE)
+    const id = window.setInterval(() => {
+      void loadLogs(ADMIN_PANEL_CODE, { silent: true })
+      void loadAiCapacity(ADMIN_PANEL_CODE, { silent: true })
+    }, 4000)
+    return () => window.clearInterval(id)
   }, [open, unlocked])
 
   useEffect(() => {
@@ -726,12 +854,20 @@ export function AdminPanel({ hideGear = false }: { hideGear?: boolean }) {
     // Garde la session déverrouillée → réouverture rapide pendant un quiz
   }
 
-  function handleLockClose() {
-    setOpen(false)
-    setUnlocked(false)
-    setGateError(null)
-    setClearMsg(null)
-    setCode('')
+  function persistPinned(next: boolean) {
+    try {
+      localStorage.setItem('quizz:admin:pinned', next ? '1' : '0')
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function handleTogglePin() {
+    setPinned((prev) => {
+      const next = !prev
+      persistPinned(next)
+      return next
+    })
   }
 
   function clampPos(x: number, y: number, w: number, h: number) {
@@ -933,7 +1069,9 @@ export function AdminPanel({ hideGear = false }: { hideGear?: boolean }) {
 
       {open && (
         <div
-          className={`admin-panel${unlocked ? ' admin-panel--float' : ''}`}
+          className={`admin-panel${unlocked ? ' admin-panel--float' : ''}${
+            unlocked && pinned ? ' admin-panel--pinned' : ''
+          }`}
           role="dialog"
           aria-modal={!unlocked}
           aria-label="Admin"
@@ -943,7 +1081,9 @@ export function AdminPanel({ hideGear = false }: { hideGear?: boolean }) {
           )}
           <section
             ref={cardRef}
-            className={`admin-panel__card${!unlocked ? ' admin-panel__card--gate' : ' admin-panel__card--sized'}`}
+            className={`admin-panel__card${!unlocked ? ' admin-panel__card--gate' : ' admin-panel__card--sized'}${
+              unlocked && pinned ? ' admin-panel__card--pinned' : ''
+            }`}
             style={
               unlocked
                 ? (() => {
@@ -970,17 +1110,37 @@ export function AdminPanel({ hideGear = false }: { hideGear?: boolean }) {
               onPointerCancel={onMovePointerUp}
               title={unlocked ? 'Glisser pour déplacer' : undefined}
             >
-              <h2 className="admin-panel__title">
-                {unlocked ? 'Logs & outils' : 'Accès admin'}
-              </h2>
+              <div className="admin-panel__title-wrap">
+                <h2 className="admin-panel__title">
+                  {unlocked
+                    ? pinned
+                      ? 'Logs & outils · épinglé'
+                      : 'Logs & outils'
+                    : 'Accès admin'}
+                </h2>
+                {unlocked && logs?.storage && (
+                  <p className="admin-panel__quota-chip" title="Quota Redis">
+                    {quotaChipLabel(logs.storage)}
+                  </p>
+                )}
+              </div>
               <div className="admin-panel__head-actions">
                 {unlocked && (
                   <button
                     type="button"
-                    className="admin-panel__lock"
-                    onClick={handleLockClose}
-                    aria-label="Verrouiller et fermer"
-                    title="Verrouiller"
+                    className={`admin-panel__lock${pinned ? ' is-on' : ''}`}
+                    onClick={handleTogglePin}
+                    aria-label={
+                      pinned
+                        ? 'Désépingler le panneau'
+                        : 'Épingler au premier plan'
+                    }
+                    aria-pressed={pinned}
+                    title={
+                      pinned
+                        ? 'Épinglé — clic pour libérer'
+                        : 'Épingler au premier plan (reste ouvert pendant le jeu)'
+                    }
                   >
                     🔒
                   </button>
@@ -1135,6 +1295,7 @@ export function AdminPanel({ hideGear = false }: { hideGear?: boolean }) {
                       ['feedback', 'Feedback'],
                       ['errors', 'Erreurs'],
                       ['curated', 'Banque'],
+                      ['pendu', 'Pendu'],
                       ['ai', 'IA'],
                     ] as const
                   ).map(([id, label]) => (
@@ -1144,7 +1305,12 @@ export function AdminPanel({ hideGear = false }: { hideGear?: boolean }) {
                       role="tab"
                       className={`admin-panel__tab${tab === id ? ' is-on' : ''}`}
                       aria-selected={tab === id}
-                      onClick={() => setTab(id)}
+                      onClick={() => {
+                        setTab(id)
+                        if (id === 'pendu') {
+                          void loadPenduLog(ADMIN_PANEL_CODE)
+                        }
+                      }}
                     >
                       {label}
                     </button>
@@ -1153,6 +1319,48 @@ export function AdminPanel({ hideGear = false }: { hideGear?: boolean }) {
 
                 {tab === 'summary' && logs && (
                   <div className="admin-panel__section">
+                    {logs.storage && (
+                      <div
+                        className={`admin-quota${
+                          (quotaPct(logs.storage) ?? 0) >= 90
+                            ? ' admin-quota--hot'
+                            : (quotaPct(logs.storage) ?? 0) >= 70
+                              ? ' admin-quota--warn'
+                              : ''
+                        }`}
+                      >
+                        <div className="admin-bar__label">
+                          <span>Stockage Redis</span>
+                          <span>{quotaLabel(logs.storage)}</span>
+                        </div>
+                        <div className="admin-bar__track">
+                          <div
+                            className="admin-bar__fill"
+                            style={{
+                              width: barWidth(quotaPct(logs.storage)),
+                            }}
+                          />
+                        </div>
+                        <p className="admin-quota__hint">
+                          {fmtMo(logs.storage.usedBytes ?? 0)} Mo occupés sur{' '}
+                          {fmtMo(logs.storage.maxBytes ?? 0)} Mo (plafond de
+                          cette base).
+                          {logs.storage.keyCount != null
+                            ? ` ${logs.storage.keyCount} clés.`
+                            : ''}
+                        </p>
+                        {logs.storage.families &&
+                          logs.storage.families.length > 0 && (
+                            <ul className="admin-quota__families">
+                              {logs.storage.families.map((fam) => (
+                                <li key={fam.id}>
+                                  {fam.label} · {fam.count}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                      </div>
+                    )}
                     <p className="admin-panel__tab-help">
                       % de bonnes réponses agrégé par niveau — utile pour voir
                       si easy / medium / hard sont bien calibrés.
@@ -1551,6 +1759,86 @@ export function AdminPanel({ hideGear = false }: { hideGear?: boolean }) {
                             })
                         })()}
                       </div>
+                    )}
+                  </div>
+                )}
+
+                {tab === 'pendu' && (
+                  <div className="admin-panel__section">
+                    <p className="admin-panel__tab-help">
+                      Mots générés par l’IA quand un palier a tout joué. À
+                      copier plus tard dans la banque (penduWords). Ils sont
+                      déjà jouables en filet.
+                    </p>
+                    <div className="admin-panel__toolbar">
+                      <button
+                        type="button"
+                        className="btn btn--primary"
+                        disabled={penduLogBusy}
+                        onClick={() => void loadPenduLog(ADMIN_PANEL_CODE)}
+                      >
+                        {penduLogBusy ? '…' : 'Rafraîchir'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--ghost"
+                        disabled={
+                          penduLogBusy ||
+                          !penduLog?.dump.length
+                        }
+                        onClick={() => {
+                          const text = (penduLog?.dump ?? [])
+                            .map((w) => `  '${w}',`)
+                            .join('\n')
+                          void navigator.clipboard.writeText(text).then(
+                            () => setClearMsg('Liste copiée.'),
+                            () => setLoadError('Copie impossible'),
+                          )
+                        }}
+                      >
+                        Copier la liste
+                      </button>
+                      <button
+                        type="button"
+                        className="admin-panel__danger"
+                        disabled={penduLogBusy}
+                        onClick={() => void handleClearPenduLog()}
+                      >
+                        Vider le log
+                      </button>
+                    </div>
+                    <p className="admin-panel__meta">
+                      {penduLog?.count ?? 0} lots · {penduLog?.wordCount ?? 0}{' '}
+                      mots uniques
+                    </p>
+                    {(penduLog?.events ?? []).length === 0 ? (
+                      <p className="admin-panel__empty">
+                        Aucun mot IA pour l’instant — la banque locale suffit.
+                      </p>
+                    ) : (
+                      <ul className="admin-curated-group__list">
+                        {(penduLog?.events ?? []).map((ev) => (
+                          <li key={ev.id} className="admin-curated-q">
+                            <div className="admin-curated-q__body">
+                              <p className="admin-curated-q__text">
+                                {ev.words.join(' · ')}
+                              </p>
+                              <p className="admin-curated-q__meta">
+                                {ev.difficulty === 'easy'
+                                  ? 'Facile'
+                                  : ev.difficulty === 'hard'
+                                    ? 'Difficile'
+                                    : 'Moyen'}
+                                {ev.mode ? ` · ${ev.mode}` : ''} ·{' '}
+                                {ev.source} ·{' '}
+                                {ev.at
+                                  ? new Date(ev.at).toLocaleString('fr-FR')
+                                  : ''}
+                              </p>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
                     )}
                   </div>
                 )}

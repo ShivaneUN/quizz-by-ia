@@ -1,5 +1,6 @@
 /**
- * TTS Edge Neural Voices — cache mémoire (dev) + Redis Upstash (prod).
+ * TTS Edge Neural Voices — synthèse à la volée.
+ * Pas de persistance Redis (l’audio n’est lu qu’au moment du clic / autoplay).
  */
 
 import { createHash } from 'node:crypto'
@@ -20,12 +21,9 @@ export type TtsVoiceId = (typeof TTS_VOICES)[number]['id']
 
 const LETTERS = ['A', 'B', 'C', 'D'] as const
 const MAX_TEXT = 2_500
-const MAX_CACHE = 80
+/** Cache RAM court : rejouer la même question sur la même instance, sans Redis. */
+const MAX_CACHE = 20
 const SYNTH_TIMEOUT_MS = 18_000
-const REDIS_TTL_SEC = 60 * 60 * 24 * 14
-const LOCK_TTL_SEC = 25
-const LOCK_WAIT_MS = 400
-const LOCK_WAIT_TRIES = 30
 
 const cache = new Map<string, Buffer>()
 const inflight = new Map<string, Promise<Buffer>>()
@@ -40,18 +38,28 @@ function normalizeText(raw: string): string {
   return raw.trim().replace(/\s+/g, ' ')
 }
 
+/** Retire tout contenu entre parenthèses (transcription / glose) — non lu par le TTS. */
+export function stripParentheticalsForSpeech(raw: string): string {
+  return normalizeText(
+    raw
+      .replace(/（[^）]*）/g, ' ')
+      .replace(/\([^)]*\)/g, ' ')
+      .replace(/\s+/g, ' '),
+  )
+}
+
 /** Texte canonique lu à voix haute (et hashé pour le cache). */
 export function buildSpeechText(input: {
   question: string
   answers: string[]
   answerMode?: string
 }): string {
-  const question = normalizeText(input.question)
+  const question = stripParentheticalsForSpeech(input.question)
   if (!question) return ''
   if (input.answerMode === 'free') return question
 
   const answers = input.answers
-    .map((a) => normalizeText(a))
+    .map((a) => stripParentheticalsForSpeech(a))
     .filter(Boolean)
     .slice(0, 4)
   if (answers.length === 0) return question
@@ -66,10 +74,6 @@ export function buildSpeechText(input: {
 function cacheKey(voice: TtsVoiceId, text: string): string {
   const hash = createHash('sha256').update(text.normalize('NFC')).digest('hex')
   return `quizz:tts:v1:${voice}:${hash}`
-}
-
-function lockKey(dataKey: string): string {
-  return `quizz:tts:lock:${dataKey}`
 }
 
 function remember(key: string, buf: Buffer): void {
@@ -89,10 +93,6 @@ function streamToBuffer(stream: Readable): Promise<Buffer> {
     stream.on('end', () => resolve(Buffer.concat(chunks)))
     stream.on('error', reject)
   })
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 type EdgeTtsModule = {
@@ -134,67 +134,28 @@ async function synthesizeWithEdge(
   }
 }
 
-async function redisGetAudio(key: string): Promise<Buffer | null> {
-  if (!redisConfigured()) return null
+/** Une fois par instance : vider l’ancien cache audio Redis (14 j, trop lourd). */
+let ttsRedisPurgeStarted = false
+
+async function purgeLegacyTtsRedis(): Promise<void> {
+  if (ttsRedisPurgeStarted || !redisConfigured()) return
+  ttsRedisPurgeStarted = true
   try {
-    const raw = await redisCommand<string | null>('GET', key)
-    if (typeof raw !== 'string' || !raw) return null
-    const buf = Buffer.from(raw, 'base64')
-    return buf.byteLength >= 64 ? buf : null
+    const keys = await redisCommand<string[] | null>('KEYS', 'quizz:tts:*')
+    if (!Array.isArray(keys) || keys.length === 0) return
+    const chunk = 40
+    for (let i = 0; i < keys.length; i += chunk) {
+      const slice = keys
+        .slice(i, i + chunk)
+        .filter(
+          (k): k is string =>
+            typeof k === 'string' && k.startsWith('quizz:tts:'),
+        )
+      if (slice.length > 0) await redisCommand('DEL', ...slice)
+    }
   } catch (e) {
-    console.warn(
-      '[tts] redis get',
-      e instanceof Error ? e.message : e,
-    )
-    return null
+    console.warn('[tts] purge redis', e instanceof Error ? e.message : e)
   }
-}
-
-async function redisSetAudio(key: string, buf: Buffer): Promise<void> {
-  if (!redisConfigured()) return
-  try {
-    await redisCommand('SETEX', key, REDIS_TTL_SEC, buf.toString('base64'))
-  } catch (e) {
-    console.warn(
-      '[tts] redis set',
-      e instanceof Error ? e.message : e,
-    )
-  }
-}
-
-async function redisAcquireLock(key: string): Promise<boolean> {
-  if (!redisConfigured()) return true
-  try {
-    const got = await redisCommand<string | null>(
-      'SET',
-      lockKey(key),
-      '1',
-      'NX',
-      'EX',
-      LOCK_TTL_SEC,
-    )
-    return got === 'OK'
-  } catch {
-    return true
-  }
-}
-
-async function redisReleaseLock(key: string): Promise<void> {
-  if (!redisConfigured()) return
-  try {
-    await redisCommand('DEL', lockKey(key))
-  } catch {
-    /* ignore */
-  }
-}
-
-async function waitForRedisAudio(key: string): Promise<Buffer | null> {
-  for (let i = 0; i < LOCK_WAIT_TRIES; i++) {
-    await sleep(LOCK_WAIT_MS)
-    const hit = await redisGetAudio(key)
-    if (hit) return hit
-  }
-  return null
 }
 
 export type TtsRequestBody = {
@@ -230,44 +191,23 @@ export async function synthesizeQuizSpeech(
     return { ok: false, status: 400, error: 'texte trop long' }
   }
 
+  void purgeLegacyTtsRedis()
+
   const voice = body.voice
   const key = cacheKey(voice, text)
   const memHit = cache.get(key)
   if (memHit) return { ok: true, audio: memHit, contentType: 'audio/mpeg' }
 
-  const redisHit = await redisGetAudio(key)
-  if (redisHit) {
-    remember(key, redisHit)
-    return { ok: true, audio: redisHit, contentType: 'audio/mpeg' }
-  }
-
   let pending = inflight.get(key)
   if (!pending) {
-    pending = (async () => {
-      const locked = await redisAcquireLock(key)
-      if (!locked) {
-        const waited = await waitForRedisAudio(key)
-        if (waited) {
-          remember(key, waited)
-          return waited
-        }
-      }
-      try {
-        const still = await redisGetAudio(key)
-        if (still) {
-          remember(key, still)
-          return still
-        }
-        const buf = await synthesizeWithEdge(voice, text)
+    pending = synthesizeWithEdge(voice, text)
+      .then((buf) => {
         remember(key, buf)
-        await redisSetAudio(key, buf)
         return buf
-      } finally {
-        if (locked) await redisReleaseLock(key)
-      }
-    })().finally(() => {
-      inflight.delete(key)
-    })
+      })
+      .finally(() => {
+        inflight.delete(key)
+      })
     inflight.set(key, pending)
   }
 
