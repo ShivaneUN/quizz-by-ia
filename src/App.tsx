@@ -67,6 +67,7 @@ import {
 } from './lib/morpionSession'
 import { loadDisplayName, saveDisplayName } from './lib/displayName'
 import { recordArcadeBest } from './lib/arcadeStorage'
+import { useProfile } from './hooks/useProfile'
 import { isPenduMyTurn, SOLO_DUO_WORDS } from './lib/pendu'
 import { remainingPenduCount, takePenduWords } from './lib/penduFill'
 import { AnswerAudit } from './components/AnswerAudit'
@@ -243,6 +244,8 @@ export default function App() {
   const [miniGameStart, setMiniGameStart] = useState<WaitGameId | null>(null)
   const [quizMiniMenu, setQuizMiniMenu] = useState(false)
   const [quizFloatGame, setQuizFloatGame] = useState<WaitGameId | null>(null)
+  const { submitScore, recordMiniGame, activeProfileId } = useProfile()
+  const morpionScoreKeyRef = useRef<string | null>(null)
   const morpionSeatRef = useRef({ code: '', playerId: '' })
   morpionSeatRef.current = {
     code: morpionRoom?.code ?? '',
@@ -367,6 +370,27 @@ export default function App() {
       cancelled = true
     }
   }, [])
+
+  // Score profil : une partie morpion terminée
+  useEffect(() => {
+    if (!morpionRoom || !morpionPlayerId || !activeProfileId) return
+    if (morpionRoom.status !== 'termine') return
+    const key = `${morpionRoom.code}:${morpionRoom.updatedAt}:${morpionRoom.winner ?? ''}`
+    if (morpionScoreKeyRef.current === key) return
+    morpionScoreKeyRef.current = key
+    const me = morpionRoom.players.find((p) => p.id === morpionPlayerId)
+    void recordMiniGame('morpion', {
+      won: Boolean(me && morpionRoom.winner === me.symbol),
+    })
+  }, [
+    morpionRoom,
+    morpionPlayerId,
+    morpionRoom?.status,
+    morpionRoom?.winner,
+    morpionRoom?.updatedAt,
+    activeProfileId,
+    recordMiniGame,
+  ])
 
   // Poll salle morpion (même hors écran — Accueil ne doit pas expirer le lastSeen)
   useEffect(() => {
@@ -1124,6 +1148,20 @@ export default function App() {
     if (!handDone) {
       setSession({ ...session, handIndex: nextIndex })
       return
+    }
+
+    if (isFlagTheme(session.theme)) {
+      void recordMiniGame('flagQuiz', {
+        won: tier.correct >= Math.ceil(Math.max(1, tier.answered) / 2),
+        score: tier.correct,
+      })
+    } else {
+      void submitScore('quiz', {
+        theme: session.theme,
+        difficulty: session.currentDifficulty,
+        score: tier.correct,
+        date: Date.now(),
+      })
     }
 
     if (session.playMode === 'manual') {
@@ -2183,7 +2221,14 @@ export default function App() {
     <div
       className={`app${isHomeLike ? ' app--home' : ''}${screen === 'minigames' || screen === 'pendu' || screen === 'morpion-play' ? ' app--center' : ''}`}
     >
-      <div className="app__atmosphere" aria-hidden />
+      <div className="app__atmosphere" aria-hidden>
+        <div className="app__stars app__stars--far" />
+        <div className="app__stars app__stars--mid" />
+        <div className="app__stars app__stars--near" />
+        <span className="app__shooting app__shooting--a" />
+        <span className="app__shooting app__shooting--b" />
+        <span className="app__shooting app__shooting--c" />
+      </div>
       {typingBoard && (
         <TypingScorePopup
           entries={typingBoard.entries}
@@ -2327,6 +2372,7 @@ export default function App() {
               startWordSource={penduLaunch.wordSource ?? 'bank'}
               onScoreChange={(s) => {
                 recordArcadeBest('pendu', s)
+                void recordMiniGame('pendu', { won: s > 0, score: s })
               }}
               onExit={() => {
                 setPenduLaunch(null)

@@ -33,6 +33,20 @@
   width: 100%;
 }
 
+@media (max-width: 720px) {
+  .app--home {
+    padding-bottom: 0;
+    padding-left: 0;
+    padding-right: 0;
+    overflow-y: visible;
+  }
+
+  .app--home .app__main {
+    padding-left: max(0.75rem, env(safe-area-inset-left));
+    padding-right: max(0.75rem, env(safe-area-inset-right));
+  }
+}
+
 @media (min-width: 721px) {
   .app--home .app__main {
     align-content: center;
@@ -45,6 +59,8 @@
   position: fixed;
   inset: 0;
   z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
   background:
     radial-gradient(ellipse 80% 55% at 50% 32%, color-mix(in srgb, #1a3a6e 55%, transparent) 0%, transparent 70%),
     radial-gradient(circle at 50% 22%, color-mix(in srgb, #3d8bfd 22%, transparent) 0%, transparent 38%),
@@ -53,22 +69,166 @@
     linear-gradient(165deg, #06101f 0%, #0b1c3d 48%, #0e2550 100%);
 }
 
-/* Étoiles discrètes — sans rayons coniques (causaient une couture verticale) */
-.app__atmosphere::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(circle at 18% 22%, color-mix(in srgb, #4db8ff 18%, transparent) 0 2px, transparent 3px),
-    radial-gradient(circle at 78% 18%, color-mix(in srgb, #4db8ff 14%, transparent) 0 2px, transparent 3px),
-    radial-gradient(circle at 88% 70%, color-mix(in srgb, #4db8ff 12%, transparent) 0 3px, transparent 4px),
-    radial-gradient(circle at 12% 68%, color-mix(in srgb, #4db8ff 10%, transparent) 0 2px, transparent 3px),
-    radial-gradient(circle at 50% 8%, color-mix(in srgb, #fff 8%, transparent) 0%, transparent 35%);
-  pointer-events: none;
-}
-
+.app__atmosphere::before,
 .app__atmosphere::after {
   content: none;
+}
+
+.app__stars {
+  position: absolute;
+  inset: 0;
+  background-repeat: repeat;
+}
+
+.app__stars--far {
+  background-image:
+    radial-gradient(1px 1px at 8% 12%, rgba(255, 255, 255, 0.7) 50%, transparent 51%),
+    radial-gradient(1px 1px at 22% 38%, rgba(180, 220, 255, 0.55) 50%, transparent 51%),
+    radial-gradient(1px 1px at 41% 18%, rgba(255, 255, 255, 0.45) 50%, transparent 51%),
+    radial-gradient(1px 1px at 63% 28%, rgba(180, 220, 255, 0.5) 50%, transparent 51%),
+    radial-gradient(1px 1px at 78% 8%, rgba(255, 255, 255, 0.65) 50%, transparent 51%),
+    radial-gradient(1px 1px at 91% 42%, rgba(255, 255, 255, 0.4) 50%, transparent 51%),
+    radial-gradient(1px 1px at 14% 72%, rgba(180, 220, 255, 0.5) 50%, transparent 51%),
+    radial-gradient(1px 1px at 33% 88%, rgba(255, 255, 255, 0.55) 50%, transparent 51%),
+    radial-gradient(1px 1px at 52% 64%, rgba(255, 255, 255, 0.35) 50%, transparent 51%),
+    radial-gradient(1px 1px at 71% 81%, rgba(180, 220, 255, 0.5) 50%, transparent 51%),
+    radial-gradient(1px 1px at 86% 58%, rgba(255, 255, 255, 0.6) 50%, transparent 51%),
+    radial-gradient(1px 1px at 5% 48%, rgba(240, 193, 75, 0.35) 50%, transparent 51%);
+  animation: app-twinkle 5.5s ease-in-out infinite;
+}
+
+.app__stars--mid {
+  background-image:
+    radial-gradient(1.5px 1.5px at 16% 24%, rgba(255, 255, 255, 0.85) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 29% 6%, rgba(180, 220, 255, 0.7) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 48% 44%, rgba(255, 255, 255, 0.75) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 67% 14%, rgba(255, 255, 255, 0.8) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 84% 36%, rgba(180, 220, 255, 0.65) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 11% 56%, rgba(255, 255, 255, 0.7) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 38% 74%, rgba(240, 193, 75, 0.55) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 58% 92%, rgba(255, 255, 255, 0.75) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 76% 68%, rgba(180, 220, 255, 0.7) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 94% 86%, rgba(255, 255, 255, 0.65) 50%, transparent 51%);
+  animation: app-twinkle 3.8s ease-in-out infinite 0.6s;
+}
+
+.app__stars--near {
+  background-image:
+    radial-gradient(2px 2px at 24% 16%, rgba(255, 255, 255, 0.95) 50%, transparent 51%),
+    radial-gradient(2px 2px at 55% 8%, rgba(180, 220, 255, 0.85) 50%, transparent 51%),
+    radial-gradient(2px 2px at 72% 48%, rgba(255, 255, 255, 0.9) 50%, transparent 51%),
+    radial-gradient(2px 2px at 7% 34%, rgba(240, 193, 75, 0.7) 50%, transparent 51%),
+    radial-gradient(2px 2px at 43% 62%, rgba(255, 255, 255, 0.85) 50%, transparent 51%),
+    radial-gradient(2px 2px at 88% 22%, rgba(255, 255, 255, 0.9) 50%, transparent 51%),
+    radial-gradient(2px 2px at 61% 78%, rgba(180, 220, 255, 0.8) 50%, transparent 51%),
+    radial-gradient(2.4px 2.4px at 18% 90%, rgba(255, 255, 255, 0.95) 50%, transparent 51%);
+  animation: app-twinkle-near 2.8s ease-in-out infinite 0.3s;
+}
+
+@keyframes app-twinkle {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes app-twinkle-near {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+}
+
+.app__shooting {
+  position: absolute;
+  top: 8%;
+  left: 110%;
+  width: 110px;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.95),
+    rgba(180, 220, 255, 0.45),
+    transparent
+  );
+  box-shadow: 0 0 8px 1px rgba(255, 255, 255, 0.45);
+  opacity: 0;
+  transform: rotate(-28deg);
+  animation: app-shoot 7.5s linear infinite;
+}
+
+.app__shooting::after {
+  content: '';
+  position: absolute;
+  right: -2px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #fff;
+  transform: translateY(-50%);
+  box-shadow: 0 0 10px 3px rgba(255, 255, 255, 0.7);
+}
+
+.app__shooting--a {
+  top: 12%;
+  animation-delay: 1.2s;
+}
+
+.app__shooting--b {
+  top: 28%;
+  width: 90px;
+  animation-duration: 9.2s;
+  animation-delay: 4.4s;
+}
+
+.app__shooting--c {
+  top: 48%;
+  width: 130px;
+  animation-duration: 8.4s;
+  animation-delay: 7.8s;
+}
+
+@keyframes app-shoot {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) rotate(-28deg);
+  }
+  6% {
+    opacity: 1;
+  }
+  18% {
+    opacity: 0;
+    transform: translate3d(-120vw, 55vh, 0) rotate(-28deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(-120vw, 55vh, 0) rotate(-28deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app__stars,
+  .app__shooting {
+    animation: none;
+  }
+
+  .app__stars {
+    opacity: 0.75;
+  }
+
+  .app__shooting {
+    display: none;
+  }
 }
 
 .app__header {

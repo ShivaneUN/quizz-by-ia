@@ -71,6 +71,29 @@
   color: var(--ink-muted);
 }
 
+.multi-gate__locked {
+  margin: 0;
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.multi-gate__locked strong {
+  display: block;
+  font-size: 1rem;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #f0c14b;
+  border: 1.5px solid color-mix(in srgb, #f0c14b 45%, transparent);
+  border-radius: 10px;
+  background: #041022;
+  padding: 0.55rem 0.7rem;
+}
+
 .multi-gate__random {
   border: 1.5px solid color-mix(in srgb, var(--teal) 45%, transparent);
   background: color-mix(in srgb, var(--teal) 12%, #0a1835);

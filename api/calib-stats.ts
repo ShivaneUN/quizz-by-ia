@@ -26,6 +26,7 @@ import {
 import { listCuratedThemeSlots } from '../server/curatedFiles.js'
 import { getRedisQuota } from '../server/redisQuota.js'
 import { clearAllQuestionHistory } from '../server/questionHistory.js'
+import { deleteProfile, listProfiles } from '../server/profileStorage.js'
 
 export const config = {
   maxDuration: 30,
@@ -50,7 +51,7 @@ function authorized(req: VercelRequest): boolean {
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') {
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
     res.setHeader(
       'Access-Control-Allow-Headers',
       'Content-Type, X-Calib-Secret',
@@ -78,6 +79,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return json(res, 200, { ok: true, multiHistoriesCleared: cleared })
       }
 
+      if (body.action === 'deleteProfile') {
+        if (!isAdminSecret(body.secret)) {
+          return json(res, 401, { error: 'secret invalide' })
+        }
+        const profileId = String(body.profileId ?? '').trim()
+        if (!profileId) return json(res, 400, { error: 'profileId requis' })
+        const success = await deleteProfile(profileId)
+        if (!success) return json(res, 404, { error: 'Profil introuvable' })
+        return json(res, 200, { success: true })
+      }
+
       const ok = await recordCalibHand(body as Partial<CalibHandEvent>)
       if (!ok) return json(res, 400, { error: 'événement invalide' })
       return json(res, 200, { ok: true })
@@ -86,6 +98,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method === 'GET') {
       if (!authorized(req)) {
         return json(res, 401, { error: 'secret invalide' })
+      }
+      const adminAction = String(req.query.action ?? '')
+      if (adminAction === 'profiles') {
+        const offset = parseInt(String(req.query.offset ?? '0'), 10)
+        const profileLimit = parseInt(String(req.query.limit ?? '50'), 10)
+        const { total, profiles } = await listProfiles(
+          Number.isFinite(offset) ? offset : 0,
+          Number.isFinite(profileLimit) ? profileLimit : 50,
+        )
+        return json(res, 200, { total, profiles })
       }
       const limit = Number(req.query.limit ?? 2000)
       const events = await listCalibHands(limit)

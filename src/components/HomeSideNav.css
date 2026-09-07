@@ -82,9 +82,18 @@
   color: #f0c14b;
 }
 
-.home-dock__item:disabled {
-  opacity: 0.55;
-  cursor: wait;
+.home-dock__bar--with-admin {
+  gap: 0.2rem;
+}
+
+.home-dock__bar--with-admin .home-dock__icon {
+  width: 2.15rem;
+  height: 2.15rem;
+}
+
+.home-dock__bar--with-admin .home-dock__label {
+  max-width: 3.6rem;
+  font-size: 0.52rem;
 }
 
 .home-dock__room {
@@ -159,6 +168,29 @@
   outline: 2px solid color-mix(in srgb, #f0c14b 70%, transparent);
   outline-offset: 2px;
   transition: outline-color 0.3s ease;
+}
+
+@media (max-width: 720px) {
+  .game-home__mobile-nav .home-dock {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+  }
+
+  .game-home__mobile-nav .home-dock__bar {
+    width: 100%;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    padding: 0.2rem 0.15rem 0.1rem;
+  }
+
+  .game-home__mobile-nav .home-dock__room {
+    width: 100%;
+    justify-content: center;
+    padding-bottom: 0.25rem;
+  }
 }
 
 @media (max-width: 380px) {

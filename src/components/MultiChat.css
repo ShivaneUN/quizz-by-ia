@@ -232,6 +232,20 @@
   border-color: #f0c14b;
 }
 
+.multi-chat__nick-locked {
+  margin: 0;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1.5px solid color-mix(in srgb, #f0c14b 45%, transparent);
+  border-radius: 10px;
+  background: #041022;
+  color: #f0c14b;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 800;
+  padding: 0.45rem 0.65rem;
+}
+
 .multi-chat__hint {
   margin: 0;
   font-size: 0.68rem;

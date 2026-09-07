@@ -22,6 +22,7 @@ import curatedBankHandler from './api/curated-bank.ts'
 import chatHandler from './api/chat.ts'
 import aiCapacityHandler from './api/ai-capacity.ts'
 import penduWordsHandler from './api/pendu-words.ts'
+import profileHandler from './api/profile.ts'
 import {
   isValidProgressId,
   setGenProgress,
@@ -757,6 +758,58 @@ function localApiPlugin(): Plugin {
               },
             }
             await penduWordsHandler(fakeReq as never, fakeRes as never)
+          } catch (e) {
+            const message = e instanceof Error ? e.message : 'Erreur serveur'
+            res.statusCode = 500
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ error: message }))
+          }
+        })()
+      })
+
+      server.middlewares.use('/api/profile', (req, res) => {
+        void (async () => {
+          try {
+            const url = new URL(req.url || '/', 'http://local')
+            const raw =
+              req.method === 'GET' || req.method === 'HEAD'
+                ? '{}'
+                : await readBody(req)
+            const body = JSON.parse(raw || '{}')
+            const fakeReq = {
+              method: req.method,
+              body,
+              query: Object.fromEntries(url.searchParams.entries()),
+              headers: req.headers,
+            }
+            const fakeRes = {
+              statusCode: 200,
+              headers: {} as Record<string, string>,
+              setHeader(k: string, v: string) {
+                this.headers[k] = v
+              },
+              status(code: number) {
+                this.statusCode = code
+                return this
+              },
+              json(payload: unknown) {
+                res.statusCode = this.statusCode
+                for (const [k, v] of Object.entries(this.headers)) {
+                  res.setHeader(k, v)
+                }
+                if (!res.getHeader('Content-Type')) {
+                  res.setHeader('Content-Type', 'application/json')
+                }
+                res.end(JSON.stringify(payload))
+                return this
+              },
+              end() {
+                res.statusCode = this.statusCode
+                res.end()
+                return this
+              },
+            }
+            await profileHandler(fakeReq as never, fakeRes as never)
           } catch (e) {
             const message = e instanceof Error ? e.message : 'Erreur serveur'
             res.statusCode = 500

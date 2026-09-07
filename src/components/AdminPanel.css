@@ -942,6 +942,19 @@
   color: #fff;
 }
 
+.admin-panel__ai-table tr.profile-row-dead td {
+  opacity: 0.55;
+}
+
+.admin-profile-code {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #f0c14b;
+  user-select: all;
+}
+
 .admin-panel__ai-model {
   max-width: 11rem;
   overflow: hidden;

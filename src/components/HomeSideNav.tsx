@@ -1,6 +1,8 @@
 import { useState } from 'react'
+import { isAdminProfile } from '../lib/adminCode'
 import { clearMultiQuestionCache } from '../lib/api'
 import { clearLocalQuizCache } from '../lib/bankStorage'
+import { useProfile } from '../hooks/useProfile'
 import {
   PopupMiniJeux,
   PopupMulti,
@@ -71,8 +73,19 @@ function IconMulti() {
   )
 }
 
+function IconAdmin() {
+  return (
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden>
+      <path
+        fill="currentColor"
+        d="M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4Zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8Z"
+      />
+    </svg>
+  )
+}
+
 /**
- * Navigation accueil — barre icônes (Profil · Mini-jeux · Chat · Multi)
+ * Navigation accueil — barre icônes (Profil · Mini-jeux · Chat · Multi · Admin)
  */
 export function HomeSideNav({
   onMulti,
@@ -85,6 +98,14 @@ export function HomeSideNav({
   onReturnToRoom,
   variant = 'dock',
 }: HomeSideNavProps) {
+  const { activeProfile, activeProfileId, profiles } = useProfile()
+  const localRef = profiles.find((p) => p.profileId === activeProfileId)
+  const adminActive = isAdminProfile(
+    activeProfile ?? {
+      profileId: activeProfileId ?? '',
+      pseudo: localRef?.pseudo,
+    },
+  )
   const [cacheMsg, setCacheMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [active, setActive] = useState<string | null>(null)
@@ -120,14 +141,17 @@ export function HomeSideNav({
     }
   }
 
-  function openAdmin() {
-    setActive('admin')
-    window.dispatchEvent(new CustomEvent('quizz:open-admin'))
-  }
-
   function openChat() {
     setActive('chat')
     window.dispatchEvent(new CustomEvent('quizz:open-chat'))
+  }
+
+  function openAdmin() {
+    setPopup(null)
+    setActive('admin')
+    window.dispatchEvent(
+      new CustomEvent('quizz:open-admin', { detail: { unlock: true } }),
+    )
   }
 
   const popups = (
@@ -135,7 +159,6 @@ export function HomeSideNav({
       {popup === 'profil' && (
         <PopupProfil
           onClose={() => setPopup(null)}
-          onOpenAdmin={openAdmin}
           onClearCache={() => void handleClearCache()}
           cacheBusy={busy}
           cacheMsg={cacheMsg}
@@ -221,7 +244,7 @@ export function HomeSideNav({
           )}
         </div>
       )}
-      <div className="home-dock__bar">
+      <div className={`home-dock__bar${adminActive ? ' home-dock__bar--with-admin' : ''}`}>
         <button
           type="button"
           className={`home-dock__item${active === 'profil' || popup === 'profil' ? ' is-on' : ''}`}
@@ -271,6 +294,18 @@ export function HomeSideNav({
           </span>
           <span className="home-dock__label">Multi</span>
         </button>
+        {adminActive && (
+          <button
+            type="button"
+            className={`home-dock__item${active === 'admin' ? ' is-on' : ''}`}
+            onClick={openAdmin}
+          >
+            <span className="home-dock__icon">
+              <IconAdmin />
+            </span>
+            <span className="home-dock__label">Admin</span>
+          </button>
+        )}
       </div>
       {popups}
     </nav>

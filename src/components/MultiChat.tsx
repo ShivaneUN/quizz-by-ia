@@ -14,6 +14,7 @@ import {
   type ChatMessage,
 } from '../lib/chatApi'
 import { saveDisplayName, useSharedDisplayName } from '../lib/displayName'
+import { useLockedPseudo } from '../hooks/useProfile'
 import './MultiChat.css'
 
 const CHAT_LAYOUT_KEY = 'quizz:chatLayout'
@@ -206,11 +207,12 @@ export function MultiChat({
   const [channel, setChannel] = useState<ChatChannel>('global')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [text, setText] = useState('')
+  const lockedPseudo = useLockedPseudo()
   const {
     name: displayName,
     setName: setDisplayName,
     commit: commitName,
-  } = useSharedDisplayName(preferredName)
+  } = useSharedDisplayName(lockedPseudo || preferredName)
   const [error, setError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [unread, setUnread] = useState(0)
@@ -228,12 +230,18 @@ export function MultiChat({
   layoutRef.current = layout
 
   useEffect(() => {
+    const locked = lockedPseudo?.trim() ?? ''
+    if (locked.length >= 2) {
+      setDisplayName(locked)
+      saveDisplayName(locked)
+      return
+    }
     const pref = preferredName.trim()
     if (pref.length >= 2) {
       setDisplayName(pref)
       saveDisplayName(pref)
     }
-  }, [preferredName, setDisplayName])
+  }, [lockedPseudo, preferredName, setDisplayName])
 
   useEffect(() => {
     if (!playerId) return
@@ -600,17 +608,21 @@ export function MultiChat({
 
           <label className="multi-chat__nick">
             <span className="visually-hidden">Pseudo chat</span>
-            <input
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value.slice(0, 24))}
-              onBlur={() => {
-                const n = displayName.trim()
-                if (n.length >= 2) commitName(n)
-              }}
-              placeholder="Ton pseudo…"
-              maxLength={24}
-              autoComplete="nickname"
-            />
+            {lockedPseudo ? (
+              <p className="multi-chat__nick-locked">{lockedPseudo}</p>
+            ) : (
+              <input
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value.slice(0, 24))}
+                onBlur={() => {
+                  const n = displayName.trim()
+                  if (n.length >= 2) commitName(n)
+                }}
+                placeholder="Ton pseudo…"
+                maxLength={24}
+                autoComplete="nickname"
+              />
+            )}
           </label>
 
           {!roomChatEnabled && (

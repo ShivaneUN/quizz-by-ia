@@ -1,9 +1,11 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { loadArcadeScores } from '../lib/arcadeStorage'
-import { loadDisplayName, saveDisplayName, useSharedDisplayName } from '../lib/displayName'
+import { useSharedDisplayName } from '../lib/displayName'
+import { useLockedPseudo } from '../hooks/useProfile'
 import { listActiveRooms, type MultiRoomSummary } from '../lib/multiApi'
 import { randomPseudo } from './MultiGate'
+import { ProfileSpace } from './ProfileSpace'
 import type { WaitGameId } from './WaitMiniGames'
 import './HomePopups.css'
 import './MultiGate.css'
@@ -74,10 +76,12 @@ function HomePopupShell({
   const desktop = useDesktopPopup()
   const body = (
     <>
-      <button type="button" className="qz-popup-back" onClick={onClose}>
-        Fermer
-      </button>
-      <div className="qz-sheet-title">{title}</div>
+      <div className="qz-popup-head">
+        <div className="qz-sheet-title">{title}</div>
+        <button type="button" className="qz-popup-back" onClick={onClose}>
+          Fermer
+        </button>
+      </div>
       {children}
     </>
   )
@@ -120,45 +124,12 @@ function HomePopupShell({
   )
 }
 
-function IconUserPlus() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden>
-      <path
-        fill="currentColor"
-        d="M15 12a4 4 0 1 0-3.2-6.4A4 4 0 0 0 15 12ZM4 20v-1.2C4 16.2 8.5 15 12 15c.7 0 1.4.05 2.1.14A5 5 0 0 0 14 17.5V20H4Zm14.5-6v-2h-2v2h-2v2h2v2h2v-2h2v-2h-2Z"
-      />
-    </svg>
-  )
-}
-
-function IconKey() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden>
-      <path
-        fill="currentColor"
-        d="M7.5 13.5A4.5 4.5 0 1 1 12 18H22v-3h-2v-2h-2v-2h-2.1A4.5 4.5 0 0 1 7.5 13.5Zm0 2a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"
-      />
-    </svg>
-  )
-}
-
 function IconChart() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden>
       <path
         fill="currentColor"
         d="M5 19V9h3v10H5Zm5.5 0V5h3v14h-3ZM16 19v-7h3v7h-3Z"
-      />
-    </svg>
-  )
-}
-
-function IconShield() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden>
-      <path
-        fill="currentColor"
-        d="M12 2 4 5v6.5c0 5.25 3.4 10.15 8 11.5 4.6-1.35 8-6.25 8-11.5V5l-8-3Z"
       />
     </svg>
   )
@@ -243,142 +214,31 @@ function IconGrid() {
 
 export function PopupProfil({
   onClose,
-  onOpenAdmin,
   onClearCache,
   cacheBusy,
   cacheMsg,
 }: {
   onClose: () => void
-  onOpenAdmin: () => void
   onClearCache: () => void
   cacheBusy?: boolean
   cacheMsg?: string | null
 }) {
-  const [view, setView] = useState<'menu' | 'create' | 'recover' | 'stats'>(
-    'menu',
-  )
-  const [name, setName] = useState(() => loadDisplayName())
-  const [msg, setMsg] = useState<string | null>(null)
-  const scores = loadArcadeScores()
-  const saved = loadDisplayName()
-
-  function submitName(e: FormEvent) {
-    e.preventDefault()
-    e.stopPropagation()
-    const next = saveDisplayName(name)
-    if (next.length < 2) {
-      setMsg('Choisis un pseudo (2 caractères min.)')
-      return
-    }
-    setMsg(
-      view === 'recover'
-        ? `Pseudo repris : ${next}`
-        : `Profil enregistré : ${next}`,
-    )
-    setView('menu')
-  }
-
   return (
     <HomePopupShell title="Profil" onClose={onClose}>
-      {view === 'menu' && (
-        <>
-          <SheetRow
-            icon={<IconUserPlus />}
-            label="Créer un profil"
-            sub="Choisis juste un pseudo"
-            onClick={() => {
-              setMsg(null)
-              setView('create')
-            }}
-          />
-          <SheetRow
-            icon={<IconKey />}
-            label="Récupérer un profil"
-            sub="Avec le pseudo déjà utilisé"
-            onClick={() => {
-              setMsg(null)
-              setView('recover')
-            }}
-          />
-          <SheetRow
-            icon={<IconChart />}
-            label="Mon profil"
-            sub={saved ? saved : 'Statistiques et historique'}
-            onClick={() => setView('stats')}
-          />
-          <div className="qz-sheet-divider" />
-          <SheetRow
-            icon={<IconShield />}
-            label="Espace admin"
-            sub="Profil administrateur"
-            onClick={() => {
-              onClose()
-              onOpenAdmin()
-            }}
-          />
-          <SheetRow
-            icon={<IconTrash />}
-            label={cacheBusy ? 'Vidage…' : 'Vider le cache'}
-            onClick={onClearCache}
-          />
-          {(msg || cacheMsg) && (
-            <p className="qz-sheet-row-sub">{msg || cacheMsg}</p>
-          )}
-        </>
-      )}
-      {(view === 'create' || view === 'recover') && (
-        <form className="qz-popup-form" onSubmit={submitName}>
-          <button
-            type="button"
-            className="qz-popup-back"
-            onClick={() => setView('menu')}
-          >
-            ← Retour
-          </button>
-          <label htmlFor="qz-profile-name">
-            {view === 'recover'
-              ? 'Pseudo déjà utilisé sur cet appareil'
-              : 'Choisis un pseudo'}
-          </label>
-          <input
-            id="qz-profile-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Ex. TurboPanda42"
-            maxLength={24}
-            autoComplete="nickname"
-          />
-          <div className="qz-popup-actions">
-            <button type="submit" className="btn btn--primary">
-              Enregistrer
-            </button>
-          </div>
-          {msg && <p className="qz-sheet-row-sub">{msg}</p>}
-        </form>
-      )}
-      {view === 'stats' && (
-        <div className="qz-popup-stats">
-          <button
-            type="button"
-            className="qz-popup-back"
-            onClick={() => setView('menu')}
-          >
-            ← Retour
-          </button>
-          <p>
-            Pseudo : <strong>{saved || 'pas encore défini'}</strong>
-          </p>
-          <p>
-            Frappe : <strong>{scores.typingBest}</strong>
-          </p>
-          <p>
-            Flappy : <strong>{scores.flappyBest}</strong>
-          </p>
-          <p>
-            Pendu : <strong>{scores.penduBest}</strong>
-          </p>
-        </div>
-      )}
+      <ProfileSpace
+        onClose={onClose}
+        listFooter={
+          <>
+            <div className="qz-sheet-divider" />
+            <SheetRow
+              icon={<IconTrash />}
+              label={cacheBusy ? 'Vidage…' : 'Vider le cache'}
+              onClick={onClearCache}
+            />
+            {cacheMsg && <p className="qz-sheet-row-sub">{cacheMsg}</p>}
+          </>
+        }
+      />
     </HomePopupShell>
   )
 }
@@ -403,7 +263,8 @@ export function PopupMulti({
   error?: string | null
 }) {
   const [view, setView] = useState<'menu' | 'create' | 'join' | 'list'>('menu')
-  const { name, setName, commit } = useSharedDisplayName()
+  const lockedPseudo = useLockedPseudo()
+  const { name, setName, commit } = useSharedDisplayName(lockedPseudo ?? '')
   const [code, setCode] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
   const [rooms, setRooms] = useState<MultiRoomSummary[]>([])
@@ -433,7 +294,7 @@ export function PopupMulti({
     }
   }, [view])
 
-  const trimmedName = name.trim()
+  const trimmedName = (lockedPseudo ?? name).trim()
 
   function submitCreate(e: FormEvent) {
     e.preventDefault()
@@ -547,33 +408,42 @@ export function PopupMulti({
       {view === 'create' && (
         <form className="multi-gate__form" onSubmit={submitCreate}>
           <div className="multi-gate__name">
-            <label htmlFor="qz-multi-pseudo">
-              <span>Pseudo (obligatoire)</span>
-              <input
-                id="qz-multi-pseudo"
-                value={name}
-                onChange={(e) => {
-                  setName(e.target.value)
-                  if (localError) setLocalError(null)
-                }}
-                placeholder="Ex. Alex"
-                maxLength={24}
-                autoComplete="nickname"
-                required
-                minLength={2}
-              />
-            </label>
-            <button
-              type="button"
-              className="multi-gate__random"
-              disabled={busy}
-              onClick={() => {
-                setName(randomPseudo())
-                setLocalError(null)
-              }}
-            >
-              Pseudo aléatoire
-            </button>
+            {lockedPseudo ? (
+              <p className="multi-gate__locked">
+                <span>Pseudo</span>
+                <strong>{lockedPseudo}</strong>
+              </p>
+            ) : (
+              <>
+                <label htmlFor="qz-multi-pseudo">
+                  <span>Pseudo (obligatoire)</span>
+                  <input
+                    id="qz-multi-pseudo"
+                    value={name}
+                    onChange={(e) => {
+                      setName(e.target.value)
+                      if (localError) setLocalError(null)
+                    }}
+                    placeholder="Ex. Alex"
+                    maxLength={24}
+                    autoComplete="nickname"
+                    required
+                    minLength={2}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="multi-gate__random"
+                  disabled={busy}
+                  onClick={() => {
+                    setName(randomPseudo())
+                    setLocalError(null)
+                  }}
+                >
+                  Pseudo aléatoire
+                </button>
+              </>
+            )}
           </div>
           {localError && (
             <p className="multi-gate__error" role="alert">
@@ -589,33 +459,42 @@ export function PopupMulti({
       {view === 'join' && (
         <form className="multi-gate__form" onSubmit={submitJoin}>
           <div className="multi-gate__name">
-            <label htmlFor="qz-multi-join-pseudo">
-              <span>Pseudo (obligatoire)</span>
-              <input
-                id="qz-multi-join-pseudo"
-                value={name}
-                onChange={(e) => {
-                  setName(e.target.value)
-                  if (localError) setLocalError(null)
-                }}
-                placeholder="Ex. Alex"
-                maxLength={24}
-                autoComplete="nickname"
-                required
-                minLength={2}
-              />
-            </label>
-            <button
-              type="button"
-              className="multi-gate__random"
-              disabled={busy}
-              onClick={() => {
-                setName(randomPseudo())
-                setLocalError(null)
-              }}
-            >
-              Pseudo aléatoire
-            </button>
+            {lockedPseudo ? (
+              <p className="multi-gate__locked">
+                <span>Pseudo</span>
+                <strong>{lockedPseudo}</strong>
+              </p>
+            ) : (
+              <>
+                <label htmlFor="qz-multi-join-pseudo">
+                  <span>Pseudo (obligatoire)</span>
+                  <input
+                    id="qz-multi-join-pseudo"
+                    value={name}
+                    onChange={(e) => {
+                      setName(e.target.value)
+                      if (localError) setLocalError(null)
+                    }}
+                    placeholder="Ex. Alex"
+                    maxLength={24}
+                    autoComplete="nickname"
+                    required
+                    minLength={2}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="multi-gate__random"
+                  disabled={busy}
+                  onClick={() => {
+                    setName(randomPseudo())
+                    setLocalError(null)
+                  }}
+                >
+                  Pseudo aléatoire
+                </button>
+              </>
+            )}
           </div>
           <label>
             <span>Code de la salle</span>
@@ -772,16 +651,6 @@ export function PopupMiniJeux({
             <strong>
               {scores.flappyBest > 0 ? scores.flappyBest : '—'}
             </strong>
-          </div>
-          <div className="qz-score-row">
-            <span>Pendu</span>
-            <strong>
-              {scores.penduBest > 0 ? scores.penduBest : '—'}
-            </strong>
-          </div>
-          <div className="qz-score-row">
-            <span>Morpion</span>
-            <strong>—</strong>
           </div>
         </div>
       )}

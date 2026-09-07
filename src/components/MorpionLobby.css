@@ -46,6 +46,19 @@
   padding: 0.55rem 0.7rem;
 }
 
+.morpion-lobby__locked {
+  margin: 0;
+  border-radius: 10px;
+  border: 1.5px solid color-mix(in srgb, #f0c14b 45%, transparent);
+  background: #071326;
+  color: #f0c14b;
+  font-size: 0.95rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: none;
+  padding: 0.55rem 0.7rem;
+}
+
 .morpion-lobby__random {
   border: 1.5px solid color-mix(in srgb, #4db8ff 45%, transparent);
   border-radius: 10px;

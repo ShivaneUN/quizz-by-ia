@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { randomPseudo } from './MultiGate'
 import { useSharedDisplayName } from '../lib/displayName'
+import { useLockedPseudo } from '../hooks/useProfile'
 import {
   createMorpionRoom,
   joinMorpionRoom,
@@ -28,8 +29,9 @@ export function MorpionLobby({
   onResume,
   defaultName,
 }: MorpionLobbyProps) {
+  const lockedPseudo = useLockedPseudo()
   const { name, setName, commit } = useSharedDisplayName(
-    resume?.playerName || defaultName || '',
+    lockedPseudo || resume?.playerName || defaultName || '',
   )
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -56,7 +58,7 @@ export function MorpionLobby({
     }
   }, [])
 
-  const trimmed = name.trim()
+  const trimmed = (lockedPseudo ?? name).trim()
   const canPlay = !busy && trimmed.length >= 2
 
   async function handleCreate() {
@@ -117,30 +119,34 @@ export function MorpionLobby({
 
       <label className="morpion-lobby__name">
         <span>Pseudo</span>
-        <div className="morpion-lobby__name-row">
-          <input
-            value={name}
-            onChange={(e) => {
-              setName(e.target.value)
-              if (error) setError(null)
-            }}
-            placeholder="Ex. Alex"
-            maxLength={24}
-            autoComplete="nickname"
-            minLength={2}
-          />
-          <button
-            type="button"
-            className="morpion-lobby__random"
-            disabled={busy}
-            onClick={() => {
-              setName(randomPseudo())
-              setError(null)
-            }}
-          >
-            Aléatoire
-          </button>
-        </div>
+        {lockedPseudo ? (
+          <p className="morpion-lobby__locked">{lockedPseudo}</p>
+        ) : (
+          <div className="morpion-lobby__name-row">
+            <input
+              value={name}
+              onChange={(e) => {
+                setName(e.target.value)
+                if (error) setError(null)
+              }}
+              placeholder="Ex. Alex"
+              maxLength={24}
+              autoComplete="nickname"
+              minLength={2}
+            />
+            <button
+              type="button"
+              className="morpion-lobby__random"
+              disabled={busy}
+              onClick={() => {
+                setName(randomPseudo())
+                setError(null)
+              }}
+            >
+              Aléatoire
+            </button>
+          </div>
+        )}
       </label>
 
       <button

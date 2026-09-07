@@ -60,13 +60,31 @@
 .qz-setting-tile {
   cursor: pointer;
   text-align: center;
-  background: var(--qz-surface-2);
-  border: none;
+  background: color-mix(in srgb, #0a1835 88%, transparent);
+  border: 1.5px solid color-mix(in srgb, #4db8ff 38%, transparent);
   border-radius: var(--qz-radius);
   padding: 7px 8px;
   min-width: 3.15rem;
   color: var(--qz-text);
   font: inherit;
+  box-shadow: 0 4px 12px color-mix(in srgb, #000 28%, transparent);
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.qz-setting-tile:hover:not(:disabled),
+.qz-setting-tile:focus-visible {
+  border-color: color-mix(in srgb, #f0c14b 70%, transparent);
+  background: color-mix(in srgb, #12264a 92%, transparent);
+  box-shadow: 0 0 14px color-mix(in srgb, #f0c14b 28%, transparent);
+}
+
+.qz-setting-tile[aria-expanded='true'] {
+  border-color: #f0c14b;
+  background: color-mix(in srgb, #1a2a12 35%, #0a1835);
+  box-shadow: 0 0 16px color-mix(in srgb, #f0c14b 40%, transparent);
 }
 
 .qz-setting-tile:disabled {
@@ -79,18 +97,33 @@
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--qz-text-muted);
+  color: #8eb8e8;
   margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 15px;
+}
+
+.qz-setting-label svg {
+  display: block;
+  color: #8eb8e8;
+  text-transform: none;
+}
+
+.qz-setting-tile[aria-expanded='true'] .qz-setting-label {
+  color: #f0c14b;
 }
 
 .qz-setting-value {
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 800;
   line-height: 1.15;
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 1.05rem;
+  color: #f0c14b;
 }
 
 .qz-setting-value.on {
@@ -140,12 +173,12 @@
   font-size: 12px;
   font-weight: 600;
   padding: 6px 10px;
-  border: none;
+  border: 1.5px solid color-mix(in srgb, #4db8ff 22%, transparent);
   border-radius: 6px;
   white-space: nowrap;
   cursor: pointer;
-  color: var(--qz-text);
-  background: transparent;
+  color: #e8f0ff;
+  background: color-mix(in srgb, #0a1835 75%, transparent);
   text-align: left;
   display: flex;
   align-items: center;
@@ -153,18 +186,42 @@
 }
 
 .qz-dropdown-option:hover:not(:disabled) {
-  background: var(--qz-surface-2);
+  border-color: color-mix(in srgb, #f0c14b 55%, transparent);
+  background: color-mix(in srgb, #1a3058 90%, transparent);
+  color: #fff;
 }
 
 .qz-dropdown-option.selected {
-  background: #000;
-  color: #fff;
-  font-weight: 700;
+  background: linear-gradient(180deg, #ffe08a 0%, #f0c14b 100%);
+  border-color: #f0c14b;
+  color: #1a1200;
+  font-weight: 800;
+  box-shadow: 0 2px 10px color-mix(in srgb, #f0c14b 40%, transparent);
+}
+
+.qz-dropdown-option.selected .qz-dropdown-hint {
+  opacity: 0.78;
+  color: #3a2a00;
 }
 
 .qz-dropdown-option:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+.qz-dropdown-option.has-hint {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  white-space: normal;
+  min-width: 12.5rem;
+}
+
+.qz-dropdown-hint {
+  font-size: 0.62rem;
+  font-weight: 600;
+  line-height: 1.25;
+  opacity: 0.72;
 }
 
 .qz-action-row {
@@ -207,6 +264,52 @@
 .qz-btn:disabled {
   opacity: 0.55;
   cursor: default;
+}
+
+.qz-random-btn {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 2.35rem;
+  height: 2.35rem;
+  margin: 0;
+  padding: 0;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, #f0c14b 55%, transparent);
+  background: color-mix(in srgb, #0a1835 92%, transparent);
+  color: #f0c14b;
+  cursor: pointer;
+  box-shadow: 0 0 12px color-mix(in srgb, #f0c14b 22%, transparent);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.12s ease;
+}
+
+.qz-random-btn:hover:not(:disabled) {
+  border-color: #ffe08a;
+  box-shadow: 0 0 16px color-mix(in srgb, #f0c14b 45%, transparent);
+  transform: scale(1.06);
+}
+
+.qz-random-btn:disabled:not(.is-rolling) {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.qz-random-btn.is-rolling {
+  opacity: 1;
+  border-color: #ffe08a;
+  box-shadow: 0 0 18px color-mix(in srgb, #f0c14b 50%, transparent);
+}
+
+.qz-random-btn.is-rolling svg,
+.qz-btn.is-rolling svg,
+.qz-wheel-spin.is-rolling svg {
+  animation: qz-dice-roll 0.4s linear infinite;
+}
+
+@keyframes qz-dice-roll {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* --- Desktop wheel --- */
@@ -649,8 +752,14 @@
 
   .game-home__mobile-nav {
     display: block;
-    width: min(22rem, 100%);
-    margin-inline: auto;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    z-index: 80;
   }
 
   .game-home__panel-title {

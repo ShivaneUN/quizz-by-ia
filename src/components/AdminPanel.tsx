@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent, type PointerEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { clearChatAll } from '../lib/chatApi'
+import { ADMIN_PANEL_CODE, hasLocalAdminUnlock, rememberLocalAdminUnlock } from '../lib/adminCode'
+import { ProfilesAdminPanel } from './ProfilesAdminPanel'
 import './AdminPanel.css'
-
-/** Doit matcher server/adminAuth.ts */
-const ADMIN_PANEL_CODE = 'Quizzyosh'
 
 type DiffRow = {
   difficulty: string
@@ -361,7 +360,7 @@ function quotaPct(q: RedisQuota): number | null {
  */
 export function AdminPanel({ hideGear = false }: { hideGear?: boolean }) {
   const [open, setOpen] = useState(false)
-  const [unlocked, setUnlocked] = useState(false)
+  const [unlocked, setUnlocked] = useState(hasLocalAdminUnlock)
   const [code, setCode] = useState('')
   const [gateError, setGateError] = useState<string | null>(null)
   const [logs, setLogs] = useState<LogsPayload | null>(null)
@@ -371,7 +370,14 @@ export function AdminPanel({ hideGear = false }: { hideGear?: boolean }) {
   const [clearing, setClearing] = useState(false)
   const [resetting, setResetting] = useState(false)
   const [tab, setTab] = useState<
-    'summary' | 'hands' | 'feedback' | 'errors' | 'curated' | 'ai' | 'pendu'
+    | 'summary'
+    | 'hands'
+    | 'feedback'
+    | 'errors'
+    | 'curated'
+    | 'ai'
+    | 'pendu'
+    | 'profiles'
   >('summary')
   const [aiRows, setAiRows] = useState<AiCapacityRow[] | null>(null)
   const [aiGen, setAiGen] = useState<AiGenPayload | null>(null)
@@ -815,8 +821,17 @@ export function AdminPanel({ hideGear = false }: { hideGear?: boolean }) {
   }, [open, unlocked])
 
   useEffect(() => {
-    function onOpen() {
+    function onOpen(e: Event) {
       setOpen(true)
+      const unlock = Boolean(
+        (e as CustomEvent<{ unlock?: boolean }>).detail?.unlock,
+      )
+      if (unlock || hasLocalAdminUnlock()) {
+        rememberLocalAdminUnlock()
+        setUnlocked(true)
+        setGateError(null)
+        setCode('')
+      }
     }
     window.addEventListener('quizz:open-admin', onOpen)
     return () => window.removeEventListener('quizz:open-admin', onOpen)
@@ -841,6 +856,7 @@ export function AdminPanel({ hideGear = false }: { hideGear?: boolean }) {
       setGateError('Code incorrect')
       return
     }
+    rememberLocalAdminUnlock()
     setGateError(null)
     setUnlocked(true)
     setCode('')
@@ -1296,6 +1312,7 @@ export function AdminPanel({ hideGear = false }: { hideGear?: boolean }) {
                       ['errors', 'Erreurs'],
                       ['curated', 'Banque'],
                       ['pendu', 'Pendu'],
+                      ['profiles', 'Profils'],
                       ['ai', 'IA'],
                     ] as const
                   ).map(([id, label]) => (
@@ -1761,6 +1778,10 @@ export function AdminPanel({ hideGear = false }: { hideGear?: boolean }) {
                       </div>
                     )}
                   </div>
+                )}
+
+                {tab === 'profiles' && (
+                  <ProfilesAdminPanel secret={ADMIN_PANEL_CODE} />
                 )}
 
                 {tab === 'pendu' && (

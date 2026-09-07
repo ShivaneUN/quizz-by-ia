@@ -37,6 +37,10 @@ const KEY_FAMILIES: { prefix: string; id: string; label: string }[] = [
   { prefix: 'quizz:genstats:', id: 'genstats', label: 'ETA génération' },
   { prefix: 'quizz:presence:', id: 'presence', label: 'présence' },
   { prefix: 'quizz:morpion:', id: 'morpion', label: 'salles morpion' },
+  { prefix: 'quizz:profile:', id: 'profiles', label: 'profils' },
+  { prefix: 'quizz:recovery:', id: 'recovery', label: 'codes profil' },
+  { prefix: 'quizz:pseudo:', id: 'pseudos', label: 'pseudos profil' },
+  { prefix: 'quizz:profiles:', id: 'profiles-index', label: 'index profils' },
 ]
 
 function classifyKey(key: string): { id: string; label: string } {

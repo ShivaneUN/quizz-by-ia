@@ -156,8 +156,10 @@ export function ThemeSelect({
   const [openDropdown, setOpenDropdown] = useState<string | null>(null)
   const [rotation, setRotation] = useState(0)
   const [spinning, setSpinning] = useState(false)
+  const [shuffling, setShuffling] = useState<'theme' | 'sub' | null>(null)
   const rafRef = useRef<number | null>(null)
   const spinTimerRef = useRef<number | null>(null)
+  const shuffleLockRef = useRef(false)
 
   const isMulti = variant === 'multi'
   const duoLocked = isMulti && playerCount > 2
@@ -247,6 +249,7 @@ export function ThemeSelect({
     () => () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
       if (spinTimerRef.current) window.clearTimeout(spinTimerRef.current)
+      shuffleLockRef.current = false
     },
     [],
   )
@@ -310,33 +313,70 @@ export function ThemeSelect({
     rafRef.current = requestAnimationFrame(animate)
   }
 
-  function spinRandomMobile() {
-    if (spinning || busy) return
-    const playable = WHEEL_THEMES.filter((t) => !t.soon)
-    if (playable.length === 0) return
-    const winner = playable[Math.floor(Math.random() * playable.length)]
-    setSpinning(true)
-    setOpenDropdown(null)
+  function runShuffle<T>(
+    items: T[],
+    apply: (item: T) => void,
+    done: (item: T) => void,
+    kind: 'theme' | 'sub',
+  ) {
+    if (items.length === 0 || shuffleLockRef.current || spinning || busy) return
+    shuffleLockRef.current = true
+    if (spinTimerRef.current) window.clearTimeout(spinTimerRef.current)
+    const winner = items[Math.floor(Math.random() * items.length)]
+    setShuffling(kind)
     let step = 0
-    const totalSteps = 22
-    let delay = 60
-
+    const total = Math.min(16, Math.max(8, items.length * 2))
+    let delay = 45
     function tick() {
-      const t = playable[step % playable.length]
-      setThemeId(t.id)
-      setSubtheme('Général')
-      setCustomTheme('')
-      setCustomFromThemeId(null)
+      apply(items[step % items.length])
       step++
-      delay += 6
-      if (step < totalSteps || playable[step % playable.length] !== winner) {
+      delay += 14
+      if (step < total) {
         spinTimerRef.current = window.setTimeout(tick, delay)
       } else {
-        setSpinning(false)
-        selectTheme(winner)
+        apply(winner)
+        shuffleLockRef.current = false
+        setShuffling(null)
+        done(winner)
       }
     }
     tick()
+  }
+
+  function spinRandomMobile() {
+    const playable = WHEEL_THEMES.filter((t) => !t.soon)
+    runShuffle(
+      playable,
+      (t) => {
+        setThemeId(t.id)
+        setSubtheme('Général')
+        setCustomTheme('')
+        setCustomFromThemeId(null)
+      },
+      (winner) => selectTheme(winner),
+      'theme',
+    )
+  }
+
+  function spinRandomSubtheme() {
+    if (!parent || customTheme.trim()) return
+    const pool = (
+      themeId === 'custom'
+        ? ['Général', ...orphanSubs.filter((s) => s !== 'Général')]
+        : officialSubs
+    ).filter((s) => s !== 'Custom')
+    runShuffle(
+      pool,
+      (s) => {
+        setSubtheme(s)
+        setCustomFromThemeId(null)
+      },
+      (s) => {
+        setSubtheme(s)
+        setCustomFromThemeId(null)
+      },
+      'sub',
+    )
   }
 
   function toggleDropdown(key: string) {
@@ -478,11 +518,10 @@ export function ThemeSelect({
     : playThemeLabel()
   const canPlay = isPendu
     ? !busy &&
-      !spinning &&
       (isMulti
         ? true
         : Boolean(onPendu) && !soloLocked)
-    : Boolean(activeLabel) && !busy && !spinning && !(variant === 'solo' && soloLocked)
+    : Boolean(activeLabel) && !busy && !(variant === 'solo' && soloLocked)
   const deezerUsingCustom = Boolean(deezerQuery.trim())
 
   function renderSubthemes(opts?: { inPanel?: boolean; showChosen?: boolean }) {
@@ -536,7 +575,20 @@ export function ThemeSelect({
         className={`subthemes${inPanel ? ' subthemes--in-panel' : ''}`}
       >
         <legend className="subthemes__title">
-          Sous-thèmes — {parent.label}
+          <span>Sous-thèmes — {parent.label}</span>
+          <button
+            type="button"
+            className={`qz-random-btn${shuffling === 'sub' ? ' is-rolling' : ''}`}
+            onClick={(e) => {
+              e.preventDefault()
+              spinRandomSubtheme()
+            }}
+            disabled={busy || Boolean(shuffling)}
+            aria-label="Sous-thème aléatoire"
+            title="Sous-thème aléatoire"
+          >
+            <IconDice />
+          </button>
         </legend>
         <div className="subthemes__grid" role="group">
           {primarySubs.map((s) => {
@@ -550,6 +602,7 @@ export function ThemeSelect({
                 type="button"
                 className={`subtheme-chip${selected ? ' is-selected' : ''}${isCustomChip ? ' subtheme-chip--custom' : ''}`}
                 onClick={() => {
+                  if (shuffling) return
                   if (isCustomChip) {
                     enterManualFromCustom()
                     return
@@ -691,7 +744,7 @@ export function ThemeSelect({
             type="button"
             className="qz-type-pill"
             onClick={() => toggleDropdown('type')}
-            disabled={busy || spinning}
+            disabled={busy}
             aria-expanded={openDropdown === 'type'}
             aria-haspopup="listbox"
           >
@@ -751,7 +804,7 @@ export function ThemeSelect({
               type="button"
               className="qz-setting-tile"
               onClick={() => toggleDropdown('portee')}
-              disabled={busy || spinning}
+              disabled={busy}
               aria-label={`Portée : ${QUIZ_SCOPE_LABELS[scope]}`}
             >
               <div className="qz-setting-label">Portée</div>
@@ -786,12 +839,12 @@ export function ThemeSelect({
           </div>
         )}
 
-        {showDifficulty && !isFlags && !isPendu && (
+        {showDifficulty && !isFlags && (
           <SettingDropdown
             label="Diff."
             value={DIFFICULTY_LABELS[difficulty]}
             isOpen={openDropdown === 'difficulte'}
-            disabled={busy || spinning}
+            disabled={busy}
             options={DIFFICULTIES.map((d) => ({
               id: d,
               label: DIFFICULTY_LABELS[d],
@@ -804,12 +857,57 @@ export function ThemeSelect({
           />
         )}
 
+        {isPendu && isMulti && (
+          <SettingDropdown
+            label="Partie"
+            value={penduMode === 'duo' ? 'Duo' : 'Multi'}
+            isOpen={openDropdown === 'partie'}
+            disabled={busy}
+            options={[
+              { id: 'duo', label: 'Duo', disabled: duoLocked },
+              { id: 'multi', label: 'Multi' },
+            ]}
+            onToggle={() => toggleDropdown('partie')}
+            onSelect={(id) => {
+              if (id === 'duo' && duoLocked) return
+              setPenduMode(id as PenduMode)
+              setOpenDropdown(null)
+            }}
+          />
+        )}
+
+        {isPendu && (
+          <SettingDropdown
+            label="Mots"
+            value={penduWordSource === 'ai' ? 'Banque + IA' : 'Banque'}
+            isOpen={openDropdown === 'mots'}
+            disabled={busy}
+            options={[
+              {
+                id: 'bank',
+                label: 'Banque',
+                hint: 'Pas d’IA — mots aléatoires dans la banque quand tout est joué',
+              },
+              {
+                id: 'ai',
+                label: 'Banque + IA',
+                hint: 'Nouveaux mots IA quand la banque est épuisée',
+              },
+            ]}
+            onToggle={() => toggleDropdown('mots')}
+            onSelect={(id) => {
+              setPenduWordSource(id as PenduWordSource)
+              setOpenDropdown(null)
+            }}
+          />
+        )}
+
         {!isFlags && !isPendu && (
           <SettingDropdown
             label="Mode"
             value={gameMode === 'progression' ? 'Paliers' : 'Libre'}
             isOpen={openDropdown === 'mode'}
-            disabled={busy || spinning}
+            disabled={busy}
             options={[
               { id: 'progression', label: 'Paliers', disabled: isDeezer },
               { id: 'free', label: 'Libre' },
@@ -826,11 +924,12 @@ export function ThemeSelect({
         {!isPendu && !isDeezer && !isFlags && (
           <SettingDropdown
             label="IA"
+            labelIcon={<IconAi />}
             value={
               AI_OPTIONS.find((o) => o.id === aiProvider)?.label ?? 'Auto'
             }
             isOpen={openDropdown === 'ia'}
-            disabled={busy || spinning}
+            disabled={busy}
             options={AI_OPTIONS.map((opt) => ({
               id: opt.id,
               label: opt.label,
@@ -849,11 +948,14 @@ export function ThemeSelect({
               type="button"
               className="qz-setting-tile"
               onClick={() => setTimerEnabled((v) => !v)}
-              disabled={busy || spinning}
+              disabled={busy}
               role="switch"
               aria-checked={timerEnabled}
+              aria-label={`Chrono : ${timerEnabled ? 'Oui' : 'Non'}`}
             >
-              <div className="qz-setting-label">Chrono</div>
+              <div className="qz-setting-label" aria-hidden>
+                <IconChrono />
+              </div>
               <div className={`qz-setting-value${timerEnabled ? ' on' : ''}`}>
                 {timerEnabled ? 'Oui' : 'Non'}
               </div>
@@ -866,118 +968,13 @@ export function ThemeSelect({
 
   const extraSettings = (
     <>
-      {isPendu && isMulti && (
-        <fieldset className="scope-field">
-          <legend className="scope-field__label">Partie</legend>
-          <div
-            className="scope-field__toggle scope-field__toggle--2"
-            role="group"
-            aria-label="Mode pendu"
-          >
-            <button
-              type="button"
-              className={`scope-chip${penduMode === 'duo' ? ' is-selected' : ''}`}
-              onClick={() => setPenduMode('duo')}
-              disabled={busy || duoLocked}
-              aria-pressed={penduMode === 'duo'}
-              title={
-                duoLocked
-                  ? 'Plus de 2 joueurs dans la salle — Duo indisponible'
-                  : 'Équipe · pendu partagé · 2 joueurs'
-              }
-            >
-              Duo
-            </button>
-            <button
-              type="button"
-              className={`scope-chip${penduMode === 'multi' ? ' is-selected' : ''}`}
-              onClick={() => setPenduMode('multi')}
-              disabled={busy}
-              aria-pressed={penduMode === 'multi'}
-              title="2–8 joueurs · pendu individuel"
-            >
-              Multi
-            </button>
-          </div>
-          {duoLocked && (
-            <p className="subthemes__chosen">
-              Duo grisé : plus de 2 joueurs dans la salle
-            </p>
-          )}
-        </fieldset>
-      )}
-
       {isPendu && (
-        <fieldset className="scope-field">
-          <legend className="scope-field__label">Difficulté</legend>
-          <div className="scope-field__toggle" role="group" aria-label="Difficulté pendu">
-            {DIFFICULTIES.map((d) => (
-              <button
-                key={d}
-                type="button"
-                className={`scope-chip${difficulty === d ? ' is-selected' : ''}`}
-                onClick={() => setDifficulty(d)}
-                disabled={busy}
-                aria-pressed={difficulty === d}
-                title={
-                  d === 'easy'
-                    ? 'Petits mots (5–6 lettres)'
-                    : d === 'hard'
-                      ? 'Grands mots et mots composés'
-                      : 'Tous les mots simples'
-                }
-              >
-                {DIFFICULTY_LABELS[d]}
-              </button>
-            ))}
-          </div>
-          <p className="subthemes__chosen">
-            {difficulty === 'easy'
-              ? 'Petits mots · 5–6 lettres'
-              : difficulty === 'hard'
-                ? 'Grands mots (8+ lettres) et composés · tirets déjà visibles'
-                : 'Mélange de toute la banque'}
-          </p>
-        </fieldset>
+        <p className="subthemes__chosen">
+          {penduWordSource === 'bank'
+            ? 'Pas d’IA — mots aléatoires dans la banque quand tout est joué'
+            : 'Nouveaux mots IA quand la banque est épuisée'}
+        </p>
       )}
-
-      {isPendu && (
-        <fieldset className="scope-field">
-          <legend className="scope-field__label">Mots</legend>
-          <div
-            className="scope-field__toggle scope-field__toggle--2"
-            role="group"
-            aria-label="Source des mots pendu"
-          >
-            <button
-              type="button"
-              className={`scope-chip${penduWordSource === 'bank' ? ' is-selected' : ''}`}
-              onClick={() => setPenduWordSource('bank')}
-              disabled={busy}
-              aria-pressed={penduWordSource === 'bank'}
-              title="Banque locale uniquement — recycle si tout est joué"
-            >
-              Banque locale
-            </button>
-            <button
-              type="button"
-              className={`scope-chip${penduWordSource === 'ai' ? ' is-selected' : ''}`}
-              onClick={() => setPenduWordSource('ai')}
-              disabled={busy}
-              aria-pressed={penduWordSource === 'ai'}
-              title="Banque puis mots IA (log admin)"
-            >
-              Banque + IA
-            </button>
-          </div>
-          <p className="subthemes__chosen">
-            {penduWordSource === 'bank'
-              ? 'Pas d’IA — mots aléatoires dans la banque quand tout est joué'
-              : 'Nouveaux mots IA quand la banque est épuisée (onglet Pendu admin)'}
-          </p>
-        </fieldset>
-      )}
-
       {isFlags && (
         <>
           <fieldset className="scope-field">
@@ -1083,10 +1080,10 @@ export function ThemeSelect({
           } as CSSProperties
         }
         onClick={() => {
-          if (soon || spinning) return
+          if (soon || spinning || shuffling) return
           selectTheme(t)
         }}
-        disabled={busy || soon || spinning}
+        disabled={busy || soon}
         aria-pressed={themeId === t.id && !customTheme && !soon}
         title={soon ? 'Disponible prochainement' : t.label}
         aria-label={
@@ -1124,7 +1121,7 @@ export function ThemeSelect({
           if (soon || spinning) return
           selectTheme(t)
         }}
-        disabled={busy || soon || spinning}
+        disabled={busy || soon}
         aria-pressed={selected}
         title={soon ? `${t.label} — disponible prochainement` : t.label}
         aria-label={soon ? `${t.label} — disponible prochainement` : t.label}
@@ -1359,19 +1356,15 @@ export function ThemeSelect({
               <div className="qz-action-row">
                 <button
                   type="button"
-                  className="qz-btn qz-btn-secondary"
+                  className={`qz-btn qz-btn-secondary${shuffling === 'theme' ? ' is-rolling' : ''}`}
                   onClick={spinRandomMobile}
-                  disabled={busy || spinning}
+                  disabled={busy || Boolean(shuffling)}
                 >
                   <IconDice /> Aléatoire
                 </button>
                 <div className="qz-play-wrap">{playButton}</div>
               </div>
             </div>
-
-            {topDock ? (
-              <div className="game-home__mobile-nav">{topDock}</div>
-            ) : null}
 
             {/* Desktop : roue */}
             <div className="game-home__stage">
@@ -1439,12 +1432,12 @@ export function ThemeSelect({
                   ) : null}
                   <button
                     type="button"
-                    className="qz-btn qz-btn-secondary qz-wheel-spin"
+                    className={`qz-btn qz-btn-secondary qz-wheel-spin${spinning ? ' is-rolling' : ''}`}
                     onClick={(e) => {
                       e.stopPropagation()
                       startSpin()
                     }}
-                    disabled={busy || spinning}
+                    disabled={busy}
                   >
                     <IconDice /> Aléatoire
                   </button>
@@ -1464,6 +1457,9 @@ export function ThemeSelect({
             {error}
           </p>
         )}
+        {topDock ? (
+          <div className="game-home__mobile-nav">{topDock}</div>
+        ) : null}
       </form>
     </section>
   )
@@ -1471,6 +1467,7 @@ export function ThemeSelect({
 
 function SettingDropdown({
   label,
+  labelIcon,
   value,
   options,
   isOpen,
@@ -1479,8 +1476,9 @@ function SettingDropdown({
   disabled,
 }: {
   label: string
+  labelIcon?: ReactNode
   value: string
-  options: { id: string; label: ReactNode; disabled?: boolean }[]
+  options: { id: string; label: ReactNode; hint?: string; disabled?: boolean }[]
   isOpen: boolean
   onToggle: () => void
   onSelect: (id: string) => void
@@ -1495,8 +1493,11 @@ function SettingDropdown({
         disabled={disabled}
         aria-expanded={isOpen}
         aria-haspopup="listbox"
+        aria-label={label}
       >
-        <div className="qz-setting-label">{label}</div>
+        <div className="qz-setting-label" aria-hidden>
+          {labelIcon ?? label}
+        </div>
         <div className="qz-setting-value">{value}</div>
       </button>
       {isOpen && (
@@ -1505,11 +1506,14 @@ function SettingDropdown({
             <button
               key={opt.id}
               type="button"
-            className={`qz-dropdown-option${String(opt.label) === value ? ' selected' : ''}`}
+              className={`qz-dropdown-option${opt.hint ? ' has-hint' : ''}${String(opt.label) === value ? ' selected' : ''}`}
               onClick={() => onSelect(opt.id)}
               disabled={opt.disabled}
             >
-              {opt.label}
+              <span>{opt.label}</span>
+              {opt.hint ? (
+                <span className="qz-dropdown-hint">{opt.hint}</span>
+              ) : null}
             </button>
           ))}
         </div>
@@ -1548,6 +1552,46 @@ function WorldIcon() {
         <ellipse cx="11" cy="9" rx="6.5" ry="3.6" fill="#fff" opacity="0.22" />
       </svg>
     </span>
+  )
+}
+
+function IconAi() {
+  return (
+    <svg viewBox="0 0 24 16" width="20" height="13" aria-hidden>
+      <rect
+        x="1"
+        y="1"
+        width="22"
+        height="14"
+        rx="3.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
+      <text
+        x="12"
+        y="11.6"
+        textAnchor="middle"
+        fill="currentColor"
+        fontSize="9"
+        fontWeight="800"
+        fontFamily="system-ui, Segoe UI, sans-serif"
+        letterSpacing="0.4"
+      >
+        IA
+      </text>
+    </svg>
+  )
+}
+
+function IconChrono() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden>
+      <path
+        fill="currentColor"
+        d="M9.2 2.4h5.6c.4 0 .7.3.7.7s-.3.7-.7.7h-1.1v1.15a8.4 8.4 0 1 1-3.4 0V3.8H9.2c-.4 0-.7-.3-.7-.7s.3-.7.7-.7Zm2.8 4.55a6.85 6.85 0 1 0 0 13.7 6.85 6.85 0 0 0 0-13.7Zm.55 2.2v3.55l2.55 1.5c.3.18.4.57.22.87a.66.66 0 0 1-.9.22l-2.85-1.68a.7.7 0 0 1-.35-.6V9.15c0-.38.31-.7.7-.7.38 0 .7.32.7.7Z"
+      />
+    </svg>
   )
 }
 
