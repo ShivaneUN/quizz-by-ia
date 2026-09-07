@@ -1,4 +1,4 @@
-/* Barre icônes accueil (Réglages · Mini-jeux · Cache · Chat · Multi) */
+/* Barre icônes accueil (Profil · Mini-jeux · Chat · Multi) */
 
 .home-dock {
   width: min(22rem, 100%);
@@ -12,7 +12,7 @@
   display: flex;
   align-items: stretch;
   justify-content: space-between;
-  gap: 0.15rem;
+  gap: 0.45rem;
   width: 100%;
   padding: 0.45rem 0.55rem 0.4rem;
   border-radius: 16px;
@@ -23,12 +23,12 @@
 }
 
 .home-dock__item {
-  flex: 1;
+  flex: 1 1 0;
   display: grid;
   justify-items: center;
   gap: 0.22rem;
   margin: 0;
-  padding: 0.15rem 0.1rem;
+  padding: 0.15rem 0.25rem;
   border: none;
   background: transparent;
   color: #9bb4d0;
@@ -56,10 +56,12 @@
 .home-dock__label {
   font-size: 0.58rem;
   font-weight: 700;
-  letter-spacing: 0.01em;
-  line-height: 1.1;
+  letter-spacing: 0;
+  line-height: 1.15;
   text-align: center;
-  white-space: nowrap;
+  white-space: normal;
+  max-width: 4.4rem;
+  padding-inline: 0.15rem;
 }
 
 .home-dock__item:hover .home-dock__icon,
@@ -78,25 +80,6 @@
 
 .home-dock__item.is-on .home-dock__label {
   color: #f0c14b;
-}
-
-.home-dock__item--danger {
-  color: #ff7a7a;
-}
-
-.home-dock__item--danger .home-dock__icon {
-  color: #ff6b6b;
-  border-color: color-mix(in srgb, #ff4d4d 45%, transparent);
-}
-
-.home-dock__item--danger .home-dock__label {
-  color: #ff6b6b;
-}
-
-.home-dock__item--danger:hover .home-dock__icon,
-.home-dock__item--danger:focus-visible .home-dock__icon {
-  border-color: #ff4d4d;
-  color: #ff8a8a;
 }
 
 .home-dock__item:disabled {
@@ -125,15 +108,6 @@
   cursor: pointer;
 }
 
-.home-dock__msg {
-  margin: 0;
-  font-size: 0.58rem;
-  font-weight: 600;
-  color: var(--ink-muted, #9bb4d0);
-  text-align: center;
-  max-width: 100%;
-}
-
 /* Ancien mode latéral (si réutilisé) */
 .home-side-nav--side {
   position: fixed;
@@ -158,12 +132,6 @@
   cursor: pointer;
 }
 
-.home-side-nav__btn--cache {
-  border-color: color-mix(in srgb, #4db8ff 40%, transparent);
-  color: var(--ink-muted, #9bb4d0);
-  font-size: 0.7rem;
-}
-
 .home-side-nav__btn--room {
   border-color: color-mix(in srgb, #ff7a45 55%, transparent);
   font-size: 0.7rem;
@@ -184,13 +152,6 @@
   font-weight: 800;
   color: #ffb08a;
   text-align: center;
-}
-
-.home-side-nav__cache-msg {
-  margin: 0;
-  font-size: 0.62rem;
-  color: var(--ink-muted, #9bb4d0);
-  text-align: right;
 }
 
 .game-home__settings-panel.is-nav-flash,

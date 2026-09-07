@@ -1,0 +1,64 @@
+.qz-float {
+  position: fixed;
+  left: 50%;
+  top: 10vh;
+  transform: translateX(-50%);
+  z-index: 220;
+  width: min(22.5rem, calc(100vw - 1.25rem));
+  max-height: min(82vh, 40rem);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: var(--qz-surface-1, #10192e);
+  border: 1.5px solid color-mix(in srgb, #4db8ff 32%, transparent);
+  border-radius: 14px;
+  box-shadow: 0 22px 50px rgba(0, 0, 0, 0.5);
+  color: var(--ink, #f4f6fb);
+  overflow: hidden;
+}
+
+.qz-float__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  background: color-mix(in srgb, #0a1835 88%, #1a4a8a);
+  border-bottom: 1px solid color-mix(in srgb, #4db8ff 22%, transparent);
+}
+
+.qz-float__bar:active {
+  cursor: grabbing;
+}
+
+.qz-float__title {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.qz-float__close {
+  border: none;
+  background: transparent;
+  color: #7ee8df;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 4px 6px;
+}
+
+.qz-float__body {
+  overflow: auto;
+  padding: 10px 10px 12px;
+}
+
+.qz-float__body .typing-duel,
+.qz-float__body .wait-minis,
+.qz-float__body .morpion-lobby,
+.qz-float__body .morpion-play {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}

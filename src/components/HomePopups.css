@@ -1,0 +1,249 @@
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.qz-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 200;
+}
+
+.qz-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--qz-surface-1, #10192e);
+  border-radius: 20px 20px 0 0;
+  padding: 18px 18px max(18px, env(safe-area-inset-bottom));
+  z-index: 201;
+  max-height: 75vh;
+  overflow-y: auto;
+  color: var(--ink, #f4f6fb);
+}
+
+.qz-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 200;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+}
+
+.qz-modal {
+  background: var(--qz-surface-1, #10192e);
+  border-radius: 14px;
+  padding: 20px;
+  width: min(320px, calc(100vw - 2rem));
+  max-height: 70vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+  color: var(--ink, #f4f6fb);
+}
+
+.qz-sheet-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0 0 12px;
+}
+
+.qz-sheet-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 6px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.qz-sheet-row:hover,
+.qz-sheet-row:focus-visible {
+  background: var(--qz-surface-2, #17223c);
+}
+
+.qz-sheet-row svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.qz-sheet-row-label {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.qz-sheet-row-sub {
+  font-size: 11px;
+  color: var(--qz-text-muted, #8d97b3);
+  margin-top: 2px;
+}
+
+.qz-sheet-chevron {
+  margin-left: auto;
+  opacity: 0.55;
+  width: 14px;
+  height: 14px;
+}
+
+.qz-sheet-divider {
+  height: 1px;
+  background: var(--qz-border, #2a3654);
+  margin: 8px 0;
+}
+
+.qz-popup-form {
+  display: grid;
+  gap: 10px;
+  padding: 6px 4px 4px;
+}
+
+.qz-popup-form label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--qz-text-muted, #8d97b3);
+}
+
+.qz-popup-form input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1.5px solid color-mix(in srgb, #4db8ff 35%, transparent);
+  border-radius: 10px;
+  background: #0a1835;
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  padding: 0.55rem 0.7rem;
+}
+
+.qz-popup-form input:focus {
+  outline: none;
+  border-color: var(--accent, #f0c14b);
+}
+
+.qz-popup-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.qz-popup-back {
+  border: none;
+  background: transparent;
+  color: #7ee8df;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0 0 8px;
+  text-align: left;
+}
+
+.qz-modal .multi-gate__form,
+.qz-sheet .multi-gate__form,
+.qz-modal .multi-gate__last,
+.qz-sheet .multi-gate__last {
+  margin: 0;
+  width: 100%;
+}
+
+.qz-modal .multi-gate__form .btn,
+.qz-sheet .multi-gate__form .btn,
+.qz-modal .multi-gate__last .btn,
+.qz-sheet .multi-gate__last .btn {
+  width: 100%;
+}
+
+.qz-popup-stats {
+  display: grid;
+  gap: 8px;
+  padding: 4px 2px 8px;
+  font-size: 13px;
+}
+
+.qz-popup-stats strong {
+  color: var(--accent, #f0c14b);
+}
+
+.qz-score-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 8px;
+  border-radius: 10px;
+  background: var(--qz-surface-2, #17223c);
+}
+
+.qz-score-row span {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.qz-score-row strong {
+  font-size: 16px;
+}
+
+.qz-room-list {
+  display: grid;
+  gap: 8px;
+}
+
+.qz-room-card {
+  display: grid;
+  gap: 6px;
+  padding: 10px 8px;
+  border-radius: 10px;
+  background: var(--qz-surface-2, #17223c);
+  border: 1px solid color-mix(in srgb, #4db8ff 18%, transparent);
+}
+
+.qz-room-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.qz-room-card__code {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.qz-room-card__status {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #7ee8df;
+}
+
+.qz-room-card__meta {
+  margin: 0;
+  font-size: 11px;
+  color: var(--qz-text-muted, #8d97b3);
+}
+
+.qz-room-card .btn {
+  width: 100%;
+  font-size: 0.82rem;
+  padding: 0.45rem 0.6rem;
+}

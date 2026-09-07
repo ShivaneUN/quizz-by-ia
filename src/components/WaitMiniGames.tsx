@@ -47,6 +47,8 @@ interface WaitMiniGamesProps {
   difficultyLabel?: string | null
   /** Hub arcade : entrée dans une salle morpion */
   onMorpionEnter?: (payload: MorpionEnterPayload) => void
+  /** Ouvre un jeu dès l’arrivée (popup accueil) */
+  initialGame?: WaitGameId | null
   morpionResume?: MorpionEnterPayload | null
   onMorpionResume?: () => void
   onMorpionMove?: (cell: number) => void
@@ -82,8 +84,9 @@ export function WaitMiniGames({
   morpionBusy,
   morpionError,
   morpionDefaultName,
+  initialGame = null,
 }: WaitMiniGamesProps) {
-  const [game, setGame] = useState<WaitGameId | null>(null)
+  const [game, setGame] = useState<WaitGameId | null>(initialGame)
   const [records, setRecords] = useState<ArcadeScores>(() => loadArcadeScores())
   const [clearMsg, setClearMsg] = useState<string | null>(null)
   const etaSec = useGenEta(mode, freePlay ? null : estimateSec)
@@ -99,6 +102,10 @@ export function WaitMiniGames({
   const progressDone = showProgress
     ? Math.max(0, Math.min(questionsTotal, Math.round(questionsDone)))
     : 0
+
+  useEffect(() => {
+    if (initialGame) setGame(initialGame)
+  }, [initialGame])
 
   useEffect(() => {
     return () => {

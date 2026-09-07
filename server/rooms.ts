@@ -144,7 +144,9 @@ export const GENERATING_ABSOLUTE_MAX_MS = 180_000
 /** Verrou runGenerate (secondes) — ≥ budget IA + marge */
 export const GEN_LOCK_TTL_SEC = 70
 
+const INDEX_LIMIT = 40
 const memory = new Map<string, RoomState>()
+const memoryActive = new Set<string>()
 const genLockMemory = new Map<string, { token: string; expiresAt: number }>()
 
 function redisConfigured(): boolean {
@@ -181,6 +183,141 @@ export { redisCommand, redisConfigured }
 
 function roomKey(code: string): string {
   return `quizz:room:${code.toUpperCase()}`
+}
+
+function activeIndexKey(): string {
+  return 'quizz:rooms:index:active'
+}
+
+export interface RoomSummary {
+  code: string
+  theme: string
+  status: RoomStatus
+  playerCount: number
+  hostName: string
+  quizMode?: RoomState['quizMode']
+  updatedAt: number
+}
+
+function isListableRoom(room: RoomState): boolean {
+  return (
+    room.status === 'lobby' ||
+    room.status === 'generating' ||
+    room.status === 'playing'
+  )
+}
+
+export function summarizeRoom(room: RoomState): RoomSummary {
+  const host = room.players.find((p) => p.id === room.hostId)
+  return {
+    code: room.code,
+    theme: room.theme,
+    status: room.status,
+    playerCount: room.players.length,
+    hostName: host?.name ?? 'Hôte',
+    quizMode: room.quizMode,
+    updatedAt: room.updatedAt,
+  }
+}
+
+async function readActiveIndex(): Promise<string[]> {
+  if (redisConfigured()) {
+    const raw = await redisCommand<unknown>(
+      'ZREVRANGE',
+      activeIndexKey(),
+      0,
+      INDEX_LIMIT - 1,
+    )
+    if (!Array.isArray(raw)) return []
+    return raw.filter((x): x is string => typeof x === 'string' && x.length > 0)
+  }
+  return [...memoryActive]
+}
+
+async function indexSave(room: RoomState): Promise<void> {
+  const code = room.code
+  if (!isListableRoom(room)) {
+    await indexRemove(code)
+    return
+  }
+  if (redisConfigured()) {
+    await redisCommand('ZADD', activeIndexKey(), room.updatedAt, code)
+    await redisCommand('EXPIRE', activeIndexKey(), ROOM_TTL_SEC * 2)
+    await redisCommand(
+      'ZREMRANGEBYRANK',
+      activeIndexKey(),
+      0,
+      -(INDEX_LIMIT + 1),
+    )
+    return
+  }
+  memoryActive.add(code)
+}
+
+async function indexRemove(code: string): Promise<void> {
+  const c = code.toUpperCase()
+  if (redisConfigured()) {
+    await redisCommand('ZREM', activeIndexKey(), c)
+    return
+  }
+  memoryActive.delete(c)
+}
+
+async function scanExistingRoomCodes(): Promise<string[]> {
+  if (!redisConfigured()) return [...memory.keys()]
+  const codes: string[] = []
+  let cursor = '0'
+  for (let i = 0; i < 6 && codes.length < INDEX_LIMIT; i++) {
+    const raw = await redisCommand<unknown>(
+      'SCAN',
+      cursor,
+      'MATCH',
+      'quizz:room:*',
+      'COUNT',
+      80,
+    )
+    if (!Array.isArray(raw) || raw.length < 2) break
+    cursor = String(raw[0] ?? '0')
+    const keys = Array.isArray(raw[1]) ? raw[1] : []
+    for (const key of keys) {
+      if (typeof key !== 'string') continue
+      const code = key.replace(/^quizz:room:/i, '').toUpperCase()
+      if (code && !code.includes(':')) codes.push(code)
+    }
+    if (cursor === '0') break
+  }
+  return codes
+}
+
+export async function listActiveRooms(): Promise<RoomSummary[]> {
+  let codes = await readActiveIndex()
+  if (codes.length === 0) {
+    codes = await scanExistingRoomCodes()
+  }
+  const rooms: RoomSummary[] = []
+  const seen = new Set<string>()
+  for (const code of codes) {
+    if (seen.has(code)) continue
+    seen.add(code)
+    let room: RoomState | null = null
+    try {
+      room = await getRoom(code)
+    } catch {
+      room = null
+    }
+    if (!room) {
+      await indexRemove(code)
+      continue
+    }
+    if (!isListableRoom(room)) {
+      await indexRemove(code)
+      continue
+    }
+    await indexSave(room)
+    rooms.push(summarizeRoom(room))
+  }
+  rooms.sort((a, b) => b.updatedAt - a.updatedAt)
+  return rooms
 }
 
 function genLockKey(code: string): string {
@@ -366,18 +503,22 @@ export async function saveRoom(room: RoomState): Promise<void> {
       'EX',
       ROOM_TTL_SEC,
     )
+    await indexSave(room)
     return
   }
   memory.set(room.code, room)
+  await indexSave(room)
 }
 
 export async function deleteRoom(code: string): Promise<void> {
   const c = code.trim().toUpperCase()
   if (redisConfigured()) {
     await redisCommand('DEL', roomKey(c))
+    await indexRemove(c)
     return
   }
   memory.delete(c)
+  await indexRemove(c)
 }
 
 /** Prolonge le TTL tant que quelqu’un poll la salle. */

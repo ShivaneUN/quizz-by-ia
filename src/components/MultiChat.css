@@ -3,8 +3,11 @@
   right: max(0.75rem, env(safe-area-inset-right));
   bottom: max(0.85rem, env(safe-area-inset-bottom));
   z-index: 120;
-  display: grid;
-  justify-items: end;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 0.45rem;
   pointer-events: none;
 }
 
@@ -13,30 +16,68 @@
 }
 
 .multi-chat.is-open {
-  justify-items: stretch;
+  align-items: flex-end;
+}
+
+.multi-chat__fabs {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .multi-chat__fab {
+  box-sizing: border-box;
   position: relative;
-  border: 2px solid color-mix(in srgb, #f0c14b 55%, transparent);
-  background: #0a1835;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.15rem;
+  height: 2.15rem;
+  margin: 0;
+  padding: 0;
+  border: 1.5px solid color-mix(in srgb, #f0c14b 60%, transparent);
+  border-radius: 999px;
+  background: linear-gradient(180deg, #16325c 0%, #0a1835 100%);
   color: #fff;
   font: inherit;
   font-weight: 800;
-  font-size: 0.85rem;
-  letter-spacing: 0.04em;
-  padding: 0.7rem 1.05rem;
-  border-radius: 999px;
+  font-size: 0.68rem;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
-  box-shadow: 0 8px 24px color-mix(in srgb, #000 40%, transparent);
+  box-shadow:
+    0 6px 16px color-mix(in srgb, #000 42%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 12%, transparent);
+  transition:
+    transform 0.12s ease,
+    border-color 0.15s ease,
+    filter 0.15s ease;
+}
+
+.multi-chat__fab svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  flex-shrink: 0;
+}
+
+.multi-chat__fab:hover,
+.multi-chat__fab:focus-visible {
+  border-color: #f0c14b;
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+
+.multi-chat__fab:active {
+  transform: translateY(0);
 }
 
 .multi-chat__badge {
   position: absolute;
-  top: -0.35rem;
-  right: -0.25rem;
-  min-width: 1.2rem;
-  height: 1.2rem;
+  top: -0.28rem;
+  right: -0.2rem;
+  min-width: 1rem;
+  height: 1rem;
   padding: 0 0.25rem;
   border-radius: 999px;
   background: #ff7a45;

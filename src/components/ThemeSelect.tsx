@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import {
   ORBIT_THEMES,
   formatThemeQuery,
@@ -40,6 +40,23 @@ import {
 import { type PenduMode } from '../lib/pendu'
 import { type PenduWordSource } from '../lib/penduWords'
 import './ThemeSelect.css'
+import './theme-selector.css'
+
+const WHEEL_THEMES = ORBIT_THEMES
+const WHEEL_N = WHEEL_THEMES.length
+const WHEEL_SIZE = 700
+const WHEEL_CX = WHEEL_SIZE / 2
+const WHEEL_CY = WHEEL_SIZE / 2
+const WHEEL_R = WHEEL_SIZE * 0.42
+const WHEEL_MARKER = 90
+
+const wheelAngleOf = (idx: number) => idx * (360 / WHEEL_N) - 90
+const norm360 = (a: number) => ((a % 360) + 360) % 360
+
+function wheelShortLabel(t: ThemeTile) {
+  if (t.id === 'pregen') return 'Pré-généré'
+  return t.label
+}
 
 export type GameModeOption = 'progression' | 'free'
 
@@ -89,8 +106,6 @@ interface ThemeSelectProps {
   error?: string | null
   /** Solo bloqué tant qu’une salle multi est ouverte */
   soloLocked?: boolean
-  soloLockHint?: string
-  onReturnToRoom?: () => void
   /** Type Pendu — lance le jeu local (pas de génération IA) */
   onPendu?: (payload: PenduStartPayload) => void
   /** Joueurs déjà dans la salle (multi) — Duo grisé si > 2 */
@@ -108,8 +123,6 @@ export function ThemeSelect({
   busy,
   error,
   soloLocked = false,
-  soloLockHint,
-  onReturnToRoom,
   onPendu,
   playerCount = 1,
   topDock,
@@ -140,6 +153,11 @@ export function ThemeSelect({
   const [isPendu, setIsPendu] = useState(false)
   const [penduMode, setPenduMode] = useState<PenduMode>('solo')
   const [penduWordSource, setPenduWordSource] = useState<PenduWordSource>('bank')
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null)
+  const [rotation, setRotation] = useState(0)
+  const [spinning, setSpinning] = useState(false)
+  const rafRef = useRef<number | null>(null)
+  const spinTimerRef = useRef<number | null>(null)
 
   const isMulti = variant === 'multi'
   const duoLocked = isMulti && playerCount > 2
@@ -225,6 +243,14 @@ export function ThemeSelect({
     }
   }, [themeId, subtheme])
 
+  useEffect(
+    () => () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+      if (spinTimerRef.current) window.clearTimeout(spinTimerRef.current)
+    },
+    [],
+  )
+
   function deezerThemeLabel(): string {
     return formatDeezerTheme({
       mode: deezerPoolMode,
@@ -239,11 +265,82 @@ export function ThemeSelect({
     setSubtheme('Général')
     setCustomTheme('')
     setCustomFromThemeId(null)
+    setOpenDropdown(null)
     if (t.id === 'drapeaux') {
       setGameMode('free')
       setQuizMode('standard')
       setIsPendu(false)
     }
+  }
+
+  function exactRotationFor(idx: number, aroundRotation: number, extraSpins: number) {
+    const targetAngle = wheelAngleOf(idx)
+    const base = norm360(norm360(WHEEL_MARKER) - targetAngle)
+    const fullTurns = Math.round(aroundRotation / 360) + extraSpins
+    return fullTurns * 360 + base
+  }
+
+  function startSpin() {
+    if (spinning || busy) return
+    const playable = WHEEL_THEMES.map((t, i) => (t.soon ? -1 : i)).filter((i) => i >= 0)
+    if (playable.length === 0) return
+    const target = playable[Math.floor(Math.random() * playable.length)]
+    setSpinning(true)
+    setOpenDropdown(null)
+
+    const from = rotation
+    let to = exactRotationFor(target, rotation, 4)
+    if (to <= from) to += 360
+
+    const duration = 3200
+    const start = performance.now()
+
+    function animate(now: number) {
+      const t = Math.min(1, (now - start) / duration)
+      const eased = 1 - Math.pow(1 - t, 3)
+      setRotation(from + (to - from) * eased)
+      if (t < 1) {
+        rafRef.current = requestAnimationFrame(animate)
+      } else {
+        setRotation(to)
+        setSpinning(false)
+        selectTheme(WHEEL_THEMES[target])
+      }
+    }
+    rafRef.current = requestAnimationFrame(animate)
+  }
+
+  function spinRandomMobile() {
+    if (spinning || busy) return
+    const playable = WHEEL_THEMES.filter((t) => !t.soon)
+    if (playable.length === 0) return
+    const winner = playable[Math.floor(Math.random() * playable.length)]
+    setSpinning(true)
+    setOpenDropdown(null)
+    let step = 0
+    const totalSteps = 22
+    let delay = 60
+
+    function tick() {
+      const t = playable[step % playable.length]
+      setThemeId(t.id)
+      setSubtheme('Général')
+      setCustomTheme('')
+      setCustomFromThemeId(null)
+      step++
+      delay += 6
+      if (step < totalSteps || playable[step % playable.length] !== winner) {
+        spinTimerRef.current = window.setTimeout(tick, delay)
+      } else {
+        setSpinning(false)
+        selectTheme(winner)
+      }
+    }
+    tick()
+  }
+
+  function toggleDropdown(key: string) {
+    setOpenDropdown((cur) => (cur === key ? null : key))
   }
 
   /** Custom d’un thème → même flux que la barre manuelle du centre */
@@ -381,10 +478,11 @@ export function ThemeSelect({
     : playThemeLabel()
   const canPlay = isPendu
     ? !busy &&
+      !spinning &&
       (isMulti
         ? true
         : Boolean(onPendu) && !soloLocked)
-    : Boolean(activeLabel) && !busy && !(variant === 'solo' && soloLocked)
+    : Boolean(activeLabel) && !busy && !spinning && !(variant === 'solo' && soloLocked)
   const deezerUsingCustom = Boolean(deezerQuery.trim())
 
   function renderSubthemes(opts?: { inPanel?: boolean; showChosen?: boolean }) {
@@ -536,37 +634,19 @@ export function ThemeSelect({
   )
 
   const playButton = (
-    <>
-      {variant === 'solo' && soloLocked && (
-        <div className="solo-lock" role="status">
-          <p className="solo-lock__msg">
-            {soloLockHint ??
-              'Tu es encore dans une salle multi. Quitte la salle pour jouer en solo.'}
-          </p>
-          {onReturnToRoom && (
-            <button
-              type="button"
-              className="btn btn--secondary solo-lock__btn"
-              onClick={onReturnToRoom}
-            >
-              Retour à la salle
-            </button>
-          )}
-        </div>
-      )}
-      <button className="btn-jouer" type="submit" disabled={!canPlay}>
-        <span className="btn-jouer__icon" aria-hidden>
-          ▶
-        </span>
-        {busy
-          ? 'Préparation…'
-          : isPendu
-            ? isMulti
-              ? existingRoom
-                ? 'Valider le pendu'
-                : 'Créer la salle'
-              : 'Jouer au pendu'
-            : existingRoom
+    <button className="btn-jouer" type="submit" disabled={!canPlay}>
+      <span className="btn-jouer__icon" aria-hidden>
+        ▶
+      </span>
+      {busy
+        ? 'Préparation…'
+        : isPendu
+          ? isMulti
+            ? existingRoom
+              ? 'Valider le pendu'
+              : 'Créer la salle'
+            : 'Jouer au pendu'
+          : existingRoom
             ? 'Valider le thème'
             : isMulti
               ? isDeezer
@@ -577,61 +657,215 @@ export function ThemeSelect({
                 : isDeezer
                   ? 'Lancer le quiz musical'
                   : 'Jouer'}
-      </button>
-    </>
+    </button>
   )
+
+  const typeLabel = isPendu ? 'Pendu' : isDeezer ? 'Deezer' : 'Texte IA'
+
+  function applyScope(s: QuizScope) {
+    if (s === 'fr' && !isDeezer && themeId !== 'aleatoire') {
+      const label =
+        customTheme.trim() ||
+        (parent && themeId !== 'custom' && themeId !== 'pregen'
+          ? parent.label
+          : '')
+      if (label && !themeSupportsFrScope(label)) {
+        setScope('international')
+        return
+      }
+    }
+    setScope(s)
+    if (
+      deezerPoolMode === 'style' &&
+      !isDeezerStyleNativeToScope(deezerStyleId, s)
+    ) {
+      setDeezerStyleId(s === 'fr' ? 'variete' : 'pop')
+    }
+  }
 
   const settingsFields = (
     <div className="game-home__options">
-      <fieldset className="scope-field">
-        <legend className="scope-field__label">Type</legend>
-        <div
-          className="scope-field__toggle scope-field__toggle--3"
-          role="group"
-          aria-label="Type"
-        >
+      <div className="qz-type-row">
+        <div className="qz-setting-wrap" onClick={(e) => e.stopPropagation()}>
           <button
             type="button"
-            className={`scope-chip${!isDeezer && !isPendu ? ' is-selected' : ''}`}
-            onClick={() => {
-              setIsPendu(false)
-              setQuizMode('standard')
-            }}
-            disabled={busy}
-            aria-pressed={!isDeezer && !isPendu}
+            className="qz-type-pill"
+            onClick={() => toggleDropdown('type')}
+            disabled={busy || spinning}
+            aria-expanded={openDropdown === 'type'}
+            aria-haspopup="listbox"
           >
-            Texte (IA)
+            {typeLabel}
+            <IconChevron />
           </button>
-          <button
-            type="button"
-            className={`scope-chip${isDeezer ? ' is-selected' : ''}`}
-            onClick={() => {
-              setIsPendu(false)
-              setQuizMode('audio')
-              setGameMode('free')
-            }}
-            disabled={busy}
-            aria-pressed={isDeezer}
-          >
-            Deezer
-          </button>
-          <button
-            type="button"
-            className={`scope-chip${isPendu ? ' is-selected' : ''}`}
-            onClick={() => {
-              setIsPendu(true)
-              setQuizMode('standard')
-              setGameMode('free')
-              setPenduMode(isMulti ? (playerCount > 2 ? 'multi' : 'duo') : 'solo')
-            }}
-            disabled={busy || (!isMulti && !onPendu)}
-            aria-pressed={isPendu}
-          >
-            Pendu
-          </button>
+          {openDropdown === 'type' && (
+            <div className="qz-dropdown" role="listbox" aria-label="Type">
+              <button
+                type="button"
+                className={`qz-dropdown-option${!isDeezer && !isPendu ? ' selected' : ''}`}
+                onClick={() => {
+                  setIsPendu(false)
+                  setQuizMode('standard')
+                  setOpenDropdown(null)
+                }}
+              >
+                Texte IA
+              </button>
+              <button
+                type="button"
+                className={`qz-dropdown-option${isDeezer ? ' selected' : ''}`}
+                onClick={() => {
+                  setIsPendu(false)
+                  setQuizMode('audio')
+                  setGameMode('free')
+                  setOpenDropdown(null)
+                }}
+              >
+                Deezer
+              </button>
+              <button
+                type="button"
+                className={`qz-dropdown-option${isPendu ? ' selected' : ''}`}
+                onClick={() => {
+                  setIsPendu(true)
+                  setQuizMode('standard')
+                  setGameMode('free')
+                  setPenduMode(
+                    isMulti ? (playerCount > 2 ? 'multi' : 'duo') : 'solo',
+                  )
+                  setOpenDropdown(null)
+                }}
+                disabled={!isMulti && !onPendu}
+              >
+                Pendu
+              </button>
+            </div>
+          )}
         </div>
-      </fieldset>
+      </div>
 
+      <div className="qz-settings-row">
+        {!isFlags && !isPendu && (
+          <div className="qz-setting-wrap" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="qz-setting-tile"
+              onClick={() => toggleDropdown('portee')}
+              disabled={busy || spinning}
+              aria-label={`Portée : ${QUIZ_SCOPE_LABELS[scope]}`}
+            >
+              <div className="qz-setting-label">Portée</div>
+              <div className="qz-setting-value">
+                {scope === 'fr' ? <FrFlagIcon /> : <WorldIcon />}
+              </div>
+            </button>
+            {openDropdown === 'portee' && (
+              <div className="qz-dropdown" role="listbox" aria-label="Portée">
+                <button
+                  type="button"
+                  className={`qz-dropdown-option${scope === 'fr' ? ' selected' : ''}`}
+                  onClick={() => {
+                    applyScope('fr')
+                    setOpenDropdown(null)
+                  }}
+                >
+                  <FrFlagIcon /> France
+                </button>
+                <button
+                  type="button"
+                  className={`qz-dropdown-option${scope === 'international' ? ' selected' : ''}`}
+                  onClick={() => {
+                    applyScope('international')
+                    setOpenDropdown(null)
+                  }}
+                >
+                  <WorldIcon /> Monde
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {showDifficulty && !isFlags && !isPendu && (
+          <SettingDropdown
+            label="Diff."
+            value={DIFFICULTY_LABELS[difficulty]}
+            isOpen={openDropdown === 'difficulte'}
+            disabled={busy || spinning}
+            options={DIFFICULTIES.map((d) => ({
+              id: d,
+              label: DIFFICULTY_LABELS[d],
+            }))}
+            onToggle={() => toggleDropdown('difficulte')}
+            onSelect={(id) => {
+              setDifficulty(id as Difficulty)
+              setOpenDropdown(null)
+            }}
+          />
+        )}
+
+        {!isFlags && !isPendu && (
+          <SettingDropdown
+            label="Mode"
+            value={gameMode === 'progression' ? 'Paliers' : 'Libre'}
+            isOpen={openDropdown === 'mode'}
+            disabled={busy || spinning}
+            options={[
+              { id: 'progression', label: 'Paliers', disabled: isDeezer },
+              { id: 'free', label: 'Libre' },
+            ]}
+            onToggle={() => toggleDropdown('mode')}
+            onSelect={(id) => {
+              if (id === 'progression' && isDeezer) return
+              setGameMode(id as GameModeOption)
+              setOpenDropdown(null)
+            }}
+          />
+        )}
+
+        {!isPendu && !isDeezer && !isFlags && (
+          <SettingDropdown
+            label="IA"
+            value={
+              AI_OPTIONS.find((o) => o.id === aiProvider)?.label ?? 'Auto'
+            }
+            isOpen={openDropdown === 'ia'}
+            disabled={busy || spinning}
+            options={AI_OPTIONS.map((opt) => ({
+              id: opt.id,
+              label: opt.label,
+            }))}
+            onToggle={() => toggleDropdown('ia')}
+            onSelect={(id) => {
+              setAiProvider(id as AiProvider)
+              setOpenDropdown(null)
+            }}
+          />
+        )}
+
+        {!isPendu && (
+          <div className="qz-setting-wrap" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="qz-setting-tile"
+              onClick={() => setTimerEnabled((v) => !v)}
+              disabled={busy || spinning}
+              role="switch"
+              aria-checked={timerEnabled}
+            >
+              <div className="qz-setting-label">Chrono</div>
+              <div className={`qz-setting-value${timerEnabled ? ' on' : ''}`}>
+                {timerEnabled ? 'Oui' : 'Non'}
+              </div>
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+
+  const extraSettings = (
+    <>
       {isPendu && isMulti && (
         <fieldset className="scope-field">
           <legend className="scope-field__label">Partie</legend>
@@ -790,156 +1024,7 @@ export function ThemeSelect({
           </fieldset>
         </>
       )}
-
-      {!isFlags && !isPendu && (
-        <>
-      <fieldset className="scope-field">
-        <legend className="scope-field__label">Portée</legend>
-        <div className="scope-field__toggle" role="group">
-          {(['fr', 'international'] as const).map((s) => (
-            <button
-              key={s}
-              type="button"
-              className={`scope-chip${scope === s ? ' is-selected' : ''}`}
-              onClick={() => {
-                if (s === 'fr' && !isDeezer && themeId !== 'aleatoire') {
-                  const label =
-                    customTheme.trim() ||
-                    (parent && themeId !== 'custom' && themeId !== 'pregen'
-                      ? parent.label
-                      : '')
-                  if (label && !themeSupportsFrScope(label)) {
-                    setScope('international')
-                    return
-                  }
-                }
-                setScope(s)
-                // Si le style actuel ne colle pas à la nouvelle portée → style neutre
-                if (
-                  deezerPoolMode === 'style' &&
-                  !isDeezerStyleNativeToScope(deezerStyleId, s)
-                ) {
-                  setDeezerStyleId(s === 'fr' ? 'variete' : 'pop')
-                }
-              }}
-              disabled={busy}
-              aria-pressed={scope === s}
-              aria-label={QUIZ_SCOPE_LABELS[s]}
-              title={
-                s === 'fr' &&
-                !isDeezer &&
-                themeId !== 'aleatoire' &&
-                parent &&
-                themeId !== 'custom' &&
-                themeId !== 'pregen' &&
-                !themeSupportsFrScope(parent.label)
-                  ? 'Ce thème est toujours en International'
-                  : QUIZ_SCOPE_LABELS[s]
-              }
-            >
-              {s === 'fr' ? (
-                <span className="scope-chip__flag scope-chip__flag--fr" aria-hidden>
-                  <svg viewBox="0 0 9 6" width="18" height="12">
-                    <rect width="3" height="6" fill="#002395" />
-                    <rect x="3" width="3" height="6" fill="#fff" />
-                    <rect x="6" width="3" height="6" fill="#ED2939" />
-                  </svg>
-                </span>
-              ) : (
-                <span className="scope-chip__flag" aria-hidden>
-                  🌍
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-      </fieldset>
-
-      <fieldset className="scope-field">
-        <legend className="scope-field__label">Mode</legend>
-        <div className="scope-field__toggle" role="group" aria-label="Mode">
-          <button
-            type="button"
-            className={`scope-chip${gameMode === 'progression' ? ' is-selected' : ''}`}
-            onClick={() => setGameMode('progression')}
-            disabled={busy || isDeezer}
-            aria-pressed={gameMode === 'progression'}
-          >
-            Paliers
-          </button>
-          <button
-            type="button"
-            className={`scope-chip${gameMode === 'free' ? ' is-selected' : ''}`}
-            onClick={() => setGameMode('free')}
-            disabled={busy}
-            aria-pressed={gameMode === 'free'}
-          >
-            Libre
-          </button>
-        </div>
-      </fieldset>
-
-      {showDifficulty && (
-        <fieldset className="scope-field">
-          <legend className="scope-field__label">Difficulté</legend>
-          <div className="scope-field__toggle" role="group">
-            {DIFFICULTIES.map((d) => (
-              <button
-                key={d}
-                type="button"
-                className={`scope-chip${difficulty === d ? ' is-selected' : ''}`}
-                onClick={() => setDifficulty(d)}
-                disabled={busy}
-                aria-pressed={difficulty === d}
-                title={DIFFICULTY_LABELS[d]}
-              >
-                {DIFFICULTY_LABELS[d]}
-              </button>
-            ))}
-          </div>
-        </fieldset>
-      )}
-        </>
-      )}
-
-      {!isPendu && (
-      <div className="game-home__ia-chrono">
-        {!isDeezer && !isFlags && (
-          <fieldset className="scope-field">
-            <legend className="scope-field__label">IA</legend>
-            <div className="scope-field__toggle" role="group" aria-label="IA">
-              {AI_OPTIONS.map((opt) => (
-                <button
-                  key={opt.id}
-                  type="button"
-                  className={`scope-chip${aiProvider === opt.id ? ' is-selected' : ''}`}
-                  onClick={() => setAiProvider(opt.id)}
-                  disabled={busy}
-                  aria-pressed={aiProvider === opt.id}
-                  title={opt.hint}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          </fieldset>
-        )}
-        <button
-          type="button"
-          className={`chrono-switch${timerEnabled ? ' is-on' : ''}`}
-          role="switch"
-          aria-checked={timerEnabled}
-          disabled={busy}
-          onClick={() => setTimerEnabled((v) => !v)}
-        >
-          <span className="chrono-switch__label">Chrono</span>
-          <span className="chrono-switch__track" aria-hidden>
-            <span className="chrono-switch__thumb" />
-          </span>
-        </button>
-      </div>
-      )}
-    </div>
+    </>
   )
 
   const customThemeField = (
@@ -977,7 +1062,6 @@ export function ThemeSelect({
   function orbitCenter() {
     return (
       <div className="game-home__center">
-        {brandBlock}
         {settingsFields}
         {isFlags ? null : customThemeField}
         {playButton}
@@ -999,10 +1083,10 @@ export function ThemeSelect({
           } as CSSProperties
         }
         onClick={() => {
-          if (soon) return
+          if (soon || spinning) return
           selectTheme(t)
         }}
-        disabled={busy || soon}
+        disabled={busy || soon || spinning}
         aria-pressed={themeId === t.id && !customTheme && !soon}
         title={soon ? 'Disponible prochainement' : t.label}
         aria-label={
@@ -1012,8 +1096,44 @@ export function ThemeSelect({
         <span className="theme-bubble__icon">
           <ThemeIcon id={t.id} />
         </span>
-        <span className="theme-bubble__label">{t.label}</span>
+        <span className="theme-bubble__label">{wheelShortLabel(t)}</span>
         {soon && <span className="theme-bubble__soon">Bientôt</span>}
+      </button>
+    )
+  }
+
+  function renderWheelItem(t: ThemeTile, idx: number) {
+    const angle = (wheelAngleOf(idx) * Math.PI) / 180
+    const x = WHEEL_CX + WHEEL_R * Math.cos(angle)
+    const y = WHEEL_CY + WHEEL_R * Math.sin(angle)
+    const soon = Boolean(t.soon)
+    const selected = themeId === t.id && !customTheme && !soon
+    return (
+      <button
+        key={`wheel-${t.id}`}
+        type="button"
+        className={`qz-wheel-item${selected ? ' is-selected' : ''}${soon ? ' is-soon' : ''}`}
+        style={{
+          left: x,
+          top: y,
+          transform: `translate(-50%, -50%) rotate(${-rotation}deg)`,
+          ['--i' as string]: idx,
+        }}
+        onClick={(e) => {
+          e.stopPropagation()
+          if (soon || spinning) return
+          selectTheme(t)
+        }}
+        disabled={busy || soon || spinning}
+        aria-pressed={selected}
+        title={soon ? `${t.label} — disponible prochainement` : t.label}
+        aria-label={soon ? `${t.label} — disponible prochainement` : t.label}
+      >
+        <span className="qz-theme-badge" style={{ background: t.color }}>
+          <ThemeIcon id={t.id} />
+          {soon && <span className="qz-wheel-soon">Bientôt</span>}
+        </span>
+        <span className="qz-wheel-name">{wheelShortLabel(t)}</span>
       </button>
     )
   }
@@ -1032,7 +1152,11 @@ export function ThemeSelect({
           {backLabel ?? '← Retour'}
         </button>
       )}
-      <form className="game-home__form" onSubmit={handleSubmit}>
+      <form
+        className="game-home__form"
+        onSubmit={handleSubmit}
+        onClick={() => setOpenDropdown(null)}
+      >
         {isPendu ? (
           <>
             {topDock ? (
@@ -1042,12 +1166,17 @@ export function ThemeSelect({
               <div className="deezer-layout__hero">{brandBlock}</div>
               <div className="deezer-layout__settings">
                 {settingsFields}
+                {extraSettings}
                 {playButton}
               </div>
             </div>
           </>
         ) : isDeezer ? (
-          <div className="deezer-layout">
+          <>
+            {topDock ? (
+              <div className="game-home__top-dock">{topDock}</div>
+            ) : null}
+            <div className="deezer-layout">
             <div className="deezer-layout__hero">{brandBlock}</div>
 
             <div className="deezer-panel">
@@ -1167,22 +1296,21 @@ export function ThemeSelect({
 
             <div className="deezer-layout__settings">
               {settingsFields}
+              {extraSettings}
               {playButton}
             </div>
-          </div>
+            </div>
+          </>
         ) : (
           <>
             <div className="game-home__mobile-brand">{brandBlock}</div>
 
-            {topDock ? (
-              <div className="game-home__top-dock">{topDock}</div>
-            ) : null}
-
-            {/* Mobile : réglages + thèmes côte à côte */}
+            {/* Mobile : réglages + thèmes */}
             <div className="game-home__board">
               <aside className="game-home__settings-panel" aria-label="Réglages">
                 <p className="game-home__panel-title">Réglages</p>
                 {settingsFields}
+                {extraSettings}
               </aside>
 
               <div className="game-home__themes-panel">
@@ -1227,26 +1355,105 @@ export function ThemeSelect({
               </div>
             </div>
 
-            <div className="game-home__mobile-play">{playButton}</div>
-
-            {/* Desktop : orbite */}
-            <div className="game-home__stage">
-              <div className="game-home__orbit-ring" aria-hidden />
-
-              <div
-                className="game-home__themes"
-                role="group"
-                aria-label="Thèmes"
-              >
-                {ORBIT_THEMES.map((t) => renderOrbitBubble(t, 'desk-'))}
+            <div className="game-home__mobile-play">
+              <div className="qz-action-row">
+                <button
+                  type="button"
+                  className="qz-btn qz-btn-secondary"
+                  onClick={spinRandomMobile}
+                  disabled={busy || spinning}
+                >
+                  <IconDice /> Aléatoire
+                </button>
+                <div className="qz-play-wrap">{playButton}</div>
               </div>
+            </div>
 
-              <div className="game-home__desktop-center">
-                {orbitCenter()}
+            {topDock ? (
+              <div className="game-home__mobile-nav">{topDock}</div>
+            ) : null}
+
+            {/* Desktop : roue */}
+            <div className="game-home__stage">
+              <div
+                className="qz-wheel-wrap"
+                style={{ width: WHEEL_SIZE, height: WHEEL_SIZE }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <svg
+                  width={WHEEL_SIZE}
+                  height={WHEEL_SIZE}
+                  style={{ position: 'absolute', top: 0, left: 0 }}
+                  aria-hidden
+                >
+                  <circle
+                    cx={WHEEL_CX}
+                    cy={WHEEL_CY}
+                    r={WHEEL_R}
+                    fill="none"
+                    stroke="var(--qz-border)"
+                    strokeWidth="1"
+                    strokeDasharray="4 6"
+                  />
+                </svg>
+
+                <div
+                  className="qz-wheel-ring"
+                  style={{
+                    width: WHEEL_SIZE,
+                    height: WHEEL_SIZE,
+                    transformOrigin: `${WHEEL_CX}px ${WHEEL_CY}px`,
+                    transform: `rotate(${rotation}deg)`,
+                  }}
+                  role="group"
+                  aria-label="Thèmes"
+                >
+                  {WHEEL_THEMES.map((t, idx) => renderWheelItem(t, idx))}
+                </div>
+
+                <div
+                  className="qz-wheel-pointer"
+                  style={{
+                    left: WHEEL_CX,
+                    top: WHEEL_CY + WHEEL_R - 34,
+                    transform: 'translate(-50%, 0)',
+                  }}
+                >
+                  <div
+                    className={`qz-wheel-triangle${spinning ? ' active' : ''}`}
+                  />
+                </div>
+
+                <div className="qz-wheel-brand">{brandBlock}</div>
+                <div className="qz-wheel-panel">{orbitCenter()}</div>
+
+                <div
+                  className="qz-wheel-footer"
+                  style={{
+                    left: WHEEL_CX,
+                    top: WHEEL_CY + WHEEL_R - 52,
+                  }}
+                >
+                  {topDock ? (
+                    <div className="game-home__wheel-nav">{topDock}</div>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="qz-btn qz-btn-secondary qz-wheel-spin"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      startSpin()
+                    }}
+                    disabled={busy || spinning}
+                  >
+                    <IconDice /> Aléatoire
+                  </button>
+                </div>
               </div>
             </div>
 
             <div className="game-home__desktop-extras">
+              {extraSettings}
               {renderSubthemes({ showChosen: true })}
             </div>
           </>
@@ -1259,5 +1466,124 @@ export function ThemeSelect({
         )}
       </form>
     </section>
+  )
+}
+
+function SettingDropdown({
+  label,
+  value,
+  options,
+  isOpen,
+  onToggle,
+  onSelect,
+  disabled,
+}: {
+  label: string
+  value: string
+  options: { id: string; label: ReactNode; disabled?: boolean }[]
+  isOpen: boolean
+  onToggle: () => void
+  onSelect: (id: string) => void
+  disabled?: boolean
+}) {
+  return (
+    <div className="qz-setting-wrap" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        className="qz-setting-tile"
+        onClick={onToggle}
+        disabled={disabled}
+        aria-expanded={isOpen}
+        aria-haspopup="listbox"
+      >
+        <div className="qz-setting-label">{label}</div>
+        <div className="qz-setting-value">{value}</div>
+      </button>
+      {isOpen && (
+        <div className="qz-dropdown" role="listbox" aria-label={label}>
+          {options.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+            className={`qz-dropdown-option${String(opt.label) === value ? ' selected' : ''}`}
+              onClick={() => onSelect(opt.id)}
+              disabled={opt.disabled}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FrFlagIcon() {
+  return (
+    <span className="qz-flag" aria-hidden>
+      <svg viewBox="0 0 9 6" width="18" height="12">
+        <rect width="3" height="6" fill="#002395" />
+        <rect x="3" width="3" height="6" fill="#fff" />
+        <rect x="6" width="3" height="6" fill="#ED2939" />
+      </svg>
+    </span>
+  )
+}
+
+function WorldIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden>
+      <circle
+        cx="12"
+        cy="12"
+        r="9"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <path
+        d="M3 12h18M12 3c-3 3.2-4.5 6.5-4.5 9S9 17.8 12 21c3-3.2 4.5-6.5 4.5-9S15 6.2 12 3Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+    </svg>
+  )
+}
+
+function IconChevron() {
+  return (
+    <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden>
+      <path
+        d="M6 9l6 6 6-6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function IconDice() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden>
+      <rect
+        x="4"
+        y="4"
+        width="16"
+        height="16"
+        rx="3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <circle cx="9" cy="9" r="1.3" fill="currentColor" />
+      <circle cx="15" cy="9" r="1.3" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.3" fill="currentColor" />
+      <circle cx="9" cy="15" r="1.3" fill="currentColor" />
+      <circle cx="15" cy="15" r="1.3" fill="currentColor" />
+    </svg>
   )
 }

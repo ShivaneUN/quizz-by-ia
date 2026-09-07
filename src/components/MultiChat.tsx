@@ -165,6 +165,30 @@ interface MultiChatProps {
   roomChatEnabled?: boolean
   /** Masquer le bouton flottant (ex. barre dock accueil) */
   hideFab?: boolean
+  /** Bouton Mini-jeux à côté du chat (pendant un quiz) */
+  onMiniGames?: () => void
+}
+
+function IconPadFab() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden>
+      <path
+        fill="currentColor"
+        d="M17 4H7C4.24 4 2 6.24 2 9v6c0 2.76 2.24 5 5 5h10c2.76 0 5-2.24 5-5V9c0-2.76-2.24-5-5-5Zm-8.5 9.5H7v1.5H5.5V13.5H4V12h1.5V10.5H7V12h1.5v1.5Zm7.25.75a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Zm2.5-2.5a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 1 1 0 2.5Z"
+      />
+    </svg>
+  )
+}
+
+function IconChatFab() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden>
+      <path
+        fill="currentColor"
+        d="M4 4h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4v-4H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"
+      />
+    </svg>
+  )
 }
 
 /**
@@ -176,6 +200,7 @@ export function MultiChat({
   roomCode = null,
   roomChatEnabled = false,
   hideFab = false,
+  onMiniGames,
 }: MultiChatProps) {
   const [open, setOpen] = useState(false)
   const [channel, setChannel] = useState<ChatChannel>('global')
@@ -468,20 +493,36 @@ export function MultiChat({
       className={`multi-chat${open ? ' is-open' : ''}`}
       style={panelStyle}
     >
-      {!open && !hideFab && (
-        <button
-          type="button"
-          className="multi-chat__fab"
-          onClick={openChat}
-          aria-label="Ouvrir le chat"
-        >
-          Chat
-          {unread > 0 && (
-            <span className="multi-chat__badge">
-              {unread > 9 ? '9+' : unread}
-            </span>
+      {!hideFab && (
+        <div className="multi-chat__fabs">
+          {onMiniGames && (
+            <button
+              type="button"
+              className="multi-chat__fab"
+              onClick={onMiniGames}
+              aria-label="Mini-jeux"
+              title="Mini-jeux"
+            >
+              <IconPadFab />
+            </button>
           )}
-        </button>
+          {!open && (
+            <button
+              type="button"
+              className="multi-chat__fab"
+              onClick={openChat}
+              aria-label="Chat"
+              title="Chat"
+            >
+              <IconChatFab />
+              {unread > 0 && (
+                <span className="multi-chat__badge">
+                  {unread > 9 ? '9+' : unread}
+                </span>
+              )}
+            </button>
+          )}
+        </div>
       )}
 
       {open && (

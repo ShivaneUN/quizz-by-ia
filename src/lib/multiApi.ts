@@ -162,10 +162,21 @@ async function postRoom(
   }
   return data as {
     room?: MultiRoom
+    rooms?: MultiRoomSummary[]
     playerId?: string
     message?: string
     closed?: boolean
   }
+}
+
+export interface MultiRoomSummary {
+  code: string
+  theme: string
+  status: MultiRoom['status']
+  playerCount: number
+  hostName: string
+  quizMode?: MultiRoom['quizMode']
+  updatedAt: number
 }
 
 export async function createRoom(input: {
@@ -353,4 +364,9 @@ export async function reportTypingScore(input: {
 export async function pollRoom(code: string) {
   const data = await postRoom({ action: 'state', code })
   return { room: data.room! }
+}
+
+export async function listActiveRooms() {
+  const data = await postRoom({ action: 'list' })
+  return { rooms: data.rooms ?? [] }
 }

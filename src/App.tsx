@@ -70,7 +70,7 @@ import { recordArcadeBest } from './lib/arcadeStorage'
 import { isPenduMyTurn, SOLO_DUO_WORDS } from './lib/pendu'
 import { remainingPenduCount, takePenduWords } from './lib/penduFill'
 import { AnswerAudit } from './components/AnswerAudit'
-import { WaitMiniGames } from './components/WaitMiniGames'
+import { WaitMiniGames, type WaitGameId } from './components/WaitMiniGames'
 import { MorpionPlay } from './components/MorpionPlay'
 import { PenduPlay } from './components/PenduPlay'
 import {
@@ -78,9 +78,10 @@ import {
   type TypingScoreEntry,
 } from './components/TypingScorePopup'
 import { HomeSideNav } from './components/HomeSideNav'
+import { PopupMiniJeux } from './components/HomePopups'
+import { MiniGameFloat } from './components/MiniGameFloat'
 import { AdminPanel } from './components/AdminPanel'
 import { MultiChat } from './components/MultiChat'
-import { MultiGate } from './components/MultiGate'
 import { MultiLobby } from './components/MultiLobby'
 import { MultiPlay } from './components/MultiPlay'
 import { MultiScoreboard } from './components/MultiScoreboard'
@@ -111,7 +112,6 @@ type Screen =
   | 'minigames'
   | 'pendu'
   | 'morpion-play'
-  | 'multi-gate'
   | 'multi-theme'
   | 'multi-lobby'
   | 'multi-play'
@@ -240,6 +240,9 @@ export default function App() {
   const [morpionRoom, setMorpionRoom] = useState<MorpionRoom | null>(null)
   const [morpionBusy, setMorpionBusy] = useState(false)
   const [morpionError, setMorpionError] = useState<string | null>(null)
+  const [miniGameStart, setMiniGameStart] = useState<WaitGameId | null>(null)
+  const [quizMiniMenu, setQuizMiniMenu] = useState(false)
+  const [quizFloatGame, setQuizFloatGame] = useState<WaitGameId | null>(null)
   const morpionSeatRef = useRef({ code: '', playerId: '' })
   morpionSeatRef.current = {
     code: morpionRoom?.code ?? '',
@@ -254,6 +257,12 @@ export default function App() {
   const multiTypingFlushRef = useRef(0)
   const multiPrevStatusRef = useRef<MultiRoom['status'] | null>(null)
   const typingReportTimer = useRef<number | null>(null)
+
+  useEffect(() => {
+    if (screen !== 'home') return
+    setQuizMiniMenu(false)
+    setQuizFloatGame(null)
+  }, [screen])
 
   // Audit multi : enregistre à chaque révélation de question
   useEffect(() => {
@@ -520,7 +529,7 @@ export default function App() {
           setMultiRoom(null)
           setMultiBusy(false)
           setError('Tu as été retiré de la salle')
-          setScreen('multi-gate')
+          setScreen('home')
           return
         }
         let merged = room
@@ -1354,9 +1363,7 @@ export default function App() {
     setError(null)
     if (multiRoom && multiPlayerId) {
       setScreen(multiScreenForStatus(multiRoom.status))
-      return
     }
-    setScreen('multi-gate')
   }
 
   function returnToActiveRoom() {
@@ -1614,8 +1621,8 @@ export default function App() {
     setStatusMsg('Création de la salle…')
     try {
       if (multiName.trim().length < 2) {
-        setError('Pseudo obligatoire — retourne à l’écran multijoueur')
-        setScreen('multi-gate')
+        setError('Pseudo obligatoire — rouvre Multijoueur pour en choisir un')
+        setScreen('home')
         return
       }
       const res = await createRoom({
@@ -1902,8 +1909,7 @@ export default function App() {
 
     // Solo / pas encore en salle
     if (!multiRoom || !multiPlayerId) {
-      if (screen === 'multi-theme') setScreen('multi-gate')
-      else setScreen('home')
+      setScreen('home')
       return
     }
 
@@ -2167,12 +2173,10 @@ export default function App() {
   const showHeader =
     screen !== 'mode' &&
     screen !== 'home' &&
-    screen !== 'multi-gate' &&
     screen !== 'multi-theme'
   const isHomeLike =
     screen === 'mode' ||
     screen === 'home' ||
-    screen === 'multi-gate' ||
     (screen === 'multi-theme' && !multiRoom)
 
   return (
@@ -2200,13 +2204,38 @@ export default function App() {
             .find((s) => s.length >= 2) ?? ''
         const inRoom = Boolean(multiRoom && multiPlayerId)
         return (
-          <MultiChat
-            playerId={chatId}
-            preferredName={preferred}
-            roomCode={inRoom ? multiRoom!.code : null}
-            roomChatEnabled={inRoom}
-            hideFab={screen === 'home'}
-          />
+          <>
+            <MultiChat
+              playerId={chatId}
+              preferredName={preferred}
+              roomCode={inRoom ? multiRoom!.code : null}
+              roomChatEnabled={inRoom}
+              hideFab={screen === 'home'}
+              onMiniGames={
+                screen === 'home'
+                  ? undefined
+                  : () => {
+                      setQuizMiniMenu(true)
+                    }
+              }
+            />
+            {screen !== 'home' && quizMiniMenu && (
+              <PopupMiniJeux
+                onClose={() => setQuizMiniMenu(false)}
+                onPickGame={(game) => {
+                  setQuizMiniMenu(false)
+                  setQuizFloatGame(game)
+                }}
+              />
+            )}
+            {screen !== 'home' && quizFloatGame && (
+              <MiniGameFloat
+                key={quizFloatGame}
+                game={quizFloatGame}
+                onClose={() => setQuizFloatGame(null)}
+              />
+            )}
+          </>
         )
       })()}
       {showHeader && (
@@ -2259,6 +2288,7 @@ export default function App() {
             <WaitMiniGames
               freePlay
               mode="solo"
+              initialGame={miniGameStart}
               onMorpionEnter={handleMorpionEnter}
               morpionResume={
                 morpionRoom && morpionPlayerId
@@ -2316,19 +2346,28 @@ export default function App() {
               busy={penduFilling}
               error={error}
               soloLocked={Boolean(multiRoom && multiPlayerId)}
-              soloLockHint={
-                multiRoom
-                  ? `Salle ${multiRoom.code} ouverte — quitte la salle pour jouer en solo.`
-                  : undefined
-              }
-              onReturnToRoom={returnToActiveRoom}
               topDock={
                 <HomeSideNav
                   onMulti={openMultiFromHome}
                   onMinigames={() => {
                     setError(null)
+                    setMiniGameStart(null)
                     setScreen('minigames')
                   }}
+                  onPickMiniGame={(game) => {
+                    setError(null)
+                    setMiniGameStart(game)
+                    setScreen('minigames')
+                  }}
+                  onCreateRoom={(name) => {
+                    setError(null)
+                    handleMultiCreateName(name)
+                  }}
+                  onJoinRoom={(code, name) => {
+                    void handleMultiJoin(code, name)
+                  }}
+                  multiBusy={multiBusy}
+                  multiError={error}
                   inRoom={Boolean(multiRoom && multiPlayerId)}
                   roomCode={multiRoom?.code}
                   onReturnToRoom={returnToActiveRoom}
@@ -2375,16 +2414,6 @@ export default function App() {
               }}
             />
           </>
-        )}
-
-        {screen === 'multi-gate' && (
-          <MultiGate
-            onCreate={handleMultiCreateName}
-            onJoin={handleMultiJoin}
-            onBack={() => setScreen('home')}
-            busy={multiBusy}
-            error={error}
-          />
         )}
 
         {screen === 'multi-theme' && (

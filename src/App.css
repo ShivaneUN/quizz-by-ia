@@ -13,10 +13,32 @@
 
 .app--home {
   grid-template-rows: 1fr;
-  align-content: start;
+  align-content: stretch;
+  min-height: 100vh;
+  min-height: 100dvh;
   padding-top: max(0.75rem, env(safe-area-inset-top));
   padding-bottom: max(2.5rem, env(safe-area-inset-bottom));
   overflow-y: auto;
+}
+
+.app--home .app__atmosphere,
+.app--home .multi-chat {
+  grid-row: 1;
+  grid-column: 1;
+}
+
+.app--home .app__main {
+  grid-row: 1;
+  grid-column: 1;
+  width: 100%;
+}
+
+@media (min-width: 721px) {
+  .app--home .app__main {
+    align-content: center;
+    align-self: stretch;
+    min-height: 0;
+  }
 }
 
 .app__atmosphere {
@@ -117,14 +139,6 @@
   gap: 1.25rem;
   align-content: start;
   justify-items: center;
-}
-
-.app--home .app__main {
-  width: min(54rem, 100%);
-}
-
-.app--home .app__main {
-  width: 100%;
 }
 
 .app--center .app__main {

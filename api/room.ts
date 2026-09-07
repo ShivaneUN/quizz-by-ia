@@ -13,6 +13,7 @@ import {
   getRoom,
   saveRoom,
   deleteRoom,
+  listActiveRooms,
   makeRoomCode,
   newPlayerId,
   publicRoomView,
@@ -1391,6 +1392,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const room = await syncRoomRound(code)
       if (!room) return json(res, 404, { error: 'Salle introuvable' })
       return json(res, 200, { room: publicRoomView(room) })
+    }
+
+    if (action === 'list') {
+      const rooms = await listActiveRooms()
+      return json(res, 200, { rooms })
     }
 
     if (action === 'pendu') {
