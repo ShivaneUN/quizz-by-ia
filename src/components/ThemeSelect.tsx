@@ -241,9 +241,9 @@ export function ThemeSelect({
 
   useEffect(() => {
     if (themeId === 'custom' || themeId === 'pregen' || themeId === 'aleatoire') {
-      if (subtheme !== 'Général') setSubtheme('Général')
+      setSubtheme('Général')
     }
-  }, [themeId, subtheme])
+  }, [themeId])
 
   useEffect(
     () => () => {
@@ -315,20 +315,20 @@ export function ThemeSelect({
 
   function runShuffle<T>(
     items: T[],
+    winner: T,
     apply: (item: T) => void,
     done: (item: T) => void,
     kind: 'theme' | 'sub',
   ) {
-    if (items.length === 0 || shuffleLockRef.current || spinning || busy) return
+    if (items.length === 0 || shuffleLockRef.current || busy) return
     shuffleLockRef.current = true
     if (spinTimerRef.current) window.clearTimeout(spinTimerRef.current)
-    const winner = items[Math.floor(Math.random() * items.length)]
     setShuffling(kind)
     let step = 0
     const total = Math.min(16, Math.max(8, items.length * 2))
     let delay = 45
     function tick() {
-      apply(items[step % items.length])
+      apply(items[step % items.length]!)
       step++
       delay += 14
       if (step < total) {
@@ -343,30 +343,44 @@ export function ThemeSelect({
     tick()
   }
 
+  function pickOther<T>(items: T[], current: T): T {
+    const others = items.filter((item) => item !== current)
+    const pool = others.length > 0 ? others : items
+    return pool[Math.floor(Math.random() * pool.length)]!
+  }
+
   function spinRandomMobile() {
+    if (spinning) return
     const playable = WHEEL_THEMES.filter((t) => !t.soon)
+    if (playable.length === 0) return
+    const current = playable.find((t) => t.id === themeId)
+    const winner = pickOther(playable, current ?? playable[0]!)
     runShuffle(
       playable,
+      winner,
       (t) => {
         setThemeId(t.id)
         setSubtheme('Général')
         setCustomTheme('')
         setCustomFromThemeId(null)
       },
-      (winner) => selectTheme(winner),
+      (picked) => selectTheme(picked),
       'theme',
     )
   }
 
   function spinRandomSubtheme() {
-    if (!parent || customTheme.trim()) return
+    if (!parent) return
     const pool = (
       themeId === 'custom'
         ? ['Général', ...orphanSubs.filter((s) => s !== 'Général')]
-        : officialSubs
-    ).filter((s) => s !== 'Custom')
+        : [...officialSubs.filter((s) => s !== 'Custom'), ...generatedUnderTheme]
+    ).filter((s, i, arr) => s && arr.indexOf(s) === i)
+    if (pool.length === 0) return
+    const winner = pickOther(pool, subtheme)
     runShuffle(
       pool,
+      winner,
       (s) => {
         setSubtheme(s)
         setCustomFromThemeId(null)
@@ -574,13 +588,19 @@ export function ThemeSelect({
       <fieldset
         className={`subthemes${inPanel ? ' subthemes--in-panel' : ''}`}
       >
-        <legend className="subthemes__title">
-          <span>Sous-thèmes — {parent.label}</span>
+        <legend className="visually-hidden">
+          Sous-thèmes — {parent.label}
+        </legend>
+        <div className="subthemes__head">
+          <span className="subthemes__title">
+            Sous-thèmes — {parent.label}
+          </span>
           <button
             type="button"
             className={`qz-random-btn${shuffling === 'sub' ? ' is-rolling' : ''}`}
             onClick={(e) => {
               e.preventDefault()
+              e.stopPropagation()
               spinRandomSubtheme()
             }}
             disabled={busy || Boolean(shuffling)}
@@ -589,7 +609,7 @@ export function ThemeSelect({
           >
             <IconDice />
           </button>
-        </legend>
+        </div>
         <div className="subthemes__grid" role="group">
           {primarySubs.map((s) => {
             const isCustomChip = s === 'Custom'

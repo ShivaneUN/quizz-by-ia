@@ -39,8 +39,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const code = String(body.code ?? '').trim().toUpperCase()
 
     if (action === 'presence') {
-      const online = await touchSitePresence(String(body.playerId ?? ''))
-      return json(res, 200, { online })
+      const { online, names, people } = await touchSitePresence(
+        String(body.playerId ?? ''),
+        String(body.playerName ?? ''),
+        body.hasProfile === true,
+      )
+      return json(res, 200, { online, names, people })
     }
 
     if (action === 'clearAll') {

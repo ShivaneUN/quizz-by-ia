@@ -279,6 +279,9 @@
   background: color-mix(in srgb, #0a1835 92%, transparent);
   color: #f0c14b;
   cursor: pointer;
+  pointer-events: auto;
+  position: relative;
+  z-index: 3;
   box-shadow: 0 0 12px color-mix(in srgb, #f0c14b 22%, transparent);
   transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.12s ease;
 }

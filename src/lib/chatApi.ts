@@ -26,6 +26,8 @@ async function postChat(body: Record<string, unknown>) {
     messages?: ChatMessage[]
     message?: ChatMessage
     online?: number
+    names?: string[]
+    people?: { name: string; self: boolean; profile?: boolean }[]
     clearedAt?: number
     ok?: boolean
   }
@@ -62,13 +64,53 @@ export async function sendChat(input: {
   return data.message!
 }
 
-/** Ping présence site-wide → nombre de personnes en ligne. */
-export async function pingPresence(playerId: string): Promise<number> {
+/** Ping présence site-wide → nombre + pseudos en ligne. */
+export async function pingPresence(
+  playerId: string,
+  playerName?: string,
+  hasProfile = false,
+): Promise<{
+  online: number
+  names: string[]
+  people: { name: string; self: boolean; profile: boolean }[]
+}> {
   const data = await postChat({
     action: 'presence',
     playerId,
+    playerName,
+    hasProfile,
   })
-  return typeof data.online === 'number' ? data.online : 0
+  const people = Array.isArray(data.people)
+    ? data.people.filter(
+        (
+          p,
+        ): p is { name: string; self: boolean; profile?: boolean } =>
+          Boolean(p) &&
+          typeof p === 'object' &&
+          typeof p.name === 'string' &&
+          p.name.trim().length >= 2,
+      )
+    : []
+  const names =
+    people.length > 0
+      ? people.map((p) => p.name)
+      : Array.isArray(data.names)
+        ? data.names.filter(
+            (n): n is string => typeof n === 'string' && n.trim().length >= 2,
+          )
+        : []
+  return {
+    online: typeof data.online === 'number' ? data.online : names.length,
+    names,
+    people:
+      people.length > 0
+        ? people.map((p) => ({
+            name: p.name.trim(),
+            self: Boolean(p.self),
+            profile: p.profile === true,
+          }))
+        : names.map((name) => ({ name, self: false, profile: false })),
+  }
 }
 
 /** Admin : vide le chat pour tous. */

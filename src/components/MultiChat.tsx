@@ -216,7 +216,12 @@ export function MultiChat({
   const [error, setError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [unread, setUnread] = useState(0)
+  const [chatPing, setChatPing] = useState(0)
   const [online, setOnline] = useState(0)
+  const [onlinePeople, setOnlinePeople] = useState<
+    { name: string; self: boolean; profile: boolean }[]
+  >([])
+  const [peopleOpen, setPeopleOpen] = useState(false)
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [layout, setLayout] = useState<ChatLayout>(() => loadLayout())
   const listRef = useRef<HTMLDivElement>(null)
@@ -243,24 +248,39 @@ export function MultiChat({
     }
   }, [lockedPseudo, preferredName, setDisplayName])
 
+  const peopleRef = useRef<HTMLDivElement>(null)
+  const pingNameRef = useRef('')
+  pingNameRef.current = (
+    displayName.trim() ||
+    lockedPseudo ||
+    preferredName
+  ).trim()
+
   useEffect(() => {
     if (!playerId) return
     let cancelled = false
     const tick = async () => {
       try {
-        const n = await pingPresence(playerId)
-        if (!cancelled) setOnline(n)
+        const { online: n, people } = await pingPresence(
+          playerId,
+          pingNameRef.current,
+          Boolean(lockedPseudo),
+        )
+        if (!cancelled) {
+          setOnline(n)
+          setOnlinePeople(people)
+        }
       } catch {
         /* ignore */
       }
     }
     void tick()
-    const id = window.setInterval(() => void tick(), 12_000)
+    const id = window.setInterval(() => void tick(), peopleOpen ? 5_000 : 12_000)
     return () => {
       cancelled = true
       window.clearInterval(id)
     }
-  }, [playerId])
+  }, [playerId, peopleOpen, lockedPseudo])
 
   useEffect(() => {
     let cancelled = false
@@ -288,8 +308,9 @@ export function MultiChat({
         if (next.messages.length === 0) return
         const floor = clearedAtRef.current
         const visible = next.messages.filter((m) => m.at > floor)
+        const hadCursor = Boolean(lastIdRef.current)
         setMessages((prev) => {
-          if (!lastIdRef.current) return visible.slice(-80)
+          if (!hadCursor) return visible.slice(-80)
           const ids = new Set(prev.map((m) => m.id))
           const merged = [...prev]
           for (const m of visible) {
@@ -299,9 +320,12 @@ export function MultiChat({
         })
         lastIdRef.current =
           next.messages[next.messages.length - 1]?.id ?? lastIdRef.current
-        if (!openRef.current) {
+        if (!openRef.current && hadCursor) {
           const others = visible.filter((m) => m.playerId !== playerId).length
-          if (others > 0) setUnread((u) => u + others)
+          if (others > 0) {
+            setUnread((u) => u + others)
+            setChatPing((n) => n + 1)
+          }
         }
       } catch {
         /* ignore */
@@ -326,11 +350,41 @@ export function MultiChat({
   }
 
   useEffect(() => {
+    if (!peopleOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPeopleOpen(false)
+    }
+    const onPtr = (e: PointerEvent) => {
+      const t = e.target as HTMLElement | null
+      if (!t?.closest('.multi-chat__online-wrap')) setPeopleOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('pointerdown', onPtr)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('pointerdown', onPtr)
+    }
+  }, [peopleOpen])
+
+  useEffect(() => {
+    if (!open) setPeopleOpen(false)
+  }, [open])
+
+  useEffect(() => {
     if (!open) return
     setUnread(0)
+    setChatPing(0)
     const el = listRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [open, messages, channel])
+
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent('quizz:chat-unread', {
+        detail: { unread: open ? 0 : unread, ping: open ? 0 : chatPing },
+      }),
+    )
+  }, [unread, chatPing, open])
 
   useEffect(() => {
     const onResize = () => {
@@ -368,6 +422,7 @@ export function MultiChat({
       updateLayout(cur)
     }
     setUnread(0)
+    setChatPing(0)
     setOpen(true)
   }
 
@@ -517,15 +572,22 @@ export function MultiChat({
           {!open && (
             <button
               type="button"
-              className="multi-chat__fab"
+              className={`multi-chat__fab${unread > 0 ? ' has-unread' : ''}`}
               onClick={openChat}
-              aria-label="Chat"
+              aria-label={
+                unread > 0 ? `Chat, ${unread} message${unread > 1 ? 's' : ''}` : 'Chat'
+              }
               title="Chat"
             >
-              <IconChatFab />
+              <span
+                key={chatPing}
+                className={chatPing > 0 ? 'multi-chat__fab-icon is-ping' : 'multi-chat__fab-icon'}
+              >
+                <IconChatFab />
+              </span>
               {unread > 0 && (
-                <span className="multi-chat__badge">
-                  {unread > 9 ? '9+' : unread}
+                <span className="multi-chat__badge" key={unread}>
+                  {unread > 99 ? '99+' : unread}
                 </span>
               )}
             </button>
@@ -592,6 +654,7 @@ export function MultiChat({
                 className="multi-chat__close"
                 onClick={() => {
                   setEmojiOpen(false)
+                  setPeopleOpen(false)
                   setOpen(false)
                 }}
                 aria-label="Fermer"
@@ -601,10 +664,90 @@ export function MultiChat({
             </div>
           </header>
 
-          <p className="multi-chat__online" aria-live="polite">
-            <span className="multi-chat__online-dot" aria-hidden />
-            {online > 0 ? `${online} en ligne` : '…'}
-          </p>
+          <div className="multi-chat__online-wrap" ref={peopleRef}>
+            <button
+              type="button"
+              className={`multi-chat__online${peopleOpen ? ' is-on' : ''}`}
+              aria-live="polite"
+              aria-expanded={peopleOpen}
+              aria-haspopup="dialog"
+              title="Voir qui est en ligne"
+              onClick={() => setPeopleOpen((v) => !v)}
+            >
+              <span className="multi-chat__online-dot" aria-hidden />
+              {online > 0 ? `${online} en ligne` : '…'}
+            </button>
+            {peopleOpen && (
+              <div
+                className="multi-chat__people"
+                role="dialog"
+                aria-label="Pseudos en ligne"
+              >
+                <p className="multi-chat__people-title">En ligne</p>
+                {onlinePeople.length === 0 ? (
+                  <p className="multi-chat__people-empty">
+                    {online > 0
+                      ? 'Pseudos pas encore reçus — ils doivent ouvrir le chat'
+                      : 'Personne d’autre pour l’instant'}
+                  </p>
+                ) : (
+                  <>
+                    {(() => {
+                      const profiles = onlinePeople.filter((p) => p.profile)
+                      const visitors = onlinePeople.filter((p) => !p.profile)
+                      const renderList = (
+                        people: typeof onlinePeople,
+                        kind: 'profile' | 'visitor',
+                      ) => (
+                        <ul className="multi-chat__people-list">
+                          {people.map((p, i) => (
+                            <li
+                              key={`${kind}-${p.name}-${i}`}
+                              className={p.self ? 'is-me' : undefined}
+                            >
+                              <span className="multi-chat__people-name">
+                                {p.name}
+                                {p.self ? ' (toi)' : ''}
+                              </span>
+                              {!p.profile && (
+                                <span className="multi-chat__tag">Visiteur</span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      )
+                      return (
+                        <>
+                          {profiles.length > 0 && (
+                            <div className="multi-chat__people-group">
+                              <p className="multi-chat__people-label">
+                                Profils · {profiles.length}
+                              </p>
+                              {renderList(profiles, 'profile')}
+                            </div>
+                          )}
+                          {visitors.length > 0 && (
+                            <div className="multi-chat__people-group">
+                              <p className="multi-chat__people-label">
+                                Visiteurs · {visitors.length}
+                              </p>
+                              {renderList(visitors, 'visitor')}
+                            </div>
+                          )}
+                          {online > onlinePeople.length && (
+                            <p className="multi-chat__people-empty">
+                              {online - onlinePeople.length} sans pseudo pour
+                              l’instant
+                            </p>
+                          )}
+                        </>
+                      )
+                    })()}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
 
           <label className="multi-chat__nick">
             <span className="visually-hidden">Pseudo chat</span>
@@ -639,15 +782,31 @@ export function MultiChat({
             ) : messages.length === 0 ? (
               <p className="multi-chat__empty">Aucun message pour l’instant</p>
             ) : (
-              messages.map((m) => (
+              messages.map((m) => {
+                const mine = m.playerId === playerId
+                const visitor = mine
+                  ? !lockedPseudo
+                  : onlinePeople.some(
+                      (p) =>
+                        !p.profile &&
+                        p.name.trim().toLowerCase() ===
+                          m.playerName.trim().toLowerCase(),
+                    )
+                return (
                 <div
                   key={m.id}
-                  className={`multi-chat__msg${m.playerId === playerId ? ' is-me' : ''}`}
+                  className={`multi-chat__msg${mine ? ' is-me' : ''}`}
                 >
-                  <span className="multi-chat__name">{m.playerName}</span>
+                  <span className="multi-chat__name">
+                    {m.playerName}
+                    {visitor && (
+                      <span className="multi-chat__tag">Visiteur</span>
+                    )}
+                  </span>
                   <span className="multi-chat__text">{m.text}</span>
                 </div>
-              ))
+                )
+              })
             )}
           </div>
 

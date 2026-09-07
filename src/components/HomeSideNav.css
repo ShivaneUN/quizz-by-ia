@@ -40,6 +40,7 @@
 .home-dock__icon {
   display: grid;
   place-items: center;
+  position: relative;
   width: 2.35rem;
   height: 2.35rem;
   border-radius: 50%;
@@ -51,6 +52,78 @@
     border-color 0.15s ease,
     color 0.15s ease,
     box-shadow 0.15s ease;
+}
+
+.home-dock__item.has-unread .home-dock__icon {
+  border-color: #f0c14b;
+  color: #fff;
+}
+
+.home-dock__chat-icon {
+  display: grid;
+  place-items: center;
+}
+
+.home-dock__chat-icon.is-ping {
+  animation: qz-chat-ping 0.75s ease;
+  transform-origin: 50% 70%;
+}
+
+.home-dock__badge {
+  position: absolute;
+  top: -0.15rem;
+  right: -0.15rem;
+  min-width: 1.05rem;
+  height: 1.05rem;
+  padding: 0 0.25rem;
+  border-radius: 999px;
+  background: #ff7a45;
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 800;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 0 0 2px #061228;
+  animation: qz-chat-badge 0.45s ease;
+  z-index: 1;
+}
+
+@keyframes qz-chat-ping {
+  0%,
+  100% {
+    transform: rotate(0deg) scale(1);
+  }
+  18% {
+    transform: rotate(-14deg) scale(1.18);
+  }
+  36% {
+    transform: rotate(12deg) scale(1.12);
+  }
+  54% {
+    transform: rotate(-8deg) scale(1.08);
+  }
+  72% {
+    transform: rotate(5deg) scale(1.04);
+  }
+}
+
+@keyframes qz-chat-badge {
+  0% {
+    transform: scale(0.5);
+  }
+  55% {
+    transform: scale(1.28);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-dock__chat-icon.is-ping,
+  .home-dock__badge {
+    animation: none;
+  }
 }
 
 .home-dock__label {

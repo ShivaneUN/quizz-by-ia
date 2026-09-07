@@ -2,7 +2,8 @@
  * Chat — général (tout le site) + salle (membres uniquement).
  */
 
-import { getRoom, redisCommand, redisConfigured } from './rooms.js'
+import { getRoom, listActiveRooms, redisCommand, redisConfigured } from './rooms.js'
+import { lookupProfileIdByPseudoFast } from './profileStorage.js'
 
 export type ChatChannel = 'global' | 'room'
 
@@ -199,33 +200,214 @@ export async function sendChatMessage(input: {
     await appendRedis(roomChatKey(code), message)
   }
 
+  void touchSitePresence(playerId, playerName)
+
   return { ok: true, message }
 }
 
 const PRESENCE_KEY = 'quizz:presence:site'
+const PRESENCE_NAMES_KEY = 'quizz:presence:names'
 /** Considéré en ligne si ping < 45s */
 const ONLINE_WINDOW_MS = 45_000
-const memoryPresence = new Map<string, number>()
+const memoryPresence = new Map<string, { at: number; name: string; profile: boolean }>()
 
-function pruneMemoryPresence(now: number): number {
-  const cutoff = now - ONLINE_WINDOW_MS
-  for (const [id, at] of memoryPresence) {
-    if (at < cutoff) memoryPresence.delete(id)
+function sanitizePresenceName(raw: unknown): string {
+  return String(raw ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 24)
+}
+
+function parsePresenceRec(raw: unknown): PresenceRec | null {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    const o = raw as Record<string, unknown>
+    if ('name' in o) {
+      const name = sanitizePresenceName(o.name)
+      if (name.length < 2) return null
+      return { name, profile: o.profile === true }
+    }
   }
-  return memoryPresence.size
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim()
+    if (trimmed.startsWith('{')) {
+      try {
+        return parsePresenceRec(JSON.parse(trimmed) as unknown)
+      } catch {
+        /* plain name */
+      }
+    }
+    const name = sanitizePresenceName(trimmed)
+    if (name.length < 2) return null
+    return { name, profile: false }
+  }
+  return null
+}
+
+function presenceHashFromRaw(raw: unknown): Record<string, PresenceRec> {
+  const out: Record<string, PresenceRec> = {}
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      const rec = parsePresenceRec(v)
+      if (rec) out[k] = rec
+    }
+    return out
+  }
+  if (Array.isArray(raw)) {
+    for (let i = 0; i + 1 < raw.length; i += 2) {
+      const rec = parsePresenceRec(raw[i + 1])
+      if (rec) out[String(raw[i])] = rec
+    }
+  }
+  return out
+}
+
+function idsFromZrange(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((v) => String(v ?? '').trim())
+    .filter((id) => id.length > 0)
+}
+
+async function namesFromRecentChat(): Promise<Record<string, string>> {
+  const map: Record<string, string> = {}
+  const apply = (list: ChatMessage[]) => {
+    for (const m of list) {
+      const pid = String(m.playerId ?? '').trim()
+      const n = sanitizePresenceName(m.playerName)
+      if (pid && n.length >= 2) map[pid] = n
+    }
+  }
+  apply(memoryGlobal)
+  for (const list of memoryRooms.values()) apply(list)
+  const fromRedis = await readRedis(GLOBAL_KEY)
+  if (fromRedis) apply(fromRedis)
+  return map
+}
+
+async function namesFromActiveRooms(): Promise<Record<string, string>> {
+  const map: Record<string, string> = {}
+  try {
+    const rooms = await listActiveRooms()
+    for (const summary of rooms.slice(0, 20)) {
+      const room = await getRoom(summary.code)
+      if (!room) continue
+      for (const p of room.players) {
+        const n = sanitizePresenceName(p.name)
+        if (p.id && n.length >= 2) map[p.id] = n
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return map
+}
+
+type PresenceRec = { name: string; profile: boolean }
+
+export type OnlinePerson = { name: string; self: boolean; profile: boolean }
+
+export type SitePresence = {
+  online: number
+  names: string[]
+  people: OnlinePerson[]
+}
+
+function buildPeople(
+  ids: string[],
+  byId: Record<string, PresenceRec>,
+  selfId: string,
+): OnlinePerson[] {
+  const people: OnlinePerson[] = []
+  for (const pid of ids) {
+    const rec = byId[pid]
+    const name = rec?.name
+    if (!name) continue
+    people.push({
+      name,
+      self: pid === selfId,
+      profile: rec.profile === true,
+    })
+  }
+  people.sort((a, b) => {
+    if (a.profile !== b.profile) return a.profile ? -1 : 1
+    if (a.self !== b.self) return a.self ? -1 : 1
+    return a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' })
+  })
+  return people
+}
+
+async function markRegisteredProfiles(
+  byId: Record<string, PresenceRec>,
+): Promise<void> {
+  const names = [
+    ...new Set(
+      Object.values(byId)
+        .filter((r) => !r.profile)
+        .map((r) => r.name),
+    ),
+  ]
+  await Promise.all(
+    names.map(async (name) => {
+      const owned = await lookupProfileIdByPseudoFast(name)
+      if (!owned) return
+      for (const rec of Object.values(byId)) {
+        if (rec.name === name) rec.profile = true
+      }
+    }),
+  )
+}
+
+function presenceResult(
+  ids: string[],
+  byId: Record<string, PresenceRec>,
+  selfId: string,
+): SitePresence {
+  const people = buildPeople(ids, byId, selfId)
+  return {
+    online: ids.length,
+    names: people.map((p) => p.name),
+    people,
+  }
 }
 
 /**
- * Heartbeat présence site-wide. Retourne le nombre de joueurs en ligne.
+ * Heartbeat présence site-wide. Retourne le nombre de joueurs et leurs pseudos.
  */
-export async function touchSitePresence(playerId: string): Promise<number> {
+export async function touchSitePresence(
+  playerId: string,
+  playerName?: string,
+  hasProfile = false,
+): Promise<SitePresence> {
   const id = String(playerId ?? '').trim().slice(0, 64)
-  if (!id) return 0
+  if (!id) return { online: 0, names: [], people: [] }
   const now = Date.now()
+  const name = sanitizePresenceName(playerName)
+
+  const fillMissing = async (ids: string[], byId: Record<string, PresenceRec>) => {
+    const missing = ids.filter((pid) => !byId[pid]?.name)
+    if (missing.length === 0) return
+    const fromChat = await namesFromRecentChat()
+    const fromRooms = missing.some((pid) => !fromChat[pid])
+      ? await namesFromActiveRooms()
+      : {}
+    for (const pid of missing) {
+      const found = fromChat[pid] || fromRooms[pid]
+      if (!found) continue
+      byId[pid] = { name: found, profile: byId[pid]?.profile === true }
+    }
+  }
 
   if (redisConfigured()) {
     try {
       await redisCommand('ZADD', PRESENCE_KEY, now, id)
+      if (name.length >= 2) {
+        await redisCommand(
+          'HSET',
+          PRESENCE_NAMES_KEY,
+          id,
+          JSON.stringify({ name, profile: hasProfile === true }),
+        )
+      }
       await redisCommand(
         'ZREMRANGEBYSCORE',
         PRESENCE_KEY,
@@ -233,13 +415,36 @@ export async function touchSitePresence(playerId: string): Promise<number> {
         now - ONLINE_WINDOW_MS,
       )
       await redisCommand('EXPIRE', PRESENCE_KEY, 120)
-      const n = await redisCommand<number>('ZCARD', PRESENCE_KEY)
-      if (typeof n === 'number' && n >= 0) return n
+      await redisCommand('EXPIRE', PRESENCE_NAMES_KEY, 60 * 60 * 24 * 7)
+      const ids = idsFromZrange(
+        await redisCommand<unknown>('ZRANGE', PRESENCE_KEY, 0, -1),
+      )
+      const byId = presenceHashFromRaw(
+        await redisCommand<unknown>('HGETALL', PRESENCE_NAMES_KEY),
+      )
+      await fillMissing(ids, byId)
+      await markRegisteredProfiles(byId)
+      return presenceResult(ids, byId, id)
     } catch {
       /* fallback mémoire */
     }
   }
 
-  memoryPresence.set(id, now)
-  return pruneMemoryPresence(now)
+  memoryPresence.set(id, { at: now, name, profile: hasProfile === true })
+  const cutoff = now - ONLINE_WINDOW_MS
+  const ids: string[] = []
+  const byId: Record<string, PresenceRec> = {}
+  for (const [pid, row] of memoryPresence) {
+    if (row.at < cutoff) {
+      memoryPresence.delete(pid)
+      continue
+    }
+    ids.push(pid)
+    if (row.name.length >= 2) {
+      byId[pid] = { name: row.name, profile: row.profile === true }
+    }
+  }
+  await fillMissing(ids, byId)
+  await markRegisteredProfiles(byId)
+  return presenceResult(ids, byId, id)
 }

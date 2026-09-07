@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { isAdminProfile } from '../lib/adminCode'
 import { clearMultiQuestionCache } from '../lib/api'
 import { clearLocalQuizCache } from '../lib/bankStorage'
@@ -111,6 +111,22 @@ export function HomeSideNav({
   const [active, setActive] = useState<string | null>(null)
   const [popup, setPopup] = useState<HomePopupId | null>(null)
   const [floatGame, setFloatGame] = useState<WaitGameId | null>(null)
+  const [chatUnread, setChatUnread] = useState(0)
+  const [chatPing, setChatPing] = useState(0)
+
+  useEffect(() => {
+    function onUnread(e: Event) {
+      const detail = (e as CustomEvent<{ unread?: number; ping?: number }>).detail
+      const next = Math.max(0, Number(detail?.unread) || 0)
+      setChatUnread(next)
+      if (next > 0 && Number(detail?.ping) > 0) {
+        setChatPing(Number(detail.ping))
+      }
+      if (next === 0) setChatPing(0)
+    }
+    window.addEventListener('quizz:chat-unread', onUnread)
+    return () => window.removeEventListener('quizz:chat-unread', onUnread)
+  }, [])
 
   async function handleClearCache() {
     const ok = window.confirm(
@@ -273,11 +289,28 @@ export function HomeSideNav({
         </button>
         <button
           type="button"
-          className={`home-dock__item${active === 'chat' ? ' is-on' : ''}`}
+          className={`home-dock__item${active === 'chat' ? ' is-on' : ''}${chatUnread > 0 ? ' has-unread' : ''}`}
           onClick={openChat}
+          aria-label={
+            chatUnread > 0
+              ? `Chat, ${chatUnread} message${chatUnread > 1 ? 's' : ''}`
+              : 'Chat'
+          }
         >
           <span className="home-dock__icon">
-            <IconChat />
+            <span
+              key={chatPing}
+              className={
+                chatPing > 0 ? 'home-dock__chat-icon is-ping' : 'home-dock__chat-icon'
+              }
+            >
+              <IconChat />
+            </span>
+            {chatUnread > 0 && (
+              <span className="home-dock__badge" key={chatUnread}>
+                {chatUnread > 99 ? '99+' : chatUnread}
+              </span>
+            )}
           </span>
           <span className="home-dock__label">Chat</span>
         </button>

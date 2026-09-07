@@ -255,6 +255,22 @@ async function findProfileIdByPseudo(pseudo: string): Promise<string | null> {
   return null
 }
 
+/** Lookup cheap : uniquement l’index Redis/mémoire, pas de scan de tous les profils. */
+export async function lookupProfileIdByPseudoFast(
+  pseudo: string,
+): Promise<string | null> {
+  const key = pseudoLookupKey(pseudo)
+  if (!key) return null
+  if (redisConfigured()) {
+    const owner = await redisCommand<string | null>(
+      'GET',
+      `${PSEUDO_PREFIX}${key}`,
+    )
+    return owner ? String(owner) : null
+  }
+  return memoryPseudos.get(key) ?? null
+}
+
 async function claimPseudo(key: string, profileId: string): Promise<void> {
   if (redisConfigured()) {
     const claimed = await redisCommand<string | null>(
