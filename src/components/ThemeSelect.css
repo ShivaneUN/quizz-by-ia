@@ -1354,6 +1354,8 @@
   width: min(22rem, 100%);
   margin-inline: auto;
 }
+
+.flag-count-grid {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
