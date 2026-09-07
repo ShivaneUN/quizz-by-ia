@@ -1,0 +1,25 @@
+---
+description: Keep Vercel Hobby production deploys unblocked
+alwaysApply: true
+---
+
+# Vercel production (Hobby)
+
+Live URL: `https://quizz-by-ia.vercel.app`. GitHub is connected; push `master` to deploy.
+
+## Commits
+
+- Author must be the GitHub-linked owner: `Yowshi <294892313+ShivaneUN@users.noreply.github.com>`.
+- Never commit as `developer@example.com` — Hobby blocks the deploy.
+- Do not add `Co-authored-by: Cursor` (or other AI trailers). Hobby treats extra authors as collaborators.
+- After `npm install`, `scripts/setup-git.mjs` sets local identity and `core.hooksPath`.
+
+## Serverless functions
+
+- Max **12** files matching `api/*.ts` (Hobby limit). `npm run build` fails above that.
+- New HTTP route: fold it into an existing `api/*.ts` handler and add a `vercel.json` rewrite (see `/api/gen-status` → `/api/generate-questions`).
+
+## After a Ready deploy
+
+If `quizz-by-ia.vercel.app` still shows the old site, run `npm run alias:prod`.
+Do not commit `.env.local` or `.vercel`.

@@ -1,0 +1,3 @@
+#!/bin/sh
+node "$(dirname "$0")/../scripts/check-git-author.mjs"
+node "$(dirname "$0")/../scripts/check-hobby-functions.mjs"

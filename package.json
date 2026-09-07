@@ -6,10 +6,13 @@
   "scripts": {
     "dev": "vite --host",
     "dev:local": "vite --host 127.0.0.1",
-    "build": "tsc -b && vite build",
+    "build": "node scripts/check-hobby-functions.mjs && tsc -b && vite build",
     "build:server": "node scripts/bundle-server.mjs",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "setup:git": "node scripts/setup-git.mjs",
+    "alias:prod": "node scripts/alias-production.mjs",
+    "prepare": "node scripts/setup-git.mjs"
   },
   "dependencies": {
     "msedge-tts": "^2.0.7",
