@@ -14,7 +14,7 @@ import {
 } from './server/genStats.ts'
 import roomHandler from './api/room.ts'
 import morpionHandler from './api/morpion.ts'
-import genStatusHandler from './api/gen-status.ts'
+import generateQuestionsHandler from './api/generate-questions.ts'
 import calibStatsHandler from './api/calib-stats.ts'
 import questionFeedbackHandler from './api/question-feedback.ts'
 import factCheckHandler from './api/fact-check.ts'
@@ -243,7 +243,7 @@ function localApiPlugin(): Plugin {
                 return this
               },
             }
-            await genStatusHandler(fakeReq as never, fakeRes as never)
+            await generateQuestionsHandler(fakeReq as never, fakeRes as never)
           } catch (e) {
             const message = e instanceof Error ? e.message : 'Erreur serveur'
             res.statusCode = 500

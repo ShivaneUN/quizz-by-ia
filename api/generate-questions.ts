@@ -8,6 +8,7 @@ import {
 } from '../server/generate.js'
 import {
   clearGenProgress,
+  getGenProgress,
   isValidProgressId,
   setGenProgress,
 } from '../server/genProgress.js'
@@ -33,13 +34,52 @@ function isGatewayTimeoutMessage(msg: string): boolean {
   )
 }
 
+async function handleGenStatus(req: VercelRequest, res: VercelResponse) {
+  const progressId = String(req.query.id ?? '').trim()
+  if (progressId) {
+    if (!isValidProgressId(progressId)) {
+      return res.status(400).json({ error: 'id invalide' })
+    }
+    try {
+      const prog = await getGenProgress(progressId)
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
+      res.setHeader('Pragma', 'no-cache')
+      return res.status(200).json({
+        done: prog?.done ?? 0,
+        total: prog?.total ?? 10,
+        engine: prog?.engine ?? null,
+        stage: prog?.stage ?? null,
+      })
+    } catch (e) {
+      return res.status(500).json({
+        error: e instanceof Error ? e.message : 'Erreur serveur',
+      })
+    }
+  }
+
+  try {
+    const raw = String(req.query.kind ?? 'solo')
+    const kind = raw === 'multi' ? 'multi' : 'solo'
+    const { estimateSec, samples } = await getGenerationEstimateSec(kind)
+    return res.status(200).json({ estimateSec, samples, kind })
+  } catch (e) {
+    return res.status(500).json({
+      error: e instanceof Error ? e.message : 'Erreur serveur',
+    })
+  }
+}
+
 /**
+ * GET  /api/gen-status (rewritten to this function on Vercel)
  * POST /api/generate-questions
  * Body: { theme, mode, difficulty?, scope?, provider?, quizMode?, excludeQuestions?, progressId? }
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method === 'GET') {
+    return handleGenStatus(req, res)
+  }
   if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST')
+    res.setHeader('Allow', 'GET, POST')
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
