@@ -64,7 +64,7 @@ export function parseFlagDifficulty(raw: unknown): FlagDifficulty {
   return 'easy'
 }
 
-function flagDifficultyToQuestionDifficulty(
+export function flagDifficultyToQuestionDifficulty(
   d: FlagDifficulty,
 ): 'easy' | 'medium' | 'hard' {
   return d === 'easy' || d === 'medium' ? d : 'hard'

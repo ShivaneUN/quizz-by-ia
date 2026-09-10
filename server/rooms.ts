@@ -80,6 +80,8 @@ export interface RoomState {
   /** Drapeaux : N questions + palier 4 niveaux (easy/medium/hard/expert) */
   flagCount?: number
   flagDifficulty?: 'easy' | 'medium' | 'hard' | 'expert'
+  /** Timestamp ms : salle sans joueur (suppression auto après ROOM_EMPTY_TTL_MS) */
+  emptySince?: number
   /** Message si status === 'error' */
   errorMessage?: string
   players: RoomPlayer[]
@@ -137,6 +139,9 @@ export const ROUND_MS = 10_000
 export const MULTI_QUESTION_COUNT = 10
 /** TTL Redis salle (inactivité) — rafraîchi à chaque save / poll */
 export const ROOM_TTL_SEC = 60 * 5
+/** Salle vide : délai avant suppression auto (hôte/admin peuvent fermer avant) */
+export const ROOM_EMPTY_TTL_MS = 60_000
+export const ROOM_EMPTY_TTL_SEC = Math.ceil(ROOM_EMPTY_TTL_MS / 1000)
 /** Au-delà sans heartbeat : génération orpheline (ex. kill Vercel) → status error */
 export const GENERATING_STALE_MS = 70_000
 /** Plafond total depuis le 1er start (plusieurs topups HTTP) */
@@ -200,6 +205,7 @@ export interface RoomSummary {
 }
 
 function isListableRoom(room: RoomState): boolean {
+  if (!Array.isArray(room.players) || room.players.length === 0) return false
   return (
     room.status === 'lobby' ||
     room.status === 'generating' ||
@@ -289,10 +295,13 @@ async function scanExistingRoomCodes(): Promise<string[]> {
   return codes
 }
 
-export async function listActiveRooms(): Promise<RoomSummary[]> {
+export async function listActiveRooms(opts?: {
+  includeEmpty?: boolean
+}): Promise<RoomSummary[]> {
   let codes = await readActiveIndex()
-  if (codes.length === 0) {
-    codes = await scanExistingRoomCodes()
+  if (opts?.includeEmpty || codes.length === 0) {
+    const scanned = await scanExistingRoomCodes()
+    codes = [...new Set([...codes, ...scanned])]
   }
   const rooms: RoomSummary[] = []
   const seen = new Set<string>()
@@ -309,11 +318,16 @@ export async function listActiveRooms(): Promise<RoomSummary[]> {
       await indexRemove(code)
       continue
     }
-    if (!isListableRoom(room)) {
+    const empty = room.players.length === 0
+    if (empty && !opts?.includeEmpty) {
       await indexRemove(code)
       continue
     }
-    await indexSave(room)
+    if (!empty && !isListableRoom(room)) {
+      await indexRemove(code)
+      continue
+    }
+    if (!empty) await indexSave(room)
     rooms.push(summarizeRoom(room))
   }
   rooms.sort((a, b) => b.updatedAt - a.updatedAt)
@@ -475,33 +489,57 @@ export async function getRoom(code: string): Promise<RoomState | null> {
   if (!Number.isFinite(room.roundDurationMs) || room.roundDurationMs <= 0) {
     room.roundDurationMs = ROUND_MS
   }
-  room.players = room.players.map((p) => ({
-    ...p,
-    streakActuelle:
-      typeof p.streakActuelle === 'number' && p.streakActuelle >= 0
-        ? p.streakActuelle
-        : 0,
-    meilleurStreak:
-      typeof p.meilleurStreak === 'number' && p.meilleurStreak >= 0
-        ? p.meilleurStreak
-        : 0,
-    bonusApplique:
-      typeof p.bonusApplique === 'number' && p.bonusApplique >= 0
-        ? p.bonusApplique
-        : 0,
-  }))
+  room.players = Array.isArray(room.players)
+    ? room.players.map((p) => ({
+        ...p,
+        streakActuelle:
+          typeof p.streakActuelle === 'number' && p.streakActuelle >= 0
+            ? p.streakActuelle
+            : 0,
+        meilleurStreak:
+          typeof p.meilleurStreak === 'number' && p.meilleurStreak >= 0
+            ? p.meilleurStreak
+            : 0,
+        bonusApplique:
+          typeof p.bonusApplique === 'number' && p.bonusApplique >= 0
+            ? p.bonusApplique
+            : 0,
+      }))
+    : []
+
+  // Salle vide depuis ≥ 60 s → suppression auto
+  if (room.players.length === 0) {
+    const since =
+      typeof room.emptySince === 'number' && room.emptySince > 0
+        ? room.emptySince
+        : typeof room.updatedAt === 'number' && room.updatedAt > 0
+          ? room.updatedAt
+          : 0
+    if (since > 0 && Date.now() - since >= ROOM_EMPTY_TTL_MS) {
+      await deleteRoom(c)
+      return null
+    }
+    if (!room.emptySince) room.emptySince = since || Date.now()
+  } else if (room.emptySince) {
+    delete room.emptySince
+  }
+
   return room
 }
 
 export async function saveRoom(room: RoomState): Promise<void> {
   room.updatedAt = Date.now()
+  const empty = !Array.isArray(room.players) || room.players.length === 0
+  if (empty && !room.emptySince) room.emptySince = room.updatedAt
+  if (!empty) delete room.emptySince
+  const ttlSec = empty ? ROOM_EMPTY_TTL_SEC : ROOM_TTL_SEC
   if (redisConfigured()) {
     await redisCommand(
       'SET',
       roomKey(room.code),
       JSON.stringify(room),
       'EX',
-      ROOM_TTL_SEC,
+      ttlSec,
     )
     await indexSave(room)
     return
@@ -521,10 +559,33 @@ export async function deleteRoom(code: string): Promise<void> {
   await indexRemove(c)
 }
 
-/** Prolonge le TTL tant que quelqu’un poll la salle. */
+/** Prolonge le TTL tant que quelqu’un poll la salle (ne rallonge pas une salle vide). */
 export async function touchRoom(code: string): Promise<void> {
   const c = code.trim().toUpperCase()
   if (!redisConfigured()) return
+  const raw = await redisCommand<string | null>('GET', roomKey(c))
+  if (!raw) return
+  let room: RoomState
+  try {
+    room = JSON.parse(raw) as RoomState
+  } catch {
+    return
+  }
+  const empty = !Array.isArray(room.players) || room.players.length === 0
+  if (empty) {
+    const since =
+      typeof room.emptySince === 'number' && room.emptySince > 0
+        ? room.emptySince
+        : typeof room.updatedAt === 'number'
+          ? room.updatedAt
+          : Date.now()
+    const leftSec = Math.max(
+      1,
+      Math.ceil((ROOM_EMPTY_TTL_MS - (Date.now() - since)) / 1000),
+    )
+    await redisCommand('EXPIRE', roomKey(c), leftSec)
+    return
+  }
   await redisCommand('EXPIRE', roomKey(c), ROOM_TTL_SEC)
 }
 

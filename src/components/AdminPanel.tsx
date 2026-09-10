@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { clearChatAll } from '../lib/chatApi'
 import { ADMIN_PANEL_CODE, hasLocalAdminUnlock, rememberLocalAdminUnlock } from '../lib/adminCode'
 import { ProfilesAdminPanel } from './ProfilesAdminPanel'
+import { RoomsAdminPanel } from './RoomsAdminPanel'
 import './AdminPanel.css'
 
 type DiffRow = {
@@ -378,6 +379,7 @@ export function AdminPanel({ hideGear = false }: { hideGear?: boolean }) {
     | 'ai'
     | 'pendu'
     | 'profiles'
+    | 'rooms'
   >('summary')
   const [aiRows, setAiRows] = useState<AiCapacityRow[] | null>(null)
   const [aiGen, setAiGen] = useState<AiGenPayload | null>(null)
@@ -1311,6 +1313,7 @@ export function AdminPanel({ hideGear = false }: { hideGear?: boolean }) {
                       ['feedback', 'Feedback'],
                       ['errors', 'Erreurs'],
                       ['curated', 'Banque'],
+                      ['rooms', 'Salles'],
                       ['pendu', 'Pendu'],
                       ['profiles', 'Profils'],
                       ['ai', 'IA'],
@@ -1778,6 +1781,10 @@ export function AdminPanel({ hideGear = false }: { hideGear?: boolean }) {
                       </div>
                     )}
                   </div>
+                )}
+
+                {tab === 'rooms' && (
+                  <RoomsAdminPanel secret={ADMIN_PANEL_CODE} />
                 )}
 
                 {tab === 'profiles' && (

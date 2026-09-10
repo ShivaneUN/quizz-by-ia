@@ -36,6 +36,7 @@ import {
   preferNewerRoom,
   resumeRoomTimer,
   setRoomDifficulty,
+  setRoomFlags,
   setRoomPlayMode,
   setRoomTheme,
   setRoomTimer,
@@ -1752,9 +1753,11 @@ export default function App() {
     setMultiBusy(true)
     setError(null)
     setStatusMsg(
-      multiRoom.quizMode === 'audio'
-        ? 'Tirage des extraits Deezer…'
-        : 'Génération des questions…',
+      isFlagTheme(multiRoom.theme)
+        ? `Préparation de ${multiRoom.flagCount ?? 10} drapeaux…`
+        : multiRoom.quizMode === 'audio'
+          ? 'Tirage des extraits Deezer…'
+          : 'Génération des questions…',
     )
     setAudit([])
     multiAuditKeysRef.current = new Set()
@@ -2010,6 +2013,32 @@ export default function App() {
   }
 
   async function handleMultiStart() {
+    await runSharedMultiStart()
+  }
+
+  async function handleMultiReplayFlags(input: {
+    flagDifficulty: FlagDifficulty
+    flagCount: number
+  }) {
+    if (!multiRoom || !multiPlayerId || !isFlagTheme(multiRoom.theme)) return
+    const nextFlagDifficulty = input.flagDifficulty
+    const nextFlagCount = clampFlagCount(nextFlagDifficulty, input.flagCount)
+    setMultiBusy(true)
+    setError(null)
+    try {
+      const res = await setRoomFlags({
+        code: multiRoom.code,
+        playerId: multiPlayerId,
+        flagDifficulty: nextFlagDifficulty,
+        flagCount: nextFlagCount,
+      })
+      setMultiRoom(res.room)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erreur')
+      setMultiBusy(false)
+      return
+    }
+    setMultiBusy(false)
     await runSharedMultiStart()
   }
 
@@ -2740,6 +2769,7 @@ export default function App() {
               busy={multiBusy}
               error={error}
               onReplay={handleMultiStart}
+              onReplayFlags={(input) => void handleMultiReplayFlags(input)}
               onContinueTier={() => void handleMultiContinueTier()}
               onRestartTiers={() => void handleMultiRestartTiers()}
               onSetDifficulty={handleMultiSetDifficulty}

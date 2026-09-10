@@ -42,6 +42,9 @@ export function resolveQuizScope(
   scope: 'fr' | 'international',
 ): 'fr' | 'international' {
   if (scope !== 'fr') return scope
+  // Aléatoire : la portée choisie filtre le vivier (FR = thèmes FR only)
+  const head = parentThemeSlug(theme)
+  if (head === 'aleatoire' || head === 'random') return 'fr'
   if (themeSupportsFrScope(theme)) return 'fr'
   return 'international'
 }

@@ -1,7 +1,11 @@
 import type { MultiRoom } from '../lib/multiApi'
 import type { Difficulty } from '../types'
 import { DIFFICULTY_LABELS, PASS_THRESHOLD, QUESTIONS_PER_TIER } from '../types'
-import { isFlagTheme } from '../lib/flagQuiz'
+import {
+  FLAG_DIFFICULTY_LABELS,
+  isFlagTheme,
+  parseFlagDifficulty,
+} from '../lib/flagQuiz'
 import { HostPlayersPanel } from './HostPlayersPanel'
 import { WaitMiniGames } from './WaitMiniGames'
 import './MultiLobby.css'
@@ -82,14 +86,15 @@ export function MultiLobby({
         {room.quizMode === 'pendu'
           ? ` · Pendu ${room.penduVariant === 'duo' ? 'Duo' : 'Multi'} · ${DIFFICULTY_LABELS[difficulty]} · ${room.penduWordSource === 'ai' ? 'Banque + IA' : 'Banque locale'}`
           : ''}
-        {room.flagCount
-          ? ` · ${room.flagCount} drapeaux${
-              room.flagDifficulty === 'expert' ? ' · Hard' : ''
-            }`
+        {isFlagTheme(room.theme)
+          ? ` · ${FLAG_DIFFICULTY_LABELS[parseFlagDifficulty(room.flagDifficulty)]} · ${room.flagCount ?? 10} drapeaux`
           : ''}
         {room.quizMode !== 'pendu' &&
+          !isFlagTheme(room.theme) &&
           (playMode === 'progression' ? ' · Paliers' : ' · Libre')}
-        {room.quizMode !== 'pendu' && ` · ${DIFFICULTY_LABELS[difficulty]}`}
+        {room.quizMode !== 'pendu' &&
+          !isFlagTheme(room.theme) &&
+          ` · ${DIFFICULTY_LABELS[difficulty]}`}
         {room.quizMode !== 'pendu' &&
           (timerOn ? ' · Chrono 10 s' : ' · Sans chrono')}
       </p>

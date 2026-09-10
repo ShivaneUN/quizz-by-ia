@@ -39,6 +39,8 @@ export function resolveQuizScope(
   scope: QuizScope,
 ): QuizScope {
   if (scope !== 'fr') return scope
+  const head = parentThemeSlug(theme)
+  if (head === 'aleatoire' || head === 'random') return 'fr'
   if (themeSupportsFrScope(theme)) return 'fr'
   return 'international'
 }

@@ -7,7 +7,6 @@ import {
   type ThemeTile,
 } from '../lib/themes'
 import { resolveQuizScope, themeSupportsFrScope } from '../lib/quizScope'
-import { drawRandomThemePair } from '../lib/randomTheme'
 import {
   DEEZER_GLOBAL_OPTION,
   DEEZER_STYLE_OPTIONS,
@@ -482,15 +481,7 @@ export function ThemeSelect({
     }
 
     if (themeId === 'aleatoire') {
-      const picked = drawRandomThemePair()
-      const t = picked.query
-      const effectiveScope = resolveQuizScope(t, scope)
-      if (effectiveScope !== scope) setScope(effectiveScope)
-      ensureCuratedThemeFromPlay(t, {
-        themeId: picked.themeId,
-        subTheme: picked.sub,
-      })
-      onStart(t, '', effectiveScope, {
+      onStart('Aléatoire', '', scope, {
         timerEnabled,
         audioAutoplay: false,
         difficulty: gameMode === 'free' ? difficulty : 'easy',
@@ -572,8 +563,8 @@ export function ThemeSelect({
         >
           <legend className="subthemes__title">Aléatoire</legend>
           <p className="subthemes__chosen">
-            Un thème + sous-thème au hasard — sans rejouer le même couple tant
-            que tous n’ont pas tourné.
+            Chaque partie mélange plusieurs thèmes et sous-thèmes différents
+            (une question ≠ un seul thème).
           </p>
         </fieldset>
       )

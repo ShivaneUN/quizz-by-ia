@@ -316,6 +316,16 @@ export async function setRoomDifficulty(input: {
   return { room: data.room! }
 }
 
+export async function setRoomFlags(input: {
+  code: string
+  playerId: string
+  flagDifficulty: 'easy' | 'medium' | 'hard' | 'expert'
+  flagCount: number
+}) {
+  const data = await postRoom({ action: 'setFlags', ...input })
+  return { room: data.room! }
+}
+
 export async function setRoomPlayMode(input: {
   code: string
   playerId: string
@@ -325,7 +335,11 @@ export async function setRoomPlayMode(input: {
   return { room: data.room! }
 }
 
-export async function closeRoom(input: { code: string; playerId: string }) {
+export async function closeRoom(input: {
+  code: string
+  playerId?: string
+  secret?: string
+}) {
   return postRoom({ action: 'close', ...input })
 }
 
@@ -366,7 +380,10 @@ export async function pollRoom(code: string) {
   return { room: data.room! }
 }
 
-export async function listActiveRooms() {
-  const data = await postRoom({ action: 'list' })
+export async function listActiveRooms(opts?: { secret?: string }) {
+  const data = await postRoom({
+    action: 'list',
+    ...(opts?.secret ? { secret: opts.secret } : {}),
+  })
   return { rooms: data.rooms ?? [] }
 }

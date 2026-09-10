@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from 'react'
 import type { MultiRoom } from '../lib/multiApi'
 import type { Difficulty } from '../types'
 import {
@@ -5,6 +6,15 @@ import {
   DIFFICULTY_LABELS,
   PASS_THRESHOLD,
 } from '../types'
+import {
+  FLAG_DIFFICULTIES,
+  FLAG_DIFFICULTY_LABELS,
+  clampFlagCount,
+  flagCountSteps,
+  isFlagTheme,
+  parseFlagDifficulty,
+  type FlagDifficulty,
+} from '../lib/flagQuiz'
 import { HostPlayersPanel } from './HostPlayersPanel'
 import { ProgressBar } from './ProgressBar'
 import './MultiScoreboard.css'
@@ -15,6 +25,10 @@ interface MultiScoreboardProps {
   busy?: boolean
   error?: string | null
   onReplay: () => void
+  onReplayFlags?: (input: {
+    flagDifficulty: FlagDifficulty
+    flagCount: number
+  }) => void
   onContinueTier: () => void
   onRestartTiers: () => void
   onSetDifficulty: (difficulty: Difficulty) => void
@@ -30,6 +44,7 @@ export function MultiScoreboard({
   busy,
   error,
   onReplay,
+  onReplayFlags,
   onContinueTier,
   onRestartTiers,
   onSetDifficulty,
@@ -37,7 +52,29 @@ export function MultiScoreboard({
   onLeave,
   onKick,
 }: MultiScoreboardProps) {
-  const total = room.questions.length || 10
+  const isFlags = isFlagTheme(room.theme)
+  const roomFlagDifficulty = parseFlagDifficulty(room.flagDifficulty)
+  const roomFlagCount = room.flagCount || room.questions.length || 10
+  const [replayFlagDifficulty, setReplayFlagDifficulty] =
+    useState<FlagDifficulty>(roomFlagDifficulty)
+  const [replayFlagCount, setReplayFlagCount] = useState(roomFlagCount)
+
+  useEffect(() => {
+    if (!isFlags) return
+    setReplayFlagDifficulty(roomFlagDifficulty)
+    setReplayFlagCount(roomFlagCount)
+  }, [isFlags, roomFlagDifficulty, roomFlagCount])
+
+  const flagSteps = useMemo(
+    () => flagCountSteps(replayFlagDifficulty),
+    [replayFlagDifficulty],
+  )
+  const flagCountClamped = useMemo(
+    () => clampFlagCount(replayFlagDifficulty, replayFlagCount),
+    [replayFlagDifficulty, replayFlagCount],
+  )
+
+  const total = room.questions.length || (isFlags ? roomFlagCount : 10)
   const baseOf = (score: number, bonus?: number) =>
     Math.max(0, score - (bonus ?? 0))
   const ranked = [...room.players].sort((a, b) => b.score - a.score)
@@ -46,7 +83,8 @@ export function MultiScoreboard({
     room.difficulty === 'medium' || room.difficulty === 'hard'
       ? room.difficulty
       : 'easy'
-  const playMode = room.playMode === 'progression' ? 'progression' : 'free'
+  const playMode =
+    isFlags || room.playMode !== 'progression' ? 'free' : 'progression'
   const allPassed =
     room.players.length > 0 &&
     room.players.every(
@@ -54,10 +92,10 @@ export function MultiScoreboard({
     )
   const curIdx = DIFFICULTIES.indexOf(difficulty)
   const nextDifficulty =
-    allPassed && curIdx >= 0 && curIdx < DIFFICULTIES.length - 1
+    !isFlags && allPassed && curIdx >= 0 && curIdx < DIFFICULTIES.length - 1
       ? DIFFICULTIES[curIdx + 1]
       : null
-  const allTiersDone = allPassed && nextDifficulty === null
+  const allTiersDone = !isFlags && allPassed && nextDifficulty === null
 
   const winner = ranked[0]
   const you = ranked.find((p) => p.id === playerId)
@@ -77,8 +115,12 @@ export function MultiScoreboard({
         <p className="multi-dash__eyebrow">Fin de partie</p>
         <h2 className="multi-dash__title">Dashboard</h2>
         <p className="multi-dash__meta">
-          {room.theme} · {DIFFICULTY_LABELS[difficulty]}
-          {playMode === 'progression' ? ' · Paliers' : ' · Libre'}
+          {room.theme}
+          {isFlags
+            ? ` · ${FLAG_DIFFICULTY_LABELS[roomFlagDifficulty]} · ${roomFlagCount} drapeaux`
+            : ` · ${DIFFICULTY_LABELS[difficulty]}${
+                playMode === 'progression' ? ' · Paliers' : ' · Libre'
+              }`}
           {timerOn ? ' · Chrono' : ' · Sans chrono'}
           {` · ${room.code}`}
         </p>
@@ -217,7 +259,73 @@ export function MultiScoreboard({
 
       {isHost ? (
         <div className="multi-dash__actions">
-          {playMode === 'progression' ? (
+          {isFlags ? (
+            <>
+              <div className="multi-dash__diffs">
+                <p className="multi-dash__diffs-label">
+                  Rejouer — difficulté drapeaux
+                </p>
+                <div
+                  className="multi-dash__diffs-btns multi-dash__diffs-btns--flags"
+                  role="group"
+                  aria-label="Difficulté drapeaux"
+                >
+                  {FLAG_DIFFICULTIES.map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      className={`btn${replayFlagDifficulty === d ? ' btn--primary' : ' btn--secondary'}`}
+                      disabled={busy}
+                      aria-pressed={replayFlagDifficulty === d}
+                      onClick={() => {
+                        setReplayFlagDifficulty(d)
+                        setReplayFlagCount((c) => clampFlagCount(d, c))
+                      }}
+                    >
+                      {FLAG_DIFFICULTY_LABELS[d]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="multi-dash__diffs">
+                <p className="multi-dash__diffs-label">Nombre de drapeaux</p>
+                <div
+                  className="multi-dash__flag-counts"
+                  role="group"
+                  aria-label="Nombre de drapeaux"
+                >
+                  {flagSteps.map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      className={`multi-dash__flag-count${flagCountClamped === n ? ' is-selected' : ''}`}
+                      disabled={busy}
+                      aria-pressed={flagCountClamped === n}
+                      onClick={() => setReplayFlagCount(n)}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={() =>
+                  onReplayFlags
+                    ? onReplayFlags({
+                        flagDifficulty: replayFlagDifficulty,
+                        flagCount: flagCountClamped,
+                      })
+                    : onReplay()
+                }
+                disabled={busy}
+              >
+                Rejouer ({FLAG_DIFFICULTY_LABELS[replayFlagDifficulty]} ·{' '}
+                {flagCountClamped})
+              </button>
+            </>
+          ) : playMode === 'progression' ? (
             <>
               {allTiersDone ? (
                 <button

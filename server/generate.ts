@@ -6,6 +6,10 @@
 import { fetchCommonsImageUrl } from './wikimedia.js'
 import { buildDeezerQuiz } from './deezerQuiz.js'
 import { construirePrompt } from './quizPromptFragments.js'
+import {
+  drawMixedThemeAssignments,
+  isAleatoireTheme,
+} from './randomThemeMix.js'
 import { resolveQuizScope } from './quizScope.js'
 import { buildFlagQuiz, isFlagTheme } from './flagQuiz.js'
 import {
@@ -465,6 +469,9 @@ export function buildMockQuestions(
   const now = new Date().toISOString()
   const targets: Difficulty[] =
     mode === 'complementary' && difficulty ? [difficulty] : DIFFICULTIES
+  const mix = isAleatoireTheme(theme)
+    ? drawMixedThemeAssignments(10, 'international')
+    : null
 
   const out: GeneratedQuestion[] = []
   for (const diff of targets) {
@@ -477,16 +484,19 @@ export function buildMockQuestions(
         `Réponse D (${diff})`,
       ]
       answers[correctIndex] = `Bonne réponse #${i}`
+      const label = mix
+        ? `${mix[i - 1]!.theme} — ${mix[i - 1]!.sousTheme}`
+        : theme
       out.push({
         id: newId(),
-        question: `[${diff.toUpperCase()}] ${theme} — question mock ${i}/10 ?`,
+        question: `[${diff.toUpperCase()}] ${label} — question mock ${i}/10 ?`,
         answers,
         correctIndex,
         difficulty: diff,
         themeSlug,
         createdAt: now,
         batchId,
-        explanation: `Explication mock pour la question ${i} sur ${theme}.`,
+        explanation: `Explication mock pour la question ${i} sur ${label}.`,
         sourceType: 'culture générale/notoriété publique',
       })
     }
@@ -739,6 +749,7 @@ function splitThemeParts(theme: string): { theme: string; sousTheme: string } {
 /**
  * Construit le prompt via l'architecture modulaire vérifiée (quizPromptFragments).
  * Un seul bloc de difficulté par appel. excludeQuestions = resume_fait (3-6 mots) ou texte.
+ * Thème Aléatoire → mix de N thèmes/sous-thèmes distincts dans le même lot.
  */
 export function buildPrompt(
   themeFull: string,
@@ -753,14 +764,18 @@ export function buildPrompt(
   const difficulte = DIFFICULTY_FR[difficulty]
   const effectiveScope = resolveQuizScope(themeFull, scope)
   const portee = SCOPE_FR[effectiveScope]
+  const mixAssignments = isAleatoireTheme(themeFull)
+    ? drawMixedThemeAssignments(questionCount, effectiveScope)
+    : undefined
   return construirePrompt({
-    theme,
-    sousTheme,
+    theme: mixAssignments ? 'Aléatoire' : theme,
+    sousTheme: mixAssignments ? 'Mix' : sousTheme,
     difficulte,
     portee,
     historiqueQuestions: excludeQuestions.slice(0, 50),
     questionCount,
     mode,
+    mixAssignments,
   })
 }
 

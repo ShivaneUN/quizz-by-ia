@@ -242,6 +242,8 @@ export interface PromptParams {
   questionCount?: number
   /** full = lot principal ; topup = rattrapage des manquantes */
   mode?: 'full' | 'topup'
+  /** Mode Aléatoire : une affectation thème/sous-thème par question */
+  mixAssignments?: { theme: string; sousTheme: string }[]
 }
 
 export function construirePrompt({
@@ -252,6 +254,7 @@ export function construirePrompt({
   historiqueQuestions,
   questionCount = 10,
   mode = 'full',
+  mixAssignments,
 }: PromptParams): string {
   if (!BLOCS_DIFFICULTE[difficulte]) {
     throw new Error(
@@ -260,12 +263,32 @@ export function construirePrompt({
   }
 
   const count = Math.max(1, Math.min(10, questionCount))
+  const isMix = Array.isArray(mixAssignments) && mixAssignments.length > 0
   const topUpNote =
     mode === 'topup'
       ? `\n\nRATTRAPAGE : génère EXACTEMENT ${count} question(s) SUPPLÉMENTAIRE(s) inédites. N'invente AUCUN fait pour compléter. Si tu n'as pas ${count} faits vérifiables à 100%, retourne moins de questions plutôt que d'en fabriquer.`
       : ''
 
-  const intro = `Tu es un générateur de quiz expert et rigoureux. Génère EXACTEMENT ${count} questions à choix multiples sur le thème "${theme}", sous-thème "${sousTheme}", niveau "${difficulte}", portée "${portee}".${topUpNote}
+  const mixList = isMix
+    ? mixAssignments!
+        .slice(0, count)
+        .map((a, i) => `Q${i + 1}: "${a.theme}" > "${a.sousTheme}"`)
+        .join('\n')
+    : ''
+
+  const intro = isMix
+    ? `Tu es un générateur de quiz expert et rigoureux. Génère EXACTEMENT ${count} questions à choix multiples en mode MIX ALÉATOIRE : chaque question porte sur un couple thème/sous-thème DIFFÉRENT (liste ci-dessous), niveau "${difficulte}", portée "${portee}".${topUpNote}
+
+Affectation OBLIGATOIRE (une question = un couple, dans l'ordre) :
+${mixList}
+
+Règles mix :
+- Respecte STRICTEMENT le couple assigné à chaque question (pas de mélange entre Q).
+- Maximise la diversité : domaines, époques, pays, œuvres — pas deux questions sur le même sujet proche.
+- Les champs JSON "theme" et "sous_theme" de chaque question doivent reprendre EXACTEMENT le couple assigné.
+
+Historique à ne jamais répéter (questions déjà posées, tous niveaux) : ${JSON.stringify(historiqueQuestions && historiqueQuestions.length > 0 ? historiqueQuestions : [])}`
+    : `Tu es un générateur de quiz expert et rigoureux. Génère EXACTEMENT ${count} questions à choix multiples sur le thème "${theme}", sous-thème "${sousTheme}", niveau "${difficulte}", portée "${portee}".${topUpNote}
 
 Historique à ne jamais répéter (questions déjà posées, tous niveaux) : ${JSON.stringify(historiqueQuestions && historiqueQuestions.length > 0 ? historiqueQuestions : [])}`
 
@@ -273,6 +296,13 @@ Historique à ne jamais répéter (questions déjà posées, tous niveaux) : ${J
 
   // L'ancrage par thème n'est inclus QUE pour le niveau facile (dépendance documentée ci-dessus)
   const ancrage = difficulte === 'facile' ? ANCRAGE_PAR_THEME : ''
+
+  const formatMix = isMix
+    ? FORMAT_SORTIE.replace(
+        `Génère maintenant EXACTEMENT {question_count} questions sur "{theme}" > "{sous_theme}", niveau "{difficulte}", portée "{portee}".`,
+        `Génère maintenant EXACTEMENT {question_count} questions selon la liste MIX ALÉATOIRE ci-dessus (Q1…Q{question_count}), niveau "{difficulte}", portée "{portee}". Chaque objet JSON doit avoir "theme"/"sous_theme" = couple assigné.`,
+      )
+    : FORMAT_SORTIE
 
   // Partie FIXE en premier (identique quel que soit le thème demandé, pour un même
   // couple difficulté/ancrage), partie VARIABLE en dernier (thème, historique, format)
@@ -282,15 +312,15 @@ Historique à ne jamais répéter (questions déjà posées, tous niveaux) : ${J
     blocDifficulte,
     ancrage,
     intro,
-    FORMAT_SORTIE,
+    formatMix,
   ].filter(Boolean)
 
   // {theme}/{sous_theme} ne touchent que l'intro et FORMAT_SORTIE (fin de prompt).
   // {question_count} est aussi dans REGLES_BASE, pour que le quota du lot soit cohérent.
   return morceaux
     .join('\n\n')
-    .replaceAll('{theme}', theme)
-    .replaceAll('{sous_theme}', sousTheme)
+    .replaceAll('{theme}', isMix ? 'Aléatoire' : theme)
+    .replaceAll('{sous_theme}', isMix ? 'Mix' : sousTheme)
     .replaceAll('{difficulte}', difficulte)
     .replaceAll('{portee}', portee)
     .replaceAll('{question_count}', String(count))

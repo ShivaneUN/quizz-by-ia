@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { isAdminSecret } from '../server/adminAuth.js'
 import { generateQuestions, normalizeThemeSlug, parseAiProvider, parseQuizContentMode } from '../server/generate.js'
-import { buildFlagQuiz, clampFlagCount, isFlagTheme, parseFlagDifficulty } from '../server/flagQuiz.js'
+import { buildFlagQuiz, clampFlagCount, flagDifficultyToQuestionDifficulty, isFlagTheme, parseFlagDifficulty } from '../server/flagQuiz.js'
 import {
   getPartialQuestions,
   syncPartialQuestionCache,
@@ -305,6 +306,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         typingScore: 0,
         joinedAt: Date.now(),
       })
+      delete room.emptySince
+      if (!room.players.some((p) => p.id === room.hostId)) {
+        room.hostId = playerId
+      }
       await saveRoom(room)
       return json(res, 200, {
         playerId,
@@ -946,6 +951,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         )
         room.playMode = 'free'
         room.quizMode = 'standard'
+        if (body.difficulty !== undefined) {
+          room.difficulty = parseDifficulty(body.difficulty)
+        }
       } else {
         delete room.flagDifficulty
         delete room.flagCount
@@ -1047,10 +1055,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const playerId = String(body.playerId ?? '')
       const room = await getRoom(code)
       if (!room) return json(res, 404, { error: 'Salle introuvable' })
-      if (playerId !== room.hostId) {
-        return json(res, 403, { error: 'Seul l’hôte peut fermer la salle' })
+      const adminOk = isAdminSecret(body.secret)
+      if (!adminOk && playerId !== room.hostId) {
+        return json(res, 403, {
+          error: 'Seul l’hôte ou l’admin peut fermer la salle',
+        })
       }
       await deleteRoom(code)
+      await forceReleaseGenLock(code)
       return json(res, 200, { closed: true, code })
     }
 
@@ -1077,9 +1089,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         delete room.currentAnswers[playerId]
       }
 
+      // Plus personne : garde la salle 60 s (rejoignable), puis auto-suppression
       if (room.players.length === 0) {
-        await deleteRoom(code)
-        return json(res, 200, { left: true, closed: true, code })
+        room.emptySince = Date.now()
+        room.status = 'lobby'
+        clearGeneratingFields(room)
+        delete room.errorMessage
+        room.questions = []
+        room.questionIndex = 0
+        room.currentAnswers = {}
+        room.timerStarted = false
+        room.timerPaused = false
+        room.roundStartedAt = 0
+        room.roundDeadlineAt = 0
+        delete room.penduGame
+        await saveRoom(room)
+        void forceReleaseGenLock(code)
+        return json(res, 200, {
+          left: true,
+          closed: false,
+          emptying: true,
+          code,
+          room: publicRoomView(room),
+        })
       }
 
       // L’hôte part seul → transfert d’hôte, les autres restent
@@ -1335,8 +1367,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (room.status === 'playing' || room.status === 'generating') {
         return json(res, 400, { error: 'Impossible pendant une partie' })
       }
+      // Drapeaux : difficulté générique easy/medium/hard ignorée (voir setFlags)
+      if (isFlagTheme(room.theme)) {
+        return json(res, 200, { room: publicRoomView(room) })
+      }
       // En mode paliers, la difficulté suit la progression (sauf avance explicite hôte)
       room.difficulty = difficulty
+      await saveRoom(room)
+      return json(res, 200, { room: publicRoomView(room) })
+    }
+
+    if (action === 'setFlags') {
+      const code = String(body.code ?? '').trim().toUpperCase()
+      const playerId = String(body.playerId ?? '')
+      let room = await getRoom(code)
+      if (!room) return json(res, 404, { error: 'Salle introuvable' })
+      if (playerId !== room.hostId) {
+        return json(res, 403, { error: 'Seul l’hôte peut régler les drapeaux' })
+      }
+      if (room.status === 'playing' || room.status === 'generating') {
+        return json(res, 400, { error: 'Impossible pendant une partie' })
+      }
+      if (!isFlagTheme(room.theme)) {
+        return json(res, 400, { error: 'Pas une salle drapeaux' })
+      }
+      const flagDifficulty = parseFlagDifficulty(body.flagDifficulty)
+      room.flagDifficulty = flagDifficulty
+      room.flagCount = clampFlagCount(
+        flagDifficulty,
+        Number(body.flagCount) || room.flagCount || 10,
+      )
+      room.difficulty = flagDifficultyToQuestionDifficulty(flagDifficulty)
+      room.playMode = 'free'
       await saveRoom(room)
       return json(res, 200, { room: publicRoomView(room) })
     }
@@ -1352,6 +1414,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       if (room.status === 'playing' || room.status === 'generating') {
         return json(res, 400, { error: 'Impossible pendant une partie' })
+      }
+      if (isFlagTheme(room.theme)) {
+        room.playMode = 'free'
+        await saveRoom(room)
+        return json(res, 200, { room: publicRoomView(room) })
       }
       room.playMode = playMode
       if (playMode === 'progression') {
@@ -1395,7 +1462,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (action === 'list') {
-      const rooms = await listActiveRooms()
+      const includeEmpty = isAdminSecret(body.secret)
+      const rooms = await listActiveRooms({ includeEmpty })
       return json(res, 200, { rooms })
     }
 
